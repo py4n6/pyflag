@@ -469,22 +469,18 @@ class HTMLUI(UI.GenericUI):
         tree_array = []
 
         #The first item in the tree is the first one provided in branch
-        if not branch[0]:
-            tree_array.append((0,'/','/','branch'))
-        else:
-            tree_array.append((0,branch[0],branch[0],'branch'))
+        tree_array.append((0,branch[0],branch[0],'branch'))
 
         #Build the tree_array
         draw_branch(1,tree_array)       
 
         del link['open_tree']
         link['open_tree'] = "%s" % '/'.join(branch[:-1])
-        if not link['open_tree']:
-            del link['open_tree']
-            link['open_tree']='/'
         tmp = self.__class__()
         tmp.link("Up\n",link)
         self.text(tmp)
+
+        import pyflag.FlagFramework as FlagFramework
 
         left=self.__class__()
 
@@ -505,7 +501,7 @@ class HTMLUI(UI.GenericUI):
             ## Get the right part:
             pane_cb(query['open_tree'].split('/'),right)
         except KeyError:
-            pane_cb(['/'],right)
+            pass
         
         ## Now draw the left part
         self.row(left,right,valign='top')
@@ -583,7 +579,7 @@ class HTMLUI(UI.GenericUI):
 
         #Form the columns in the sql
         if not select_clause:
-            select_clause= [ k+ " as `" +v+"`" for (k,v) in zip(columns,names) ]
+            select_clause= [ k+" as `"+v+"`" for (k,v) in zip(columns,names) ]
             
         query_str+=",".join(select_clause) 
 
@@ -702,11 +698,7 @@ class HTMLUI(UI.GenericUI):
                 for row in dbh:
                     values.append(row['Count'])
                     count+=int(row['Count'])
-                    try:
-                        tmp_value=row[names[1]]
-                        labels.append("%s\\n (%s)" % (callbacks[names[1]](tmp_value),row['Count']))
-                    except KeyError:
-                        labels.append("%s\\n (%s)" % (row[names[1]],row['Count']))
+                    labels.append("%s\\n (%s)" % (row[names[1]],row['Count']))
 
                 ## Insert an others entry:
                 values.append(total - count)
@@ -716,9 +708,8 @@ class HTMLUI(UI.GenericUI):
                 ##Create a new pie chart:
                 pie = Graph.Graph()
                 pie.pie(labels,values,explode="0.1", legend='yes')
+                print labels,values
                 result.image(pie)
-
-            ## End of table_groupby_popup
                 
             ## Add a popup to allow the user to draw a graph
             self.popup(table_groupby_popup,'Graph',icon='pie.png',toolbar=1,menubar=1)
