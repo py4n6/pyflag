@@ -268,6 +268,13 @@ class ViewFile(Reports.report):
             left.row("filename:",'',"%s/%s"%(path,name))
             for k,v in istat.iteritems():
                 left.row('%s:' % k,'',v)
+
+            ## File specific statistics:
+            istat = fd.stats()
+            if istat:
+                for k,v in istat.iteritems():
+                    left.row('%s:' % k,'',v)
+            
             left.end_table()
 
             if image:
