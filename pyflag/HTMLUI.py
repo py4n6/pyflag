@@ -8,7 +8,7 @@
 # Michael Cohen <scudette@users.sourceforge.net>
 #
 # ******************************************************
-#  Version: FLAG $Version: 0.75 Date: Sat Feb 12 11:21:40 EST 2005$
+#  Version: FLAG $Version: 0.75 Date: Sat Feb 12 14:00:04 EST 2005$
 # ******************************************************
 #
 # * This program is free software; you can redistribute it and/or
@@ -712,7 +712,11 @@ class HTMLUI(UI.GenericUI):
                 for row in dbh:
                     values.append(row['Count'])
                     count+=int(row['Count'])
-                    labels.append("%s\\n (%s)" % (row[names[1]],row['Count']))
+                    try:
+                        tmp_value=row[names[1]]
+                        labels.append("%s\\n (%s)" % (callbacks[names[1]](tmp_value),row['Count']))
+                    except KeyError:
+                        labels.append("%s\\n (%s)" % (row[names[1]],row['Count']))
 
                 ## Insert an others entry:
                 values.append(total - count)
@@ -722,8 +726,9 @@ class HTMLUI(UI.GenericUI):
                 ##Create a new pie chart:
                 pie = Graph.Graph()
                 pie.pie(labels,values,explode="0.1", legend='yes')
-                print labels,values
                 result.image(pie)
+
+            ## End of table_groupby_popup
                 
             ## Add a popup to allow the user to draw a graph
             self.popup(table_groupby_popup,'Graph',icon='pie.png',toolbar=1,menubar=1)
