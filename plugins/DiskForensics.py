@@ -44,18 +44,6 @@ import pyflag.Scanner as Scanner
 description = "Disk Forensics"
 order=30
 
-def DeletedIcon(value,result=None):
-    """ Callback for rendering deleted items """
-    tmp=result.__class__(result)
-    if value=='alloc':
-        tmp.icon("yes.png")
-    elif value=='deleted':
-        tmp.icon("no.png")
-    else:
-        tmp.icon("question.png")
-
-    return tmp
-
 class BrowseFS(Reports.report):
     """ Report to browse the filesystem"""
     parameters = {'fsimage':'fsimage'}
@@ -73,6 +61,29 @@ class BrowseFS(Reports.report):
         branch = ['']
         new_query = result.make_link(query, '')
             
+        def tree_cb(branch):
+            path ='/'.join(branch)  + '/'
+#            fsfd = FileSystem.FS_Factory( query["case"], query["fsimage"], iofd)
+
+            a = fsfd.dent_walk(path)
+            for i in a:
+                if i['mode']=="d/d" and i['status']=='alloc':
+                    link = self.ui(result)
+                    link.link(i['name'],new_query,open_tree="%s%s" %(path,i['name']), mode='table', where_Filename="%s%s" %(path,i['name']), order='Filename')# ,__mark__="%s%s" %(path,i['name']))
+                    yield(([i['name'],link,'branch']))
+
+        def DeletedIcon(value,result=None):
+            """ Callback for deleted items """
+            tmp=self.ui()
+            if value=='alloc':
+                tmp.icon("yes.png")
+            elif value=='deleted':
+                tmp.icon("no.png")
+            else:
+                tmp.icon("question.png")
+
+            return tmp
+
         try:
             # tabular view
             if query['mode'] == 'table':
@@ -90,31 +101,22 @@ class BrowseFS(Reports.report):
             if (query.has_key("open_tree") and query['open_tree'] != '/'):
                 br = query['open_tree']
             else:
-                br = '/'
-                
-            result.para("Inspecting branch %s\r\n" % br)
-
-            def tree_cb(branch):
-                path ='/'.join(branch)+'/'
-                ## We need a local copy of the filesystem factory so as not to affect other instances!!!
-                fsfd = FileSystem.FS_Factory( query["case"], query["fsimage"], iofd)
-
-                for i in fsfd.dent_walk(path): 
-                    if i['mode']=="d/d" and i['status']=='alloc':
-                        link = self.ui(result)
-                        link.link(i['name'],new_query,open_tree="%s%s" %(path,i['name']), mode='table', where_Filename="%s%s" %(path,i['name']), order='Filename')# ,__mark__="%s%s" %(path,i['name']))
-                        yield(([i['name'],link,'branch']))
+                br = ''
 
             def pane_cb(branch,tmp):
                 query['order']='Filename'
-                br=os.path.normpath('/'.join(branch))+'/'
-                if br=='//': br='/'
+                br="/".join(branch)
+                if not fsfd.isdir(br):
+                    br = br[:br.rindex('/')]
+
+                print br
+#                tmp.text("Inspecting branch %s\r\n" % br)
                 tmp.table(
                     columns=['f.inode','name','f.status','size', 'from_unixtime(mtime)','f.mode'],
                     names=('Inode','Filename','Del','File Size','Last Modified','Mode'),
 #                    callbacks={'Del':DeletedIcon},
                     table='file_%s as f, inode_%s as i' % (fsfd.table,fsfd.table),
-                    where="f.inode=i.inode and path=%r and f.mode!='d/d'" % (br),
+                    where="f.inode=i.inode and path=%r and f.mode!='d/d'" % (br + '/'),
                     case=query['case'],
                     links=[ FlagFramework.query_type((),case=query['case'],family=query['family'],report='ViewFile', fsimage=query['fsimage'],__target__='inode', inode="%s")]
                     )
@@ -320,6 +322,17 @@ class Timeline(Reports.report):
         dbh = self.DBO(query['case'])
         tablename = dbh.MakeSQLSafe(query['fsimage'])
         
+        def DeletedIcon(value):
+            """ Callback for deleted items """
+            tmp=self.ui()
+            if value=='alloc':
+                tmp.icon("yes.png")
+            elif value=='deleted':
+                tmp.icon("no.png")
+            else:
+                tmp.icon("question.png")
+            return tmp
+
         result.table(
             columns=('from_unixtime(time)','inode','status',
                      "if(m,'m',' ')","if(a,'a',' ')","if(c,'c',' ')","if(d,'d',' ')",'name'),
@@ -425,24 +438,20 @@ class VirusScan(Reports.report):
         dbh=self.DBO(query['case'])
         tablename = dbh.MakeSQLSafe(query['fsimage'])
 
-        try:
-            result.table(
-                columns=('a.inode','concat(path,name)', 'virus'),
-                names=('Inode','Filename','Virus Detected'),
-                table='virus_%s as a join file_%s as b on a.inode=b.inode ' % (tablename,tablename),
-                case=query['case'],
-                links=[ FlagFramework.query_type((),case=query['case'],family=query['family'],fsimage=query['fsimage'],report='ViewFile',__target__='inode')]
-                )
-        except DB.DBError,e:
-            result.para("Unable to display Virus table, maybe you did not run the virus scanner over the filesystem?")
-            result.para("The error I got was %s"%e)
-            
+        result.table(
+            columns=('a.inode','concat(path,name)', 'virus'),
+            names=('Inode','Filename','Virus Detected'),
+            table='virus_%s as a join file_%s as b on a.inode=b.inode ' % (tablename,tablename),
+            case=query['case'],
+            links=[ FlagFramework.query_type((),case=query['case'],family=query['family'],fsimage=query['fsimage'],report='ViewFile',__target__='inode')]
+            )
+        
 if 0:
     class VirusScan(Reports.report):
         """ Scan Filesystem for Viruses using clamav"""
         parameters = {'fsimage':'fsimage'}
         name = "Virus Scan (clamav)"
-        description="This report will display a table of viruses found during the scanning on Loading the filesystem "
+        description="This report will scan for viruses and display a table of viruses found"
         progress_dict = {}
 
         def form(self,query,result):
@@ -621,7 +630,8 @@ class BrowseRegistry(BrowseFS):
                         context="display_mode"
                         )
 
-            except KeyError,e:
+
+            except KeyError:
                 ## Display tree output
                 del new_q['mode']
                 del new_q['open_tree']
@@ -634,7 +644,6 @@ class BrowseRegistry(BrowseFS):
 
                     # now display keys in table
                     new_q['mode'] = 'display'
-                    new_q['path']=path
                     table.table(
                         columns=['reg_key','type','size',"if(length(value)<50,value,concat(left(value,50),' .... '))"],
                         names=('Key','Type','Size','Value'),
@@ -731,10 +740,23 @@ class SearchIndex(Reports.report):
         result.heading("Occurances of %s in logical image %s" %
                        (keyword,query['fsimage']))
         table = query['fsimage']
+        iofd = IO.open(query['case'], query['fsimage'])
+        fsfd = FileSystem.FS_Factory( query["case"], query["fsimage"], iofd)
 
+        def SampleData(string,result=None):
+            offset=int(string)
+            dbh.execute("select inode from LogicalKeyword_%s where offset = %r ",(table,offset))
+            row=dbh.fetch()
+            fd = fsfd.open(inode=row['inode'])
+            fd.seek(offset-10)
+            ## Read some data before and after the keyword
+            data = fd.read(10 + len(keyword) + 20)
+            return data
+            
         result.table(
-            columns = ['inode','text','keyword'],
+            columns = ['inode','offset','keyword'],
             names=['Inode','Data','Keyword'],
+            callbacks = { 'Data': SampleData },
             table='LogicalKeyword_%s' % table,
             case=query['case'],
             )
