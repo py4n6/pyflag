@@ -44,6 +44,20 @@ import pyflag.Scanner as Scanner
 description = "Disk Forensics"
 order=30
 
+BLOCKSIZE=20
+
+def DeletedIcon(value,result=None):
+    """ Callback for rendering deleted items """
+    tmp=result.__class__(result)
+    if value=='alloc':
+        tmp.icon("yes.png")
+    elif value=='deleted':
+        tmp.icon("no.png")
+    else:
+        tmp.icon("question.png")
+
+    return tmp
+
 class BrowseFS(Reports.report):
     """ Report to browse the filesystem"""
     parameters = {'fsimage':'fsimage'}
@@ -71,18 +85,6 @@ class BrowseFS(Reports.report):
                     link = self.ui(result)
                     link.link(i['name'],new_query,open_tree="%s%s" %(path,i['name']), mode='table', where_Filename="%s%s" %(path,i['name']), order='Filename')# ,__mark__="%s%s" %(path,i['name']))
                     yield(([i['name'],link,'branch']))
-
-        def DeletedIcon(value,result=None):
-            """ Callback for deleted items """
-            tmp=self.ui()
-            if value=='alloc':
-                tmp.icon("yes.png")
-            elif value=='deleted':
-                tmp.icon("no.png")
-            else:
-                tmp.icon("question.png")
-
-            return tmp
 
         try:
             # tabular view
@@ -322,17 +324,6 @@ class Timeline(Reports.report):
         dbh = self.DBO(query['case'])
         tablename = dbh.MakeSQLSafe(query['fsimage'])
         
-        def DeletedIcon(value):
-            """ Callback for deleted items """
-            tmp=self.ui()
-            if value=='alloc':
-                tmp.icon("yes.png")
-            elif value=='deleted':
-                tmp.icon("no.png")
-            else:
-                tmp.icon("question.png")
-            return tmp
-
         result.table(
             columns=('from_unixtime(time)','inode','status',
                      "if(m,'m',' ')","if(a,'a',' ')","if(c,'c',' ')","if(d,'d',' ')",'name'),
@@ -717,9 +708,12 @@ class SearchIndex(Reports.report):
         idx = index.Load("%s/LogicalIndex_%s.idx" % (config.RESULTDIR,table))
         for offset in idx.search(keyword):
             ## Find out which inode this offset is in:
-            dbh.execute("select inode,offset from LogicalIndex_%s where offset <= %r order by offset desc,id desc",(query['fsimage'],offset))
+            block = offset >> BLOCKSIZE
+            dbh.execute("select inode,min(block) as minblock from LogicalIndex_%s where block = %r group by block",(query['fsimage'],block))
             row=dbh.fetch()
-            off = offset - int(row['offset'])
+            if not row: continue
+            ## Here we remove the block number part from the int. If there are a number of blocks in the database for this inode, we account for the extra blocks.
+            off = offset - ((2*block - row['minblock']) << BLOCKSIZE)
             if off<10: off=10
             dbh2.execute("insert into LogicalKeyword_%s set inode=%r, offset=%r, keyword=%r",(table,row['inode'],off,keyword))
         
