@@ -261,7 +261,9 @@ class HTMLUI(UI.GenericUI):
     def pre(self,string):
         self.result += "<pre>%s</pre>" % string
 
-    def link(self,string,target=FlagFramework.query_type(()),options=None,**target_options):
+    def link(self,string,target=None,options=None,**target_options):
+        if target==None:
+            target=FlagFramework.query_type(())
         q=target.clone()
         if target_options:
             for k,v in target_options.items():
@@ -469,18 +471,22 @@ class HTMLUI(UI.GenericUI):
         tree_array = []
 
         #The first item in the tree is the first one provided in branch
-        tree_array.append((0,branch[0],branch[0],'branch'))
+        if not branch[0]:
+            tree_array.append((0,'/','/','branch'))
+        else:
+            tree_array.append((0,branch[0],branch[0],'branch'))
 
         #Build the tree_array
         draw_branch(1,tree_array)       
 
         del link['open_tree']
         link['open_tree'] = "%s" % '/'.join(branch[:-1])
+        if not link['open_tree']:
+            del link['open_tree']
+            link['open_tree']='/'
         tmp = self.__class__()
         tmp.link("Up\n",link)
         self.text(tmp)
-
-        import pyflag.FlagFramework as FlagFramework
 
         left=self.__class__()
 
@@ -501,7 +507,7 @@ class HTMLUI(UI.GenericUI):
             ## Get the right part:
             pane_cb(query['open_tree'].split('/'),right)
         except KeyError:
-            pass
+            pane_cb(['/'],right)
         
         ## Now draw the left part
         self.row(left,right,valign='top')
