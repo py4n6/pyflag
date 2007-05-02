@@ -1450,7 +1450,6 @@ class HTMLUI(UI.GenericUI):
             self.result += "<hr />\n"
         
     def refresh(self,interval, query, pane='self'):
-        print pane
         del query['time']
         query['time'] = time.time()
 
