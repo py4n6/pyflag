@@ -36,6 +36,7 @@ config=pyflag.conf.ConfObject()
 import pyflag.pyflaglog as pyflaglog
 import pickle,gzip
 import plugins.LogAnalysis.Whois as Whois
+from pyflag.TableObj import IPType
 import re
 import pyflag.Registry as Registry
 
@@ -208,9 +209,14 @@ class Log:
             ',\n'.join([ x.create() for x in fields])
             ))
 
-        ## Now insert into the table:
+        ##  Now insert into the table:
         count = 0
         for fields in self.get_fields():
+
+            if config.PRECACHE_IPMETADATA:
+                for lup in fieldsToLookup:
+                    Whois.lookup_whois(fields[lup])
+
             count += 1
 
             if isinstance(fields, list):
@@ -372,30 +378,3 @@ def end(query,result):
     into the load preset log file report"""
     query['log_preset'] = 'test'
     result.refresh(0, query_type(log_preset=query['log_preset'], report="Load Preset Log File", family="Load Data"), pane='parent')
-
-
-import unittest
-import pyflag.pyflagsh as pyflagsh
-
-class LogDriverTester(unittest.TestCase):
-    test_case = None
-    test_table =None
-    log_preset = None
-    datafile = None
-    
-    def test00Cleanup(self):
-        """ Remove test log tables """
-        ## Create the case if it does not already exist:
-        pyflagsh.shell_execv(command = "create_case",
-                             argv=[self.test_case])
-        
-        ## clear any existing presets of the same name:
-        drop_preset(self.log_preset)
-
-    ## This is disabled so as to leave the test table behind - this is
-    ## required for development so we can examine the table
-    def XXXtest99Cleanup(self):
-        """ Remove test log tables """
-        ## clear the preset we created
-        drop_preset(self.log_preset)
-
