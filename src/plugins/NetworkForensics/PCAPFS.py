@@ -229,7 +229,7 @@ class PCAPFS(DBFS):
                                     con_id = connection['con_id'],
                                     packet_id = packet.id,
                                     cache_offset = fd.offset,
-                                    length = tcp.data_len,
+                                    length = len(data),
                                     seq = tcp.seq,
                                     _fast=True
                                     )
@@ -239,7 +239,7 @@ class PCAPFS(DBFS):
                                     con_id = connection['con_id'],
                                     packet_id = packet.id,
                                     cache_offset = fd.offset,
-                                    length = tcp.data_len,
+                                    length = len(data),
                                     seq = tcp.seq,
                                     _fast=True
                                     )
