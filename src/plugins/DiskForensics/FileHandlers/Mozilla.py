@@ -268,7 +268,6 @@ class MozCacheScan(Scanner.GenScanFactory):
                                     _mtime=meta['LastModified'],
                                     _atime=meta['LastFetched'],
                                     size=length)
-                
                 # add to http table
                 try:
                     date = time.strftime("%Y-%m-%d:%H:%M:%S", header.getdate("date"))
