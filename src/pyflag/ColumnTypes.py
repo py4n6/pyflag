@@ -941,6 +941,7 @@ class InodeIDType(IntegerType):
             row2 = dbh.fetch()
 
             query.set('inode_id', inode_id)
+            query.default("mode", "Summary")
             report.display(query, result)
 
             ## What should we do now - we basically set the type of
