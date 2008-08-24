@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -38,8 +37,8 @@
     The base Image class provides the 
 
 """
-#import iosubsys
-import pexpect
+import iosubsys
+#import pexpect
 import pyflag.FlagFramework as FlagFramework
 from pyflag.FlagFramework import query_type
 import pyflag.conf

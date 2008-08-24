@@ -66,9 +66,7 @@ static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
     } else if(!strcmp(output,"little")) {
       self->output_format = FORCE_LITTLE_ENDIAN;
     } else {
-      PyErr_Format(PyExc_KeyError, 
-		   "Unknown value (%s) for endianess - can be only 'big' or 'little'\n", output);
-      goto fail;
+      return PyErr_Format("Unknown value (%s) for endianess - can be only 'big' or 'little'\n", output);
     };
   };
 
@@ -77,8 +75,6 @@ static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
 
   //Fill it up:
   if(PyPCAP_fill_buffer(self, fd)<=0) {
-      PyErr_Format(PyExc_IOError, 
-		   "Cant read file");
     goto fail;
   };
 
@@ -362,7 +358,7 @@ static PyTypeObject PyPCAPType = {
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
     0,                         /* tp_weaklistoffset */
-    PyObject_SelfIter,         /* tp_iter */
+    0,//PyObject_SelfIter,         /* tp_iter */
     (iternextfunc)PyPCAP_next, /* tp_iternext */
     PyPCAP_methods,            /* tp_methods */
     0,                         /* tp_members */

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """ This module has a number of useful Time manipulation utilities
 """
 import _strptime, time
@@ -170,8 +169,8 @@ def strptime(data_string, format="%a %b %d %H:%M:%S %Y"):
 
 # below are some helpful functions to deal with date and timezone translation
 
-from dateutil.tz import gettz
-import dateutil.parser
+from pyflag.dateutil.tz import gettz
+import pyflag.dateutil.parser
 import datetime
 from os.path import basename
 

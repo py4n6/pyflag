@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2006
 # Michael Cohen <scudette@users.sourceforge.net>
@@ -219,7 +218,12 @@ def start_workers():
         return
 
     for i in range(config.WORKERS):
-       pid = os.fork()
+       try:
+           pid = os.fork()
+       except AttributeError:
+           ## When running under windows we can not fork
+           return
+       
        ## Parents:
        if pid:
          children.append(pid)
@@ -305,18 +309,12 @@ def start_workers():
 
     ## The parent now calls the startup method on each of the events:
     for event in Registry.EVENT_HANDLERS.classes:
-        try:
-            event().startup()
-        except Exception,e:
-            pyflaglog.log(pyflaglog.ERRORS, "Error: %s" % e)
+        event().startup()
 
     ## The parent now calls the startup method on each of the events:
     print "Launching startup"
     for event in Registry.EVENT_HANDLERS.classes:
-        try:
-            event().startup()
-        except Exception,e:
-            pyflaglog.log(pyflaglog.ERRORS, "Error: %s" % e)
+        event().startup()
         
 def handler(sig, frame):
     #print "Got woken up"
@@ -326,7 +324,11 @@ def handler(sig, frame):
 ## expect it we may lose sync with the db. Seems to work for now, but
 ## Im dubious.
 ## FIXME: Use select on unix domain sockets instead of time.sleep
-signal.signal(signal.SIGUSR1, handler)
+try:
+    signal.signal(signal.SIGUSR1, handler)
+except AttributeError:
+    ## This fails on windows (no signals)
+    pass
 
 def wake_workers():
     """ Try to wake workers if possible. If we fail we must wait until

@@ -14,7 +14,7 @@ static void trie_index_dealloc(trie_index *self) {
 
 static int trie_index_init(trie_index *self, PyObject *args, PyObject *kwds) {
   int all_matches = 1;
-  int unique=0;
+  int unique;
   static char *kwlist[] = {"unique",NULL};
 
   if(kwds && !PyArg_ParseTupleAndKeywords(args, kwds, "|i", kwlist,
@@ -86,10 +86,11 @@ static PyObject *trie_index_index_buffer(trie_index *self, PyObject *args, PyObj
   int unique=0;
   static char *kwlist[] = {"data","unique",NULL};
 
-  if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|i", kwlist,
-				  &data, &unique)) 
+  if(kwds && !PyArg_ParseTupleAndKeywords(args, kwds, "O|i", kwlist,
+					  &data, &unique)) 
     return NULL;
   
+  printf("Indexing not uniquely %u\n", unique);
   if(unique) {
     if(!self->set) 
       self->set = PySet_New(NULL);
@@ -245,7 +246,7 @@ static PyTypeObject trie_iter_Type = {
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
     0,                         /* tp_weaklistoffset */
-    PyObject_SelfIter,         /* tp_iter */
+    0,//PyObject_SelfIter,         /* tp_iter */
     trie_iter_next,            /* tp_iternext */
     trie_iter_methods,        /* tp_methods */
     0,                         /* tp_members */

@@ -28,6 +28,12 @@
 #ifndef __MISC_H
 #define __MISC_H
 
+#ifdef __WIN32__
+#include <winsock.h>
+#define u_int8_t uint8_t
+#define u_int16_t uint16_t
+#define u_int32_t uint32_t
+#else
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/tcp.h>
@@ -35,9 +41,10 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 //#include <unistd.h>
-#include "enum.h"
-
 #define O_BINARY 0
+#endif
+
+#include "enum.h"
 
 /** This is used for debugging. */
 #ifndef __DEBUG__
@@ -65,14 +72,6 @@ void __MODULE_INIT_ ## function_name()
 #define True 1
 
 /** This is used when we need to copy the NULL as well */
-#define ZSTRING_CMP(a, str) memcmp(a, str, strlen(str)+1)
-#define ZSTRING_NO_NULL_CMP(a, str) memcmp(a, str, strlen(str))
-#define ZSTRING_CPY(a, str) memcpy(a, str, strlen(str)+1)
-#define ZSTRING_NO_NULL_CPY(a, str) memcpy(a, str, strlen(str))
-
-/** Dont use these with memcpy and memcmp because they break under
-    FEDORA (see bug00032). Use the above instead.
-*/
 #define ZSTRING(str) str , (strlen(str)+1)
 
 #define ZSTRING_NO_NULL(str) str , (strlen(str))

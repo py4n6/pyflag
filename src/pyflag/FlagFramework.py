@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -156,6 +155,10 @@ class query_type:
         tmp = self.clone()
         result = []
         
+        #if tmp.has_key('__mark__'):
+        #    mark='#'+ tmp.__getitem__('__mark__')
+        #    tmp.__delitem__('__mark__')
+
         for k in tmp.keys():
             if k.startswith("__"):
                 del tmp[k]
@@ -400,7 +403,11 @@ class Flag:
 
         #Lets remember the fact that we analysed this report - in the database
         try:
-            dbh = DB.DBO(query.get('case'))
+            try:
+                dbh = DB.DBO(query['case'])
+            except KeyError:
+                dbh = DB.DBO(None)
+
             dbh.execute("insert into meta set property=%r,value=%r",('report_executed',canonical_query))
         except DB.DBError:
             pass
@@ -768,13 +775,15 @@ def reset_all(**query):
         except KeyError:
             pass
 
+import posixpath
+
 def normpath(string):
     """A sane implementation of normpath.
 
     The Python normpath has a bug whereby it swallaws the last / in a path name - this makes it difficult to distinguish between a directory and a filename.
     This is a workaround this braindead implementation.
     """
-    tmp = os.path.normpath('////'+string)
+    tmp = posixpath.normpath('////'+string)
     if string.endswith('/') and not tmp.endswith('/'):
         tmp=tmp+'/'
     return tmp
@@ -957,28 +966,6 @@ class CaseTable:
             else:
                 print column_cls
                 yield column_cls(**args)
-
-    def bind_column(self, case, column_name):
-        """ Tries to find column_name in our columns and returns a
-        bound (instantiated) column object
-        """
-
-        for x in self.columns:
-            column_cls = x[0]
-            args = x[1]
-            args['table'] = args.get('table', self.name)
-            ## This is a little expensive because we instantiate each
-            ## column just in order to check its name. This is
-            ## necessary because some columns have a hard coded name
-            ## which they set in the constructor (for example
-            ## InodeIDType hard codes the name to Inode - so we dont
-            ## have to supply it in args all the time).
-            e = column_cls(**args)
-            if e.name != column_name: continue
-            return e
-
-        raise RuntimeError("Column %s not found in table %s" % (
-            column_name, self.__class__.__name__))
 
     def create(self, dbh):
         """ Returns an SQL CREATE statement from our schema description """

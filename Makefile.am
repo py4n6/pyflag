@@ -51,7 +51,6 @@ clean-local:
 	-rm -rf $(bin_SCRIPTS) $(sysconf_DATA)
 
 deb-pkg:	
-	chmod 744 debian/rules
 	dpkg-buildpackage -rfakeroot
 
 data/magic.mgc: data/magic
@@ -59,6 +58,9 @@ data/magic.mgc: data/magic
 
 data/magic.mime.mgc: data/magic.mime
 	cd data && file -C -m magic.mime
+
+.la.pyd:
+	cp index.la index.pyd
 
 # This will not be installed automatically - it will be installed
 # using the install-data-hook below only if it does not already exist.
