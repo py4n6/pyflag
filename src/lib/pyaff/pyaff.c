@@ -1,5 +1,5 @@
 #include "Python.h"
-#include "afflib/afflib.h"
+#include "afflib.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -21,8 +21,8 @@ static void affile_dealloc(affile *self);
 static int affile_init(affile *self, PyObject *args, PyObject *kwds);
 static PyObject *affile_read(affile *self, PyObject *args, PyObject *kwds);
 static PyObject *affile_seek(affile *self, PyObject *args, PyObject *kwds);
-static PyObject *affile_get_seg(affile *self, PyObject *args, PyObject *kwds);
-static PyObject *affile_get_seg_names(affile *self);
+static PyObject *affile_get_header(affile *self, PyObject *args, PyObject *kwds);
+static PyObject *affile_get_headers(affile *self);
 static PyObject *affile_tell(affile *self);
 static PyObject *affile_close(affile *self);
 
@@ -31,10 +31,12 @@ static PyMethodDef affile_methods[] = {
      "Read data from file" },
     {"seek", (PyCFunction)affile_seek, METH_VARARGS|METH_KEYWORDS,
      "Seek within a file" },
-    {"get_seg", (PyCFunction)affile_get_seg, METH_VARARGS|METH_KEYWORDS,
-     "Retrieve an aff segment by name" },
-    {"get_seg_names", (PyCFunction)affile_get_seg_names, METH_NOARGS,
-     "Retrieve a list of segments present" },
+/*
+    {"get_header", (PyCFunction)affile_get_header, METH_VARARGS|METH_KEYWORDS,
+     "Retrieve an aff header by name" },
+    {"get_headers", (PyCFunction)affile_get_headers, METH_NOARGS,
+     "Retrieve an aff header by name" },
+*/
     {"tell", (PyCFunction)affile_tell, METH_NOARGS,
      "Return possition within file" },
     {"close", (PyCFunction)affile_close, METH_NOARGS,
@@ -105,7 +107,8 @@ affile_init(affile *self, PyObject *args, PyObject *kwds) {
     	return -1;
     }
 
-    self->size = af_get_imagesize(self->af);
+    //self->size = af_get_imagesize(self->af);
+    self->size = self->af->image_size;
     return 0;
 }
 
@@ -123,7 +126,7 @@ affile_read(affile *self, PyObject *args, PyObject *kwds) {
     	readlen = self->size;
 
     retdata = PyString_FromStringAndSize(NULL, readlen);
-    written = af_read(self->af, (unsigned char *)PyString_AsString(retdata), readlen);
+    written = af_read(self->af, PyString_AsString(retdata), readlen);
 
     if(readlen != written) {
         return PyErr_Format(PyExc_IOError, "Failed to read all data: wanted %d, got %d", readlen, written);
@@ -158,49 +161,66 @@ affile_close(affile *self) {
   af_close(self->af);
   Py_RETURN_NONE;
 }
+/*
 
-static PyObject *affile_get_seg(affile *self, PyObject *args, PyObject *kwds) {
-	PyObject *retdata;
-	char *buf;
-	size_t buflen=0;
-	char *segname=NULL;
-    static char *kwlist[] = {"segname", NULL};
+// affinfo uses 128 bytes, maby thats a max size?
+#define HEADER_LENGTH 128
 
-    if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &segname))
+static PyObject *affile_get_header(affile *self, PyObject *args, PyObject *kwds) {
+	int ret;
+	PyObject *tmp;
+	char buf[HEADER_LENGTH];
+	char *identifier=NULL;
+    static char *kwlist[] = {"identifier", NULL};
+
+    if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &identifier))
         return NULL;
 
-    // first get the size
-    if(af_get_seg(self->af, segname, 0, 0, &buflen) != 0) {
-        return PyErr_Format(PyExc_IOError, "error reading libaff segment\n");
-    }
-    
-    // allocate a string to return data in
-    retdata = PyString_FromStringAndSize(NULL, buflen);
-    buf = PyString_AsString(retdata);
+    // this function checks if the headers have already been parsed and
+    // returns immediately, so it shouldn't hurt to call it every time.
+    libaff_parse_header_values(self->handle, LIBaff_DATE_FORMAT_CTIME);
 
-    if(af_get_seg(self->af, segname, 0, (unsigned char *)buf, &buflen) != 0) {
-        Py_DECREF(retdata);
-        return PyErr_Format(PyExc_IOError, "error reading libaff segment\n");
+    ret = libaff_get_header_value(self->handle, identifier, buf, HEADER_LENGTH);
+    if(ret == 0) { // value not present
+    	return Py_None;
     }
- 
-    return retdata;
+    else if(ret == -1) {
+        return PyErr_Format(PyExc_IOError, "error reading libaff header");
+    }
+
+    tmp = PyString_FromString(buf);
+    return tmp;
 }
 
-static PyObject *affile_get_seg_names(affile *self) {
+static PyObject *affile_get_headers(affile *self) {
 	PyObject *headers, *tmp;
-	char segname[AF_MAX_NAME_LEN];
+	char **ptr;
+	char buf[HEADER_LENGTH];
+    char *std_headers[] = {
+	    "case_number", "description", "examinier_name",
+        "evidence_number", "notes", "acquiry_date",
+        "system_date", "acquiry_operating_system",
+        "acquiry_software_version", "password",
+        "compression_type", "model", "serial_number",
+        NULL,
+    };
 
-    af_rewind_seg(self->af);
-    headers = PyList_New(0);
+    // this function checks if the headers have already been parsed and
+    // returns immediately, so it shouldn't hurt to call it every time.
+    libaff_parse_header_values(self->handle, LIBaff_DATE_FORMAT_CTIME);
 
-    while(af_get_next_seg(self->af, segname, sizeof(segname), 0, 0, 0) == 0){
-        tmp = PyString_FromString(segname);
-        PyList_Append(headers, tmp);
-        Py_DECREF(tmp);
+    headers = PyDict_New();
+    for(ptr = std_headers; *ptr; ptr++) {
+        if(libaff_get_header_value(self->handle, *ptr, buf, HEADER_LENGTH) == 1) {
+            tmp = PyString_FromString(buf);
+            PyDict_SetItemString(headers, *ptr, tmp);
+            Py_DECREF(tmp);
+        }
     }
 
     return headers;
 }
+*/
 
 static PyObject *pyaff_open(PyObject *self, PyObject *args, PyObject *kwds) {
 	int ret;
