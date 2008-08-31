@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """ This is an implementation of a HTML parser using the pyflag lexer. 
 
 We do not use pythons native sgml parser because that is too fragile
@@ -48,10 +47,7 @@ def decode_entity(string):
     return re.sub("&#(\d+);", decoder, string)
 
 def decode_unicode(string):
-    try:
-        return re.sub(r"\\u(....)", lambda x: struct.pack("H",int(x.group(1),16)).decode("utf16").encode("utf8"), string)
-    except:
-        return string
+    return re.sub(r"\\u(....)", lambda x: struct.pack("H",int(x.group(1),16)).decode("utf16").encode("utf8"), string)
 
 def decode(string):
     return decode_unicode(decode_entity(unquote(string)))
@@ -247,24 +243,12 @@ class SanitizingTag(Tag):
 
     def css_filter(self, data):
         def resolve_css_references(m):
-            action = m.group(1)
-            url = m.group(2)
-            args={}
-            ## This is a bit of a hack - magic detection of css is
-            ## quite hard
-            if url.endswith("css"):
-                args['hint'] = 'text/css'
-                
-            result = self.resolve_reference(url, build_reference = False, **args)
-            return "%s(%s)" % (action,result)
+            result = self.resolve_reference(m.group(1), build_reference = False)
+            return "url(%s)" % result
         
-        data = re.sub("(?i)(url)\(\"?([^\)\"]+)\"?\)",
+        return re.sub("(?i)url\(\"?([^\)\"]+)\"?\)",
                       resolve_css_references,
                       data)
-        data = re.sub("(?i)(@import)\s+'([^']+)'",
-                      resolve_css_references,
-                      data)
-        return data
 
     def __str__(self):
         ## Some tags are never allowed to be outputted
@@ -347,10 +331,7 @@ def get_url(inode_id, case):
         dbh = DB.DBO(case)
         dbh.execute("select url from http where inode_id=%r limit 1", inode_id)
         row = dbh.fetch()
-        if not row:
-            dbh.execute("select url from http_sundry where id=%r limit 1", inode_id)
-            row = dbh.fetch()
-            
+
         if row:
             url = row['url']
         else:
@@ -432,7 +413,7 @@ class ResolvingHTMLTag(SanitizingTag):
         ## have a method - chances are that its in the VFS:
         else:
             fsfd = FileSystem.DBFS(self.case)
-            new_reference = url_unquote(reference)
+            new_reference = decode_entity(url_unquote(reference))
             url = os.path.normpath(os.path.join(self.base_url, new_reference))
             try:
                 path, inode, inode_id = fsfd.lookup(path = url)
@@ -442,11 +423,10 @@ class ResolvingHTMLTag(SanitizingTag):
 
         ## Try to make reference more url friendly:
 #        reference = reference.replace(" ","%20")
-        reference = decode_entity(reference)
+        reference = url_unquote(decode_entity(reference))
+
         dbh = DB.DBO(self.case)
-        dbh.execute("select http.status,http.inode_id from http join inode on "\
-                    "inode.inode_id=http.inode_id where url=%r and not "\
-                    "isnull(http.inode_id) and size > 0 limit 1", reference)
+        dbh.execute("select status,inode_id from http where url=%r and not isnull(http.inode_id) limit 1", reference)
         row = dbh.fetch()
         if row and row['inode_id']:
             ## This is needed to stop dbh leaks due to the highly

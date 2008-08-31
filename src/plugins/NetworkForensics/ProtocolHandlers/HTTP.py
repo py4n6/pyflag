@@ -36,7 +36,6 @@ import plugins.NetworkForensics.PCAPFS as PCAPFS
 import re,time,cgi,Cookie
 import TreeObj
 from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, guess_date
-import pyflag.Time as Time
 
 def escape(uri):
     """ Make a filename from a URI by escaping / chars """
@@ -78,7 +77,7 @@ class HTTP:
 
         self.request = dict(url=m.group(2),
                             method=m.group(1),
-                            packet_id = self.fd.get_packet_id()
+                            packet_id = self.fd.get_packet_id(self.fd.tell())
                             )
         self.read_headers(self.request)
 
@@ -206,6 +205,21 @@ class HTTPCaseTable(FlagFramework.CaseTable):
         ]
     index = ['url','inode_id']
 
+class AttachmentColumnType(IntegerType):
+    """ View file Attachment in HTTP parameters """
+    
+    def __init__(self, **kwargs):
+        kwargs['name']="Attachment"
+        kwargs['column'] = 'indirect'
+        link = FlagFramework.query_type(case=kwargs['case'],
+                                        family='Disk Forensics',
+                                        report='ViewFile',
+                                        mode = 'Summary',
+                                        __target__ = 'inode_id')
+        kwargs['link'] = link
+        kwargs['link_pane'] = 'popup'
+        IntegerType.__init__(self, **kwargs)
+
 class HTTPParameterCaseTable(FlagFramework.CaseTable):
     """ HTTP Parameters - Stores request details """
     name = 'http_parameters'
@@ -213,7 +227,7 @@ class HTTPParameterCaseTable(FlagFramework.CaseTable):
         [ InodeIDType, {} ],
         [ StringType, dict(name = 'Parameter', column = 'key') ],
         [ StringType, dict(name = 'Value', column = 'value')],
-        [ IntegerType, dict(name = 'Attachment', column='indirect')],
+        [ AttachmentColumnType, {}],
         ]
     index = [ 'inode_id', 'key' ]
 
@@ -322,51 +336,40 @@ class HTTPScanner(StreamScannerFactory):
                            key = k,
                            value = C[k].value)
                 
-        except (KeyError, Cookie.CookieError):
-            pass
+        except (KeyError, Cookie.CookieError): pass
 
         result =cgi.FieldStorage(environ = env, fp = cStringIO.StringIO(body))
-        self.count = 1
-        if type(result.value)==str:
-            class dummy:
-                value = result.value
-                filename = "body"
-                
-            self.process_parameter("body", dummy(), inode_id)
-        else:
-            for key in result:
-                self.process_parameter(key, result[key], inode_id)
+        count = 1
+        for key in result:
+            ## Non printable keys are probably not keys at all.
+            if re.match("[^a-z0-9A-Z_]+",key): continue
+            value = result[key]
+            try:
+                value = value[0]
+            except: pass
 
-    def process_parameter(self, key, value, inode_id):
-        dbh = DB.DBO(self.case) 
-       ## Non printable keys are probably not keys at all.
-        if re.match("[^a-z0-9A-Z_]+",key): return
-        try:
-            value = value[0]
-        except: pass
-
-        ## Deal with potentially very large uploads:
-        if hasattr(value,'filename') and value.filename:
-            path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
-            ## This is not quite correct at the moment because the
-            ## mime VFS driver is unable to reconstruct the file
-            ## from scratch
-            new_inode = "m%s" % self.count
-            new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
-                                           value.filename,
-                                           size = len(value.value))
-            fd = self.fsfd.open(inode_id=new_inode_id)
-            ## dump the file to the correct filename:
-            open(fd.get_temp_path(),'w').write(value.value)
-            dbh.insert('http_parameters',
-                   inode_id = inode_id,
-                   key = key,
-                   indirect = new_inode_id)                
-        else:
-            dbh.insert('http_parameters',
-                   inode_id = inode_id,
-                   key = key,
-                   value = value.value)
+            ## Deal with potentially very large uploads:
+            if hasattr(value,'filename') and value.filename:
+                path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
+                ## This is not quite correct at the moment because the
+                ## mime VFS driver is unable to reconstruct the file
+                ## from scratch
+                new_inode = "m%s" % count
+                new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
+                                               value.filename,
+                                               size = len(value.value))
+                fd = self.fsfd.open(inode_id=new_inode_id)
+                ## dump the file to the correct filename:
+                open(fd.get_temp_path(),'w').write(value.value)
+                dbh.insert('http_parameters',
+                       inode_id = inode_id,
+                       key = key,
+                       indirect = new_inode_id)                
+            else:
+                dbh.insert('http_parameters',
+                       inode_id = inode_id,
+                       key = key,
+                       value = value.value)
             
     def process_stream(self, stream, factories):
         """ We look for HTTP requests to identify the stream. This
@@ -397,7 +400,7 @@ class HTTPScanner(StreamScannerFactory):
 
             ## Create the VFS node:
             new_inode="%s|H%s:%s" % (combined_inode,offset,size)
-            
+
             try:
                 if 'chunked' in p.response['transfer-encoding']:
                     new_inode += "|c0"
@@ -420,11 +423,9 @@ class HTTPScanner(StreamScannerFactory):
 
 
             ## stream.ts_sec is already formatted in DB format
-            ## need to convert back to utc/gmt as paths are UTC
             timestamp =  stream.get_packet_ts(offset)
-            ds_timestamp = Time.convert(timestamp, case=self.case, evidence_tz="UTC")
             try:
-                date_str = ds_timestamp.split(" ")[0]
+                date_str = timestamp.split(" ")[0]
             except:
                 date_str = stream.ts_sec.split(" ")[0]
                 
@@ -455,7 +456,7 @@ class HTTPScanner(StreamScannerFactory):
             url = p.request.get("url")
             try:
                 date = p.response.get("date")
-                date = Time.parse(date, case=self.case, evidence_tz=None) 
+                date = self.parse_date_time_string(date)
             except (KeyError,ValueError):
                 date = 0
 
@@ -701,8 +702,6 @@ class BrowseHTTPRequests(Reports.report):
             )
 
 import plugins.Core as Core
-import pyflag.FileSystem as FileSystem
-
 class HTTPFile(Core.OffsetFile):
     """ A HTTP Object
 
@@ -711,7 +710,7 @@ class HTTPFile(Core.OffsetFile):
     """
     specifier = 'H'
     def __init__(self, case, fd, inode):
-        FileSystem.File.__init__(self, case, fd, inode)
+        Core.OffsetFile.__init__(self, case, fd, inode)
 
         ## We parse out the offset and length from the inode string
         tmp = inode.split('|')[-1]
@@ -724,8 +723,14 @@ class HTTPFile(Core.OffsetFile):
 
         try:
             self.size=int(tmp[1])
+            if self.size == 0: self.size=sys.maxint
         except IndexError:
             self.size=sys.maxint
+
+        try:
+            self.http_inode_id = int(tmp[2])
+        except IndexError:
+            self.http_inode_id = 0
 
         # crop size if it overflows IOsource
         # some iosources report size as 0 though, we must check or size will
@@ -733,8 +738,9 @@ class HTTPFile(Core.OffsetFile):
         if fd.size != 0 and self.size + self.offset > fd.size:
             self.size = fd.size - self.offset
 
+
     def make_tabs(self):
-        names, cbs = Core.OffsetFile.make_tabs(self)
+        names, cbs = self.fd.make_tabs()
         names.extend( ["HTTP"])
         cbs.extend([self.http])
 
@@ -746,15 +752,15 @@ class HTTPFile(Core.OffsetFile):
 
     def http(self, query, result):
         inode_id = query.get("inode_id", self.lookup_id())
-        if inode_id:
-            result.table(
-                elements = [ StringType('Property', 'key'),
-                             StringType('Value', 'value'),
-                             ],
-                table = 'http_parameters',
-                where = 'inode_id = %s' % inode_id,
-                case = query['case'],
-                )
+        result.table(
+            elements = [ StringType('Property', 'key'),
+                         StringType('Value', 'value'),
+                         ],
+            table = 'http_parameters',
+            where = 'inode_id = %s' % inode_id,
+            case = query['case'],
+            )
+
 
     def stats(self, query, result):
         ## Add some http stuff to it:

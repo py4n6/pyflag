@@ -76,14 +76,8 @@ AM_CONDITIONAL(HAVE_LIBJPEG, test "$have_libjpeg" = yes)
 
 # python checks 
 # (requires autoconf 1.5+ and the macros in acinclude.m4)
+AM_PATH_PYTHON([2.5])
 AC_PYTHON_DEVEL()
-AZ_PYTHON_WITH()
-AM_PATH_PYTHON()
-AZ_PYTHON_DEFAULT()
-AZ_PYTHON_INSIST()
-AZ_PYTHON_VERSION_ENSURE( [2.5] )
-AZ_PYTHON_CSPEC()
-AZ_PYTHON_LSPEC()
 
 AC_PYTHON_MODULE(MySQLdb, REQUIRED, [ You must install the python-mysql package ])
 AC_PYTHON_MODULE(pexpect, REQUIRED, [ You must install the python-pexpect package ])
@@ -106,18 +100,6 @@ AC_C_BIGENDIAN()
 
 # Large file support
 AC_SYS_LARGEFILE
-
-## Tell the use what we found:
-AC_MSG_NOTICE([])
-AC_MSG_NOTICE([*****************************************])
-AC_MSG_NOTICE([PyFlag ${PACKAGE} ${VERSION} configuration])
-AC_MSG_NOTICE([EWF Support:             $have_libewf ])
-AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
-AC_MSG_NOTICE([MaxMind GeoIP:           $have_geoip ])
-AC_MSG_NOTICE([Advanced JpegCarving:    $have_libjpeg ])
-AC_MSG_NOTICE([*****************************************])
-AC_MSG_NOTICE([])
-
 
 AC_OUTPUT([ 
 	Makefile 
@@ -151,3 +133,14 @@ AC_OUTPUT([
 	src/filesystems/sleuthkit/sleuthkit-2.52/tsk/fs/Makefile
 	src/filesystems/sleuthkit/sleuthkit-2.52/tsk/hashdb/Makefile
 	])
+
+## Tell the use what we found:
+AC_MSG_NOTICE([])
+AC_MSG_NOTICE([*****************************************])
+AC_MSG_NOTICE([PyFlag ${PACKAGE} ${VERSION} configuration])
+AC_MSG_NOTICE([EWF Support:             $have_libewf ])
+AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
+AC_MSG_NOTICE([MaxMind GeoIP:           $have_geoip ])
+AC_MSG_NOTICE([Advanced JpegCarving:    $have_libjpeg ])
+AC_MSG_NOTICE([*****************************************])
+AC_MSG_NOTICE([])
