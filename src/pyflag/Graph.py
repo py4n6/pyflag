@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -204,7 +203,7 @@ class Thumbnailer(Image):
 
         magic = Magic.MagicResolver()
         self.magic, self.content_type = magic.find_inode_magic(self.fd.case,
-                                                               inode_id = self.fd.lookup_id())
+                                                               inode_id = self.fd.inode_id)
 
         ## Now use the magic to dispatch the correct handler:
         ## Use the content type to access the thumbnail
@@ -226,7 +225,7 @@ class Thumbnailer(Image):
         """ Sets the thumbnail to a constant image """
         self.image = PIL.Image.open("%s/%s" % (config.IMAGEDIR,name))
         self.width, self.height = self.image.size
-        self.thumbnail = open("%s/%s" % (config.IMAGEDIR,name))
+        self.thumbnail = open("%s/%s" % (config.IMAGEDIR,name),'rb')
         self.content_type='image/png'
         
     def Unknown(self):

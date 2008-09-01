@@ -23,7 +23,7 @@
 import pyflag.conf
 config=pyflag.conf.ConfObject()
 from pyflag.Scanner import *
-import dissect,sys
+import dissect,sys, posixpath
 import struct,sys,cStringIO
 import pyflag.DB as DB
 from pyflag.FileSystem import File
@@ -36,6 +36,8 @@ import plugins.NetworkForensics.PCAPFS as PCAPFS
 import re,time,cgi,Cookie
 import TreeObj
 from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, guess_date
+import pyflag.Time as Time
+import pyflag.CacheManager as CacheManager
 
 def escape(uri):
     """ Make a filename from a URI by escaping / chars """
@@ -336,40 +338,51 @@ class HTTPScanner(StreamScannerFactory):
                            key = k,
                            value = C[k].value)
                 
-        except (KeyError, Cookie.CookieError): pass
+        except (KeyError, Cookie.CookieError):
+            pass
 
         result =cgi.FieldStorage(environ = env, fp = cStringIO.StringIO(body))
-        count = 1
-        for key in result:
-            ## Non printable keys are probably not keys at all.
-            if re.match("[^a-z0-9A-Z_]+",key): continue
-            value = result[key]
-            try:
-                value = value[0]
-            except: pass
+        self.count = 1
+        if type(result.value)==str:
+            class dummy:
+                value = result.value
+                filename = "body"
+                
+            self.process_parameter("body", dummy(), inode_id)
+        else:
+            for key in result:
+                self.process_parameter(key, result[key], inode_id)
 
-            ## Deal with potentially very large uploads:
-            if hasattr(value,'filename') and value.filename:
-                path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
-                ## This is not quite correct at the moment because the
-                ## mime VFS driver is unable to reconstruct the file
-                ## from scratch
-                new_inode = "m%s" % count
-                new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
-                                               value.filename,
-                                               size = len(value.value))
-                fd = self.fsfd.open(inode_id=new_inode_id)
-                ## dump the file to the correct filename:
-                open(fd.get_temp_path(),'w').write(value.value)
-                dbh.insert('http_parameters',
-                       inode_id = inode_id,
-                       key = key,
-                       indirect = new_inode_id)                
-            else:
-                dbh.insert('http_parameters',
-                       inode_id = inode_id,
-                       key = key,
-                       value = value.value)
+    def process_parameter(self, key, value, inode_id):
+        dbh = DB.DBO(self.case) 
+       ## Non printable keys are probably not keys at all.
+        if re.match("[^a-z0-9A-Z_]+",key): return
+        try:
+            value = value[0]
+        except: pass
+
+        ## Deal with potentially very large uploads:
+        if hasattr(value,'filename') and value.filename:
+            path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
+            ## This is not quite correct at the moment because the
+            ## mime VFS driver is unable to reconstruct the file
+            ## from scratch
+            new_inode = "m%s" % self.count
+            new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
+                                           value.filename,
+                                           size = len(value.value))
+            fd = self.fsfd.open(inode_id=new_inode_id)
+            ## dump the file to the correct filename:
+            CacheManager.MANAGER.create_cache_from_data(fd.case, fd.inode, value.value)
+            dbh.insert('http_parameters',
+                   inode_id = inode_id,
+                   key = key,
+                   indirect = new_inode_id)                
+        else:
+            dbh.insert('http_parameters',
+                   inode_id = inode_id,
+                   key = key,
+                   value = value.value)
             
     def process_stream(self, stream, factories):
         """ We look for HTTP requests to identify the stream. This
@@ -400,7 +413,7 @@ class HTTPScanner(StreamScannerFactory):
 
             ## Create the VFS node:
             new_inode="%s|H%s:%s" % (combined_inode,offset,size)
-
+            
             try:
                 if 'chunked' in p.response['transfer-encoding']:
                     new_inode += "|c0"
@@ -423,9 +436,11 @@ class HTTPScanner(StreamScannerFactory):
 
 
             ## stream.ts_sec is already formatted in DB format
+            ## need to convert back to utc/gmt as paths are UTC
             timestamp =  stream.get_packet_ts(offset)
+            ds_timestamp = Time.convert(timestamp, case=self.case, evidence_tz="UTC")
             try:
-                date_str = timestamp.split(" ")[0]
+                date_str = ds_timestamp.split(" ")[0]
             except:
                 date_str = stream.ts_sec.split(" ")[0]
                 
@@ -434,7 +449,7 @@ class HTTPScanner(StreamScannerFactory):
             ## Try to put the HTTP inodes at the mount point. FIXME:
             ## This should not be needed when a http stats viewer is
             ## written.
-            path=os.path.normpath(path+"/../../../../../")
+            path=posixpath.normpath(path+"/../../../../../")
 
             inode_id = self.fsfd.VFSCreate(None,new_inode,
                                            "%s/HTTP/%s/%s" % (path,date_str,
@@ -456,7 +471,7 @@ class HTTPScanner(StreamScannerFactory):
             url = p.request.get("url")
             try:
                 date = p.response.get("date")
-                date = self.parse_date_time_string(date)
+                date = Time.parse(date, case=self.case, evidence_tz=None) 
             except (KeyError,ValueError):
                 date = 0
 
@@ -785,13 +800,22 @@ class Chunked(File):
     """
     specifier = 'c'
 
-    def create_file(self,filename):
+    def __init__(self, case, fd, inode):
+        File.__init__(self, case, fd, inode)
+
+        self.cache()
+        
+    def read(self,length=None):
+        try:
+            return File.read(self, length)
+        except IOError: pass
+        
         delimiter="\r\n"
         
-        self.cached_fd = open(filename,'w')
         self.fd.seek(0)
         self.data = self.fd.read()
         self.size=0
+        result = ''
 
         while 1:
             end = self.data.find(delimiter)+len(delimiter)
@@ -804,35 +828,11 @@ class Chunked(File):
                 return
             
             if size==0: break
-            self.cached_fd.write(self.data[end:end+size])
+            result += self.data[end:end+size]
             self.size+=size
             self.data=self.data[end+size+len(delimiter):]
 
-        self.cached_fd.close()
-        
-    def __init__(self, case, fd, inode):
-        File.__init__(self, case, fd, inode)
-
-        self.filename = FlagFramework.get_temp_path(self.case,self.inode)
-
-        try:
-            self.cached_fd=open(self.filename,'r')
-        except IOError:
-            self.create_file(self.filename)
-            self.cached_fd=open(self.filename,'r')
-            
-
-    def seek(self,offset,whence=0):
-        self.cached_fd.seek(offset,whence)
-
-    def tell(self):
-        return self.cached_fd.tell()
-
-    def read(self,length=None):
-        if length==None:
-            length=self.size-self.tell()
-            
-        return self.cached_fd.read(length)
+        return result
 
 class HTTPTree(TreeObj.TreeObj):
     """ HTTP Requests can be thought of as forming a tree, relating

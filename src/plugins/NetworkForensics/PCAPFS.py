@@ -43,7 +43,7 @@ from NetworkScanner import *
 import pypcap
 import cStringIO
 from pyflag.ColumnTypes import StringType, IntegerType, TimestampType, InodeIDType, CounterType, BigIntegerType, ShortIntegerType, IPType
-
+import pyflag.CacheManager as CacheManager
 
 description = "Network Forensics"
 
@@ -122,39 +122,6 @@ class ConnectionDetailsTable(FlagFramework.CaseTable):
         [ TimestampType, dict(name='Timstamp', column='ts_sec')]
         ]
         
-class CachedWriter:
-    """ A class which caches data in memory and then flushes to disk
-    when ready. This does not tie up file descriptors.
-
-    FIXME: Stream reassembly typically uses lots of very small files -
-    this is inefficient in terms of storage and access speed. The
-    CachedWriter may be used to implement a kind of compound file.
-    """
-    def __init__(self, filename):
-        self.filename = filename
-        self.fd = cStringIO.StringIO()
-        self.offset = 0
-
-    def write_to_file(self):
-        ## Only write if we have data - so 0 length files will never
-        ## be written.
-        data = self.fd.getvalue()
-        if len(data)>0:
-            fd = open(self.filename,"a")
-            fd.write(data)
-            fd.close()
-            self.fd.truncate(0)
-        
-    def write(self, data):
-        self.fd.write(data)
-        self.offset += len(data)
-        
-        if self.fd.tell() > 100000:
-            self.write_to_file()
-
-    def __del__(self):
-        self.write_to_file()
-
 class PCAPFS(DBFS):
     """ This implements a simple filesystem for PCAP files.
     """
@@ -179,10 +146,9 @@ class PCAPFS(DBFS):
         ## incremental_loader is used because small files may be
         ## processed.
         pdbh = DB.DBO()
-        cookie = int(time.time())
-
         if scanners:
             scanner_string = ','.join(scanners)
+            cookie = int(time.time())
 
         def Callback(mode, packet, connection):
             """ This callback is called for each packet with the following modes:
@@ -238,10 +204,9 @@ class PCAPFS(DBFS):
                            )
 
                 ## This is where we write the data out
-                connection['data'] = CachedWriter(
-                    FlagFramework.get_temp_path(dbh.case,
-                                                "I%s|S%s" % (iosource_name, connection['inode_id']))
-                    )
+                connection['data'] = CacheManager.MANAGER.create_cache_fd(
+                    dbh.case,
+                    "I%s|S%s" % (iosource_name, connection['inode_id']))
 
                 if tcp.data_len > 0:
                     Callback('data', packet, connection)
@@ -441,12 +406,8 @@ class PCAPFile(File):
         self.private_dbh = dbh.clone()
         dbh.execute("select max(id) as max from pcap")
         row=dbh.fetch()
-        if row['max']:
-            self.size = row['max']
-        else:
-            self.size = 0
-        
-        self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap where id>%r" % int(self.size))
+        self.size = row['max']
+        self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap")
         self.iosource = fd
 
     def read(self,length=None):
@@ -458,14 +419,14 @@ class PCAPFile(File):
         ## Find out the offset in the file of the packet:
         row=self.private_dbh.fetch()
 
-        if not row:
-            self.readptr+=1
-            return '\x00'
-        
         ## Is this the row we were expecting?
         if row['id'] != self.readptr:
             self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap where id=%r", self.readptr)
             row=self.private_dbh.fetch()
+
+        if not row:
+            self.readptr+=1
+            return '\x00'
 
         self.packet_offset = row['offset']
         self.fd.seek(row['offset'])
@@ -601,8 +562,6 @@ class NetworkingSummary(Reports.report):
     """
     name = "Networking Summary"
     family = "Network Forensics"
-    ## Disabled for now, broken since 0.85
-    hidden = True
     
     def display(self,query,result):
     
@@ -653,3 +612,18 @@ class NetworkingSummary(Reports.report):
                 )
         except DB.DBError,args:
             result.para("No networking tables found, you probably haven't run the correct scanners: %s" % args)
+
+
+## UnitTests:
+import unittest
+import pyflag.pyflagsh as pyflagsh
+from pyflag.FileSystem import DBFS
+import pyflag.tests as tests
+
+class NetworkForensicTests(pyflag.tests.ScannerTest):
+    """ Tests network forensics """
+    test_case = "PyFlag Network Test Case"
+    test_file = "stdcapture_0.3.pcap.sgz"
+    subsystem = "SGZip"
+    fstype = 'PCAP Filesystem'
+        

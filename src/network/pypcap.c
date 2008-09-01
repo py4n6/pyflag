@@ -386,6 +386,8 @@ PyMODINIT_FUNC initpypcap(void) {
   m = Py_InitModule("pypcap", pypcapMethods);
   
   PyPCAPType.tp_new = PyType_GenericNew;
+  PyPCAPType.tp_iter = PyObject_SelfIter;
+
   if (PyType_Ready(&PyPCAPType) < 0)
     return;
   
@@ -393,7 +395,7 @@ PyMODINIT_FUNC initpypcap(void) {
   
   PyModule_AddObject(m, "PyPCAP", (PyObject *)&PyPCAPType);
 
-  // Init out network module
+  // Init our network module
   network_structs_init();
 
   // Do all the local import statements: FIXME: handle the case where

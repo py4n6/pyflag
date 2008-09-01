@@ -733,7 +733,7 @@ skfs_walk(skfs *self, PyObject *args, PyObject *kwds) {
     Py_DECREF(filekwds);
 
     if(ret == -1) {
-        Py_DECREF(iter);
+        Py_XDECREF(iter);
         return NULL;
     }
     return (PyObject *)iter;
@@ -928,7 +928,9 @@ static void
 skfs_walkiter_dealloc(skfs_walkiter *self) {
     //global_talloc_context = self->context;
 
-    Py_DECREF(self->skfs);
+    if(self->skfs)
+      Py_XDECREF(self->skfs);
+
     talloc_free(self->context);
     self->ob_type->tp_free((PyObject*)self);
 }
@@ -1576,6 +1578,8 @@ initsk(void)
 
     /* setup skfs_walkiter type */
     skfs_walkiterType.tp_new = PyType_GenericNew;
+    skfs_walkiterType.tp_iter = PyObject_SelfIter;
+
     if (PyType_Ready(&skfs_walkiterType) < 0)
         return;
 

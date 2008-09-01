@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -31,7 +30,7 @@
 
 The output within flag is abstracted such that it is possible to connect any GUI backend with any GUI Front end. This is done by use of UI objects. When a report runs, it will generate a UI object, which will be built during report execution. The report then returns the object to the calling framework which will know how to handle it. Therefore the report doesnt really know or care how the GUI is constructed """
 
-import re,cgi,types,os,time
+import re,cgi,types,os,time,posixpath
 import pyflag.FlagFramework as FlagFramework
 import pyflag.DB as DB
 from pyflag.DB import expand
@@ -303,7 +302,7 @@ class GenericUI:
                     def pane_cb(path,tmp):
                         fsfd = FileSystem.DBFS( query["case"])
                         if not fsfd.isdir(path):
-                            path=os.path.dirname(path)
+                            path=posixpath.dirname(path)
 
                         new_query = make_new_query(query, path + '/')
 
@@ -348,7 +347,7 @@ class GenericUI:
             result.heading(description)
             def left(path):
                 if os.path.basename(path)=='.': return
-                path=os.path.normpath(config.UPLOADDIR + '/' +path)
+                path=os.path.normpath(os.path.join(config.UPLOADDIR,path))
                 try:
                     for d in os.listdir(path):
                         if os.path.isdir(os.path.join(path,d)):
@@ -371,21 +370,18 @@ class GenericUI:
                 )""", tablename)
 
                 ## populate the table:
-                full_path=os.path.normpath(config.UPLOADDIR + '/' + path)
+                full_path=os.path.normpath(os.path.join(config.UPLOADDIR,path))
                 dbh.mass_insert_start(tablename)
                 ## List all the files in the directory:
                 try:
                     for d in os.listdir(full_path):
                         filename = os.path.join(path,d)
-                        full_filename = "%s/%s" % (config.UPLOADDIR, filename)
-                        try:
-                            if not os.path.isdir(full_filename):
-                                s = os.stat(full_filename)
-                                dbh.mass_insert(filename = filename,
-                                                _timestamp = "from_unixtime(%d)" % s.st_mtime,
-                                                size = s.st_size)
-                        except OSError:
-                            pass
+                        full_filename = "%s/%s" % (full_path, filename)
+                        if not os.path.isdir(full_filename):
+                            s = os.stat(full_filename)
+                            dbh.mass_insert(filename = filename,
+                                            _timestamp = "from_unixtime(%d)" % s.st_mtime,
+                                            size = s.st_size)
                     dbh.mass_insert_commit()
                 except OSError,e:
                     pass
@@ -410,8 +406,11 @@ class GenericUI:
                     )
 
                 ## Submit all the nodes in the display:
-                def submit_all(query,new_result):
-                    sql = result.renderer._make_sql(query)
+                def submit_all(query,result):
+                    sql = result._make_sql(elements = elements, filter_elements = elements,
+                                           table = tablename, case=case, filter=query.get('filter',''),
+                                           order = query.get('order',0))
+
                     dbh.execute(sql)
                     new_query = query.clone()
 #                    new_query.remove('callback_stored',self.callback)
@@ -420,7 +419,7 @@ class GenericUI:
                     for row in dbh:
                         new_query[name] = row['Filename']
 
-                    new_result.refresh(0,new_query, pane='parent')
+                    result.refresh(0,new_query, pane='parent')
 
                 result.toolbar(cb=submit_all, text="Submit all", icon='yes.png')
 
@@ -468,7 +467,7 @@ def _make_join_clause(total_elements):
     ## widget automatically.
     tables = []
     for e in total_elements:
-        if e.table and e.table not in tables: tables.append(e.table)
+        if e.table not in tables: tables.append(e.table)
 
     ## Now generate the join clause:
     query_str += " from %s " % tables[0]
@@ -574,10 +573,15 @@ class TableRenderer:
         """  This returns the total number of rows in this table - it
         could take a while which is why its a popup."""
         def count_cb(query, result):
-            sql = self._make_sql(query).split("from",1)[1]
+            try:
+                filter_str = query[self.filter]
+                sql = parser.parse_to_sql(filter_str, self.elements)
+            except KeyError:
+                sql = 1
 
             dbh=DB.DBO(self.case)
-            dbh.execute("select count(*) as total from " + sql)
+            dbh.execute("select count(*) as total from %s where (%s and %s)", (
+                self.table, self.where, sql))
             row=dbh.fetch()
             result.heading("Total rows")
             result.para("%s rows" % row['total'])

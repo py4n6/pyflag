@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Michael Cohen <scudette@users.sourceforge.net>
 #
@@ -689,7 +688,7 @@ translation = [ 0x47, 0xf1, 0xb4, 0xe6, 0x0b, 0x6a, 0x72, 0x48,
                 ]
 
 if __name__=="__main__":
-    fd=open(sys.argv[1],'r')
+    fd=open(sys.argv[1],'rb')
     b=Buffer(fd=fd)
     data = fd.read()
 #    out = ''.join([ chr(translation[ord(x)]) for x in data ])

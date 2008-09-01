@@ -29,13 +29,14 @@ import pyflag.DB as DB
 import pyflag.FileSystem as FileSystem
 from pyflag.FileSystem import File
 import pyflag.IO as IO
-from pyflag.FlagFramework import query_type, get_temp_path
+from pyflag.FlagFramework import query_type
 from NetworkScanner import *
 import struct,re,os
 import reassembler
 from pyflag.ColumnTypes import StringType, IntegerType, TimestampType
 from pyflag.ColumnTypes import InodeIDType, IPType, PCAPTime
 import pyflag.Reports as Reports
+import pyflag.CacheManager as CacheManager
 
 class DataType(StringType):
     hidden = True
@@ -116,7 +117,7 @@ class StreamFile(File):
         self.packet_list = None
 
     def make_tabs(self):
-        names, cbs = File.make_tabs(self)
+        names, cbs = self.fd.make_tabs()
 
         names.extend( [ "Show Packets", "Combined stream"])
         cbs.extend([ self.show_packets, self.combine_streams ])
@@ -150,19 +151,18 @@ class StreamFile(File):
         dbh = DB.DBO(self.case)
 
         ## This is a placeholder to reserve our inode_id
-        dbh.insert('inode', inode=self.inode, _fast=True)
+        dbh.insert('inode', inode=self.inode)
         self.inode_id = dbh.autoincrement()
-        dbh.delete('inode', where="inode_id=%s" % self.inode_id, _fast=True)
-        
+
         dbh2 = dbh.clone()
 
         ## These are the fds for individual streams
         fds = []
         for s in stream_ids:
             try:
-                filename = FlagFramework.get_temp_path(dbh.case,
-                                         "%s|S%s" % (self.fd.inode, s))
-                fds.append(open(filename))
+                fds.append(CacheManager.MANAGER.create_cache_fd(
+                    dbh.case,
+                    "%s|S%s" % (self.fd.inode, s)))
             except IOError,e:
                 fds.append(-1)
 
@@ -174,7 +174,7 @@ class StreamFile(File):
         initials = [ True,] * len(stream_ids)
 
         # The output file
-        out_fd = open(get_temp_path(dbh.case, self.inode),"w")
+        out_fd = CacheManager.MANAGER.create_cache_fd(dbh.case, self.inode)
 
         min_packet_id = sys.maxint
         
@@ -211,7 +211,6 @@ class StreamFile(File):
                 outfd_position = initial_len
 
             try:
-                #print "(Packet %s) Seeking to %s" % (row['packet_id'], outfd_position,),
                 out_fd.seek(outfd_position)
             except Exception,e:
                 print FlagFramework.get_bt_string(e)
@@ -220,9 +219,7 @@ class StreamFile(File):
             # Only try to write if there is a reverse file.
             if fds[index]>0:
                 fds[index].seek(row['cache_offset'])
-                data = fds[index].read(row['length'])
-                #print "Writing %s %r" % (row['length'],data)
-                out_fd.write(data)
+                out_fd.write(fds[index].read(row['length']))
 
             # Maintain the length of the file
             outfd_len = max(outfd_len, outfd_position+row['length'])
@@ -272,7 +269,7 @@ class StreamFile(File):
             metamtime=None
         
         ## Create VFS Entry 
-        self.inode_id = fsfd.VFSCreate(None, self.inode, pathname, size=outfd_len, mtime=metamtime, inode_id=self.inode_id)
+        self.inode_id = fsfd.VFSCreate(None, self.inode, pathname, size=outfd_len, mtime=metamtime)
         
         ##  We also now fill in the details for the combined stream in 
         ##  the connection_details table...
@@ -437,6 +434,6 @@ import pyflag.tests
 class NetworkForensicTests2(pyflag.tests.ScannerTest):
     """ Tests Reassembler with difficult to reassemble streams """
     test_case = "PyFlagTestCase"
-    test_file = "stdcapture_0.4.pcap.e01"
+    test_file = "stdcapture_0.4.pcap.E01"
     subsystem = "EWF"
     fstype = 'PCAP Filesystem'

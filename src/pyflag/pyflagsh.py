@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Michael Cohen <scudette@users.sourceforge.net>
 # David Collett <daveco@users.sourceforge.net>
 # Gavin Jackson <gavz@users.sourceforge.net>
@@ -22,14 +21,8 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 """ An interactive shell for examining file systems loaded into flag """
-try:
-    import readline
 
-    readline.parse_and_bind("tab: complete")
-except ImportError:
-    pass
-
-import sys
+import readline,sys
 import pyflag.DB as DB
 import pyflag.IO as IO
 import shlex,os,os.path,re,fnmatch
@@ -41,6 +34,8 @@ import pyflag.conf
 config = pyflag.conf.ConfObject()
 import pyflag.FileSystem as FileSystem
 import pyflag.Reports as Reports
+
+readline.parse_and_bind("tab: complete")
 
 class ParserException(Exception):
     """ Exception thrown by the parser when we cant parse the line """
@@ -118,7 +113,7 @@ class command_parse:
             command=Registry.SHELL_COMMANDS[args[0]](args[1:],env=self.environment)
             return command.execute()
         except KeyError:
-            raise ParserException("No such command (%s)" % args[0])
+            raise ParserException("No such command %s" % args[0])
 
 def escape(string):
     """ Escapes spaces in the string """
@@ -182,7 +177,7 @@ def process_line(line):
 
             ## If the output is short enough to fit on the screen,
             ## just print it there, otherwise pipe it to less.
-            if len(lines)<20:
+            if len(lines)<20 or config.command_file != None:
                 print "\n".join(lines)
             else:
                 ## FIXME: we should set a config parameter for pager.
@@ -255,18 +250,21 @@ if __name__ == "__main__":
     UI.UI = TEXTUI.TEXTUI
 
     ## Handle a history file
-    histfile = os.path.join(os.environ["HOME"], ".flashhist")
+    histfile = os.path.join(os.environ.get("HOME",'.'), ".flashhist")
     try:
         readline.read_history_file(histfile)
-    except IOError:
+    except (IOError,NameError):
         pass
+
     import atexit
 
-    atexit.register(readline.write_history_file, histfile)
-    atexit.register(FlagFramework.post_event, 'exit', config.FLAGDB)
+    try:
+        atexit.register(readline.write_history_file, histfile)
+        readline.set_completer(completer)
+        readline.set_completer_delims(' \t\n/=+\'"')
+    except NameError: pass
     
-    readline.set_completer(completer)
-    readline.set_completer_delims(' \t\n/=+\'"')
+    atexit.register(FlagFramework.post_event, 'exit', config.FLAGDB)
     
     env=environment()
     parser=command_parse(env)
@@ -309,8 +307,6 @@ if __name__ == "__main__":
                 sys.exit(0)
             except KeyboardInterrupt:
                 print "\nInterrupted"
-            except ParserException, e:
-                print "Problem parsing the previous line: %s" % e
             except Exception,e:
                 print isinstance(e,ParserException)
                 print "Unknown error: %r %s" % (e,e)

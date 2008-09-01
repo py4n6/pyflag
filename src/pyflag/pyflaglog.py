@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Michael Cohen <scudette@users.sourceforge.net>
 # David Collett <daveco@users.sourceforge.net>
 #
@@ -116,7 +115,7 @@ def start_log_thread():
 def log(level,message, *args):
     """ Prints the message out only if the configured verbosity is higher than the message's level."""
     try:
-        log_fd = open(config.LOGFILE,"a")
+        log_fd = open(config.LOGFILE,"ab")
     except:
         log_fd = sys.stderr
 

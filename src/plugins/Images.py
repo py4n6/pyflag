@@ -4,7 +4,7 @@ import pyflag.IO as IO
 import pyflag.DB as DB
 from FlagFramework import query_type
 import pyflag.FlagFramework as FlagFramework
-import sk,re,os,os.path
+import sk,re,os,os.path,posixpath
 import pyflag.conf
 config=pyflag.conf.ConfObject()
 import bisect
@@ -147,8 +147,8 @@ class Standard(IO.Image):
         for f in filenames:
             ## Ignore files which are urls
             if re.match("[^:]+://",f): return filenames
-            
-            if not f.startswith(config.UPLOADDIR):
+
+            if not f.startswith(posixpath.normpath(config.UPLOADDIR)):
                 f = "%s/%s" % (config.UPLOADDIR,f)
 
             if config.FOLLOW_SYMLINKS:
@@ -165,10 +165,10 @@ class Standard(IO.Image):
                 try:
                     link_f = os.readlink(f)
                     if not link_f.startswith("/"):
-                        f = os.path.join(os.path.dirname(f), link_f)
+                        f = posixpath.join(posixpath.dirname(f), link_f)
                     else:
                         f = link_f
-                except OSError:
+                except (OSError, AttributeError):
                     pass
 
             ## If the filename we were provided with, ends with a
@@ -182,7 +182,6 @@ class Standard(IO.Image):
                     if new_f.startswith(base) and filename_re.match(new_f):
                         globbed_filenames.append(os.path.join(dirname, new_f))
     
-
                 if not globbed_filenames:
                     raise IOError("Unable to find file %s" % f)
 
@@ -266,7 +265,7 @@ class EWF(Standard):
         filenames = self.glob_filenames(query.getarray('filename'))
         print "Openning ewf file %s" % (filenames,)
         fd = pyewf.open(filenames)            
-        return OffsettedFDFile((fd,), offset)
+        return OffsettedFDFile(fd, offset)
 
 class AFF(Standard):
     """ Advanced Forensics Format, an open format for storage of forensic
@@ -295,8 +294,15 @@ except ImportError:
     EWF = error
 
 import pyflag.tests as tests
+class AdvancedTest(tests.ScannerTest):
+    """ Test basic performance of Advanced IO Source """
+    test_case = "PyFlagTestCase"
+    test_file = "split/test_image.1"
+    subsystem = "Standard"
+    offset = "16128s"
+    
 class AdvancedTest2(tests.FDTest):
-    """ Test basic performance of Split IO Source """
+    """ Test basic performance of Advanced IO Source """
     def setUp(self):
         self.fd = OffsettedFile(["split/test_image.00",
                                  "split/test_image.01",

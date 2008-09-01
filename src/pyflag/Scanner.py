@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -45,6 +44,7 @@ import pyflag.DB as DB
 import pyflag.FlagFramework as FlagFramework
 import fnmatch
 import ScannerUtils
+import pyflag.CacheManager as CacheManager
 
 class BaseScanner:
     """ This is the actual scanner class that will be instanitated once for each file in the filesystem.
@@ -179,7 +179,7 @@ class GenScanFactory:
         path = path_glob
         if not path.endswith("*"): path = path + "*"  
         db = DB.DBO(self.case)
-        db.execute("update inode join file on file.inode = inode.inode set scanner_cache = REPLACE(scanner_cache, %r, '') where file.path rlike %r",(self.__class__.__name__, fnmatch.translate(path)))
+        db.execute("update inode join file on file.inode = inode.inode set scanner_cache = REPLACE(scanner_cache, %r, '') where file.path rlike %r" % (self.__class__.__name__, fnmatch.translate(path)))
         
     ## Relative order of scanners - Higher numbers come later in the order
     order=10
@@ -266,7 +266,7 @@ class StoreAndScan(BaseScanner):
 
         Where $inode is the filename in the filesystem.
         """
-        return FlagFramework.get_temp_path(self.case, self.inode)
+        return CacheManager.MANAGER.get_temp_path(self.case, self.inode)
 
     def finish(self):
         if not self.boring_status:
@@ -276,7 +276,7 @@ class StoreAndScan(BaseScanner):
             except: pass
             
             ## Reopen the file to read
-            fd = open(self.name,'r')
+            fd = open(self.name,'rb')
             self.external_process(fd)
             fd.close()
 
@@ -448,7 +448,7 @@ def scanfile(ddfs,fd,factories):
 
             ## If there are not enough blocks to do a reasonable chunk of the file, we skip them as well...
             if c>0 and c*fd.block_size<fd.size:
-                pyflaglog.log(pyflaglog.WARNING, "Skipping inode %s because there are not enough blocks %s < %s", fd.inode,c*fd.block_size,fd.size)
+                pyflaglog.log(pyflaglog.WARNING,"Skipping inode %s because there are not enough blocks %s < %s" % (fd.inode,c*fd.block_size,fd.size))
                 return
 
         except AttributeError:

@@ -155,20 +155,12 @@ class OffsetFile(FileSystem.File):
         if fd.size != 0 and self.size + self.offset > fd.size:
             self.size = fd.size - self.offset
 
-    def seek(self,offset,whence=0):
-        if whence==2:
-            self.readptr=self.size+offset
-        elif whence==1:
-            self.readptr+=offset
-        else:
-            self.readptr=offset
-
-        self.fd.seek(self.offset + self.readptr)
-
-    def tell(self):
-        return self.readptr
-    
     def read(self,length=None):
+        try:
+            return FileSystem.File.read(self,length)
+        except IOError:
+            pass
+
         available = self.size - self.readptr
         if length==None:
             length=available
@@ -186,10 +178,8 @@ class OffsetFile(FileSystem.File):
     def explain(self, query, result):
         self.fd.explain(query,result)
 
-        print self.offset, self.size
-
         if self.size > 0:
-            extract = "Extract %s bytes starting at byte %s" % (self.size,
+            extract = "Extract %s bytes starting at byte %s" % (self.size - self.offset,
                                                                 self.offset)
         else:
             extract = 'Extract %s bytes after end of file'\
@@ -208,7 +198,7 @@ class Help(Reports.report):
         result.textfield("Topic",'topic')
     
     def display(self,query,result):
-        fd=open("%s/%s.html" % (config.DATADIR, os.path.normpath(query['topic'])))
+        fd=open("%s/%s.html" % (config.DATADIR, os.path.normpath(query['topic'])),'rb')
         result.result+=fd.read()
         result.decoration='naked'
 
@@ -469,8 +459,6 @@ class CaseDBInit(FlagFramework.EventHandler):
         ## Make sure that the schema conforms
         dbh = DB.DBO()
         dbh.execute("select value from meta where property='flag_db'")
-        DB.check_column_in_table(None, 'sql_cache', 'status',
-                                 'enum("progress","dirty","cached")')
         for row in dbh:
             try:
                 DB.check_column_in_table(row['value'], 'sql_cache', 'status',
