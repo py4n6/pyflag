@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Michael Cohen <scudette@users.sourceforge.net>
 #
 # ******************************************************
@@ -48,12 +47,14 @@ class FDTest(unittest.TestCase):
     def test02ReadingTests(self):
         """ Test reading ranges """
         ## Note we assume the file is at least 100 bytes long...
+        self.fd.seek(0)
         data = self.fd.read(100)
         self.assertEqual(len(data),100, "Data length read does not agree with read - or file too short?")
         self.assertEqual(self.fd.tell(),100, "Seek after read does not agree")
 
         ## Check seeking and reading:
         self.fd.seek(50,0)
+        self.assertEqual(self.fd.tell(), 50)
         self.assertEqual(data[50:], self.fd.read(50), "Seek and read does not agree")
 
     def test03SeekingTests(self):
@@ -105,8 +106,7 @@ class ScannerTest(unittest.TestCase):
                                    "TZ=%s" % self.TZ
                                    ])
 
-        if self.fstype:
-            pyflagsh.shell_execv(command="execute",
+        pyflagsh.shell_execv(command="execute",
                              argv=["Load Data.Load Filesystem image",'case=%s' % self.test_case,
                                    "iosource=test",
                                    "fstype=%s" % self.fstype,

@@ -622,6 +622,7 @@ class File:
 
     def look_for_cached(self):
         ## Now we check to see if there is a cached copy of the file for us:
+
         try:
             ## open the previously cached copy
             self.cached_fd = CacheManager.MANAGER.open(self.case, self.inode)
@@ -665,7 +666,7 @@ class File:
         self.readptr = readptr
 
         ## Close our parent fd:
-        self.fd.close()
+        #self.fd.close()
 
         return self.size
 
@@ -716,7 +717,7 @@ class File:
 
         try:
             self.cached_fd.seek(self.readptr)
-        except AttributeError:
+        except AttributeError,e:
             pass
 
         return self.readptr
