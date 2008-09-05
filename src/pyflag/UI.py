@@ -347,7 +347,7 @@ class GenericUI:
             result.heading(description)
             def left(path):
                 if os.path.basename(path)=='.': return
-                path=os.path.normpath(os.path.join(config.UPLOADDIR,path))
+                path=FlagFramework.sane_join(config.UPLOADDIR,path)
                 try:
                     for d in os.listdir(path):
                         if os.path.isdir(os.path.join(path,d)):
@@ -370,13 +370,14 @@ class GenericUI:
                 )""", tablename)
 
                 ## populate the table:
-                full_path=os.path.normpath(os.path.join(config.UPLOADDIR,path))
+                full_path=FlagFramework.sane_join(config.UPLOADDIR,path)
+
                 dbh.mass_insert_start(tablename)
                 ## List all the files in the directory:
                 try:
                     for d in os.listdir(full_path):
-                        filename = os.path.join(path,d)
-                        full_filename = os.path.join(config.UPLOADDIR, filename)
+                        filename = FlagFramework.sane_join(path,d)
+                        full_filename = FlagFramework.sane_join(config.UPLOADDIR, filename)
                         if not os.path.isdir(full_filename):
                             s = os.stat(full_filename)
                             dbh.mass_insert(filename = filename,

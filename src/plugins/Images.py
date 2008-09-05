@@ -148,8 +148,8 @@ class Standard(IO.Image):
             ## Ignore files which are urls
             if re.match("[^:]+://",f): return filenames
 
-            if not f.startswith(posixpath.normpath(config.UPLOADDIR)):
-                f = os.path.join(config.UPLOADDIR,f)
+            if not f.startswith(os.path.normpath(config.UPLOADDIR)):
+                f = FlagFramework.sane_join(config.UPLOADDIR,f)
 
             if config.FOLLOW_SYMLINKS:
                 ## Is it a symlink? This allows us to symlink to a
@@ -180,7 +180,7 @@ class Standard(IO.Image):
                 dirname , base = os.path.split(m.group(1))
                 for new_f in os.listdir(dirname):
                     if new_f.startswith(base) and filename_re.match(new_f):
-                        globbed_filenames.append(os.path.join(dirname, new_f))
+                        globbed_filenames.append(FlagFramework.sane_join(dirname, new_f))
     
                 if not globbed_filenames:
                     raise IOError("Unable to find file %s" % f)
@@ -294,15 +294,8 @@ except ImportError:
     EWF = error
 
 import pyflag.tests as tests
-class AdvancedTest(tests.ScannerTest):
-    """ Test basic performance of Advanced IO Source """
-    test_case = "PyFlagTestCase"
-    test_file = "split/test_image.1"
-    subsystem = "Standard"
-    offset = "16128s"
-    
 class AdvancedTest2(tests.FDTest):
-    """ Test basic performance of Advanced IO Source """
+    """ Test basic performance of Split IO Source """
     def setUp(self):
         self.fd = OffsettedFile(["split/test_image.00",
                                  "split/test_image.01",

@@ -21,15 +21,8 @@ active = True
 
 try:
     ## Include volatility in the python path here (We only support Volatility 1.3):
-    volatility_path = None
-    for d in os.listdir(os.path.dirname(__file__)):
-        if d.startswith("Volatility-1.3"):
-            volatility_path = os.path.join(os.path.dirname(__file__),d)
-            
-    ## We need to make sure that we get in before an older version
-    if volatility_path and volatility_path not in sys.path:
-        sys.path.insert(0,volatility_path)
-
+    import VolatilityCommon
+    
     from vtypes import xpsp2types as types
     from vsyms import *
     #from forensics.win32.tasks import find_dtb
@@ -83,7 +76,7 @@ try:
 ## Switch ourselves off if volatility is not there
 except ImportError,e:
     active = False
-    pyflaglog.log(pyflaglog.INFO, "Download and unpack Volatility1.3 in %s for memory foreniscs" % os.path.dirname(__file__))
+    pyflaglog.log(pyflaglog.INFO, "Download and unpack Volatility1.3 in %s for Linux Memory foreniscs (%s)" % (os.path.dirname(__file__), e))
 
 ## These are all kind of tables we need for memory forensics
 class ProcessTypeSet(StateType):
@@ -361,14 +354,13 @@ class LinuxMemory(FileSystem.DBFS):
                 total_vm = (total_vm * PAGESIZE)/1024 
 
                 args = dict(pid = task.pid,
-                            task_name = comm,
-                            ppid = parent_pid,
-                            uid = task.uid,
-                            offset = task.offset,
-                            state = task_state,
-                            vsz = total_vm,
-                            rss = rss,
-                            )
+                              ppid = parent_pid,
+                              uid = task.uid,
+                              offset = task.offset,
+                              state = task_state,
+                              vsz = total_vm,
+                              rss = rss,
+                              )
 
                 inode_id = self.VFSCreate(None,
                                           "I%s|Vbin%s" % (self.iosource_name,
@@ -544,14 +536,14 @@ class ProcessReport(Reports.CaseTableReports):
     name = "View Processes"
     family = "Memory Forensics"
     default_table = "ProcessTable"
-    columns = [ "Inode", "Process ID", "Task Name", "Offset",
+    columns = [ "Inode", "Process ID", "Offset",
                "User ID", "State"]
 
 class OpenFileReport(ProcessReport):
     """ View all open files by processes """
     name = "View Open Files"
     default_table = "OpenFileTable"
-    columns = [ "Inode", "Fd", "File Struct", "Dentry", "Inode Struct",
+    columns = [ "Inode", "Fd", "File Struct", "Dentry", "Inode Struct", "File Type",
                "Path"]
 
 class OpenSocketsReport(ProcessReport):
