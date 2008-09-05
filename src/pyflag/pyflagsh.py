@@ -21,8 +21,17 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 """ An interactive shell for examining file systems loaded into flag """
+import sys
+sys.path.append("..")
 
-import readline,sys
+try:
+    import readline
+
+    readline.parse_and_bind("tab: complete")
+except ImportError:
+    pass
+
+import sys
 import pyflag.DB as DB
 import pyflag.IO as IO
 import shlex,os,os.path,re,fnmatch
@@ -34,8 +43,6 @@ import pyflag.conf
 config = pyflag.conf.ConfObject()
 import pyflag.FileSystem as FileSystem
 import pyflag.Reports as Reports
-
-readline.parse_and_bind("tab: complete")
 
 class ParserException(Exception):
     """ Exception thrown by the parser when we cant parse the line """

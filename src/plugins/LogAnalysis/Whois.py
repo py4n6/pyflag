@@ -76,7 +76,7 @@ WHOIS_CACHE = Store.Store()
 ## Try for the GeoIP City Stuff....
 
 try:
-    from geoip import GeoIP, GEOIP_CITY_EDITION_REV1, GEOIP_ORG_EDITION, GEOIP_ISP_EDITION
+    from geoip import GeoIP, GEOIP_CITY_EDITION_REV1, GEOIP_ORG_EDITION
 
     try:
         gi_resolver = GeoIP(config.GEOIPDIR + "/GeoIPCity.dat", 
@@ -91,7 +91,7 @@ try:
     ## Now try for the GeoIPISP
     try:
         gi_isp_resolver = GeoIP(config.GEOIPDIR + "/GeoIPISP.dat",\
-                                GEOIP_ISP_EDITION)
+                                GEOIP_ORG_EDITION)
     except IOError:
         gi_isp_resolver = None
 
@@ -130,11 +130,11 @@ def get_all_geoip_data(ip):
     except (KeyError,AttributeError): pass
 
     try:
-        result.update({"org":gi_org_resolver.org_by_addr(ip)})
+        result.update(gi_org_resolver.org_by_addr(ip))
     except (KeyError,AttributeError): pass
 
     try:
-        result.update({"isp":gi_isp_resolver.org_by_addr(ip)})
+        result.update(gi_isp_resolver.org_by_addr(ip))
     except (KeyError,AttributeError): pass
 
     return result
@@ -426,20 +426,17 @@ class LookupWhoisID(LookupIP):
 
 class WhoisInit(FlagFramework.EventHandler):
     def startup(self):
-        try:
-            dbh = DB.DBO()
-            dbh.check_index("whois_routes","netmask")
-            dbh.check_index("whois_routes","network")
-        except:
-            pass
+        dbh = DB.DBO()
+        dbh.check_index("whois_routes","netmask")
+        dbh.check_index("whois_routes","network")
 
     def init_default_db(self, dbh, case):
         dbh.execute("""CREATE TABLE `whois` (
         `id` int(11) NOT NULL,
         `src_id` int(11) default NULL,
         `start_ip` int(10) unsigned default NULL,
-        `netname` varchar(255) default NULL,
-        `numhosts` int(11) unsigned default NULL,
+        `netname` varchar(50) default NULL,
+        `numhosts` int(11) default NULL,
         `country` char(2) default NULL,
         `adminc` varchar(50) default NULL,
         `techc` varchar(50) default NULL,
@@ -492,8 +489,8 @@ class WhoisInit(FlagFramework.EventHandler):
 
         dbh.execute("""CREATE TABLE `geoip_country` (
         `id` int(11) unsigned NOT NULL auto_increment,
-        `country` char(3) NOT NULL UNIQUE,
-        `country2` char(3) NOT NULL UNIQUE,
+        `country` char(3) NOT NULL UNIQUE default('--'),
+        `country2` char(3) NOT NULL UNIQUE default('--'),
         PRIMARY KEY (`id`),
         UNIQUE KEY (`country`)
         ) engine = MyISAM""")
