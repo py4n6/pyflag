@@ -70,7 +70,8 @@ try:
 
     ## Volatility comes with memory maps and profiles - we need to know
     ## where they are:
-    config.add_option("memory_profile_dir", default=volatility_path + "/profiles",
+    config.add_option("memory_profile_dir", default=VolatilityCommon.volatility_path + \
+                      "/profiles",
                       help = "Directory that contains all volatility profiles.")
 
 ## Switch ourselves off if volatility is not there
@@ -354,13 +355,14 @@ class LinuxMemory(FileSystem.DBFS):
                 total_vm = (total_vm * PAGESIZE)/1024 
 
                 args = dict(pid = task.pid,
-                              ppid = parent_pid,
-                              uid = task.uid,
-                              offset = task.offset,
-                              state = task_state,
-                              vsz = total_vm,
-                              rss = rss,
-                              )
+                            task_name = comm,
+                            ppid = parent_pid,
+                            uid = task.uid,
+                            offset = task.offset,
+                            state = task_state,
+                            vsz = total_vm,
+                            rss = rss,
+                            )
 
                 inode_id = self.VFSCreate(None,
                                           "I%s|Vbin%s" % (self.iosource_name,
@@ -536,14 +538,14 @@ class ProcessReport(Reports.CaseTableReports):
     name = "View Processes"
     family = "Memory Forensics"
     default_table = "ProcessTable"
-    columns = [ "Inode", "Process ID", "Offset",
+    columns = [ "Inode", "Process ID", "Task Name", "Offset",
                "User ID", "State"]
 
 class OpenFileReport(ProcessReport):
     """ View all open files by processes """
     name = "View Open Files"
     default_table = "OpenFileTable"
-    columns = [ "Inode", "Fd", "File Struct", "Dentry", "Inode Struct", "File Type",
+    columns = [ "Inode", "Fd", "File Struct", "Dentry", "Inode Struct",
                "Path"]
 
 class OpenSocketsReport(ProcessReport):
