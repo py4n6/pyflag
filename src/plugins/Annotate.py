@@ -33,17 +33,28 @@ import pyflag.DB as DB
 import pyflag.TableObj as TableObj
 import pyflag.TableActions as TableActions
 
+class AnnotatedInode(FlagFramework.CaseTable):
+    """ Annotation table - Annotates and categorizes Inodes """
+    name = 'annotate'
+    columns = [ [InodeIDType, {} ],
+                [StringType, dict(name = 'Note', column='note')],
+                [StringType, dict(name = 'Category', column='category')],
+                [IntegerType, dict(name = 'ID', column='id', auto_increment=True)],
+                ]
+
+    primary = 'id'
+
 class AnnotationCaseInit(FlagFramework.EventHandler):
     """ A handler for initialising the annotation framework """
     
     def create(self, case_dbh, case):
-        case_dbh.execute("""CREATE TABLE if not exists `annotate` (
-        `id` INT(11) not null auto_increment,
-        `inode_id` int not null,
-        `note` TEXT,
-        `category` VARCHAR( 250 ) NOT NULL default 'Note',
-        PRIMARY KEY(`id`)
-        )""")        
+        #case_dbh.execute("""CREATE TABLE if not exists `annotate` (
+        #`id` INT(11) not null auto_increment,
+        #`inode_id` int not null,
+        #`note` TEXT,
+        #`category` VARCHAR( 250 ) NOT NULL default 'Note',
+        #PRIMARY KEY(`id`)
+        #)""")        
 
         case_dbh.execute("""CREATE TABLE if not exists `timeline` (
         `id` INT(11) not null auto_increment,
@@ -270,7 +281,7 @@ def render_annotate_inode_id(self, inode_id, row, result):
         value1="..%s" % inode[-13:]
     else:
         value1 = inode
-    tmp2.link(value1, tooltip = inode, target=link)
+    tmp2.link(value1, tooltip = inode, target=link, pane="new")
     result.row(tmp1,tmp2)
 
 def operator_annotated(self, column, operator, pattern):

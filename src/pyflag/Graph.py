@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -203,7 +204,7 @@ class Thumbnailer(Image):
 
         magic = Magic.MagicResolver()
         self.magic, self.content_type = magic.find_inode_magic(self.fd.case,
-                                                               inode_id = self.fd.inode_id)
+                                                               inode_id = self.fd.lookup_id())
 
         ## Now use the magic to dispatch the correct handler:
         ## Use the content type to access the thumbnail
@@ -271,7 +272,6 @@ class Thumbnailer(Image):
         """ Handles Jpeg thumbnails.
         """
         ## Calculate some basic statistics
-        print "Building thumbnail"
         self.fd.seek(0)
         fd = cStringIO.StringIO(self.fd.read(2000000) + "\xff\xd9")
 
@@ -287,11 +287,15 @@ class Thumbnailer(Image):
         self.width, self.height = self.image.size
         self.owidth, self.oheight = self.image.size
 
-        ratio = float(self.width)/float(self.height)
+        ## Calculate the ratio
+        if self.width > self.height:
+            dimensions = ( self.size_x, int(self.size_x * self.height / self.width))
+        else:
+            dimensions = ( int(self.size_x * self.width / self.height), self.size_x)
 
         self.thumbnail = cStringIO.StringIO()
         try:
-            self.image.thumbnail((self.size_x,int(self.size_x / ratio)), PIL.Image.NEAREST)
+            self.image.thumbnail(dimensions, PIL.Image.NEAREST)
         except Exception,e:
             print e
 

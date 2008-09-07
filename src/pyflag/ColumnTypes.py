@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -43,6 +44,7 @@ import pyflag.Time as Time
 import time, textwrap
 import pyflag.Registry as Registry
 import re,struct, textwrap
+import pyflag.TableActions as TableActions
 
 class date_obj:
     format = "%Y-%m-%d %H:%M:%S"
@@ -182,6 +184,8 @@ class ColumnType:
         self.table = table
         self.case = case
         self.default = default
+        for k,v in kwargs.items():
+            setattr(self, k, v)
         
     ## These are the symbols which will be treated literally
     symbols = {
@@ -419,7 +423,7 @@ class StateType(ColumnType):
     hidden = True
     states = {}
     symbols = {
-        '=': 'is'
+        '=': 'equal'
         }
 
     def __init__(self, *args, **kwargs):
@@ -428,17 +432,20 @@ class StateType(ColumnType):
         self.tests = [ [ "is" ,"foobar", True ],
                        [ "is" , self.states.keys()[0], False],
                        ]
+        self.states_rev = {}
+        for k,v in self.states.items():
+            self.states_rev[v]=k
 
     def code_is(self, column, operator, state):
         for k,v in self.states.items():
-            if state.lower()==k:
+            if state.lower()==k.lower():
                 return lambda row: row[self.column] == v
 
         raise RuntimeError("Dont understand state %r. Valid states are %s" % (state,self.states.keys()))
         
     def operator_is(self, column, operator, state):
         for k,v in self.states.items():
-            if state.lower()==k:
+            if state.lower()==k.lower():
                 return DB.expand("%s = %r" ,(self.escape_column_name(self.column), v))
 
         raise RuntimeError("Dont understand state %r. Valid states are %s" % (state,self.states.keys()))
@@ -446,6 +453,14 @@ class StateType(ColumnType):
     def create(self):
         return DB.expand("`%s` enum(%s) default NULL" ,
                          (self.column, ','.join([ DB.expand("%r",x) for x in self.states.values()])))
+
+    def plain_display_hook(self, value, row, result):
+        try:
+            result.text(self.states_rev[value])
+        except KeyError:
+            result.text(value)
+
+    display_hooks = [ plain_display_hook, ColumnType.link_display_hook]
 
 class SetType(ColumnType):
     """ This can hold a number of different items simultaneously """
@@ -479,9 +494,13 @@ class IntegerType(ColumnType, LogParserMixin):
         integer = int(arg)
         return lambda row: int(row[self.column]) == integer
 
+    auto_increment = False
+    
     def create(self):
         if self.default!=None:
             return "`%s` int(11) not null default %s" % (self.column, self.default)
+        elif self.auto_increment:
+            return "`%s` int(11) not null auto_increment" % self.column
         else:
             return "`%s` int(11)" % self.column
 
@@ -725,7 +744,7 @@ class TimestampType(IntegerType):
         defaults.append(['format', 'Format String', "%d/%b/%Y %H:%M:%S"])
 
 class PCAPTime(TimestampType):
-    symbols = {}
+    symbols = {'=':'equal'}
     LogCompatible = False
     
     def select(self):
@@ -748,9 +767,15 @@ class PCAPTime(TimestampType):
         id = dbh.fetch()['id']
         return "%s < '%s'" % (self.escape_column_name(self.column), id)
      
-    # TODO: literal/equal not implemented yet, have to take care of ordering based
-    # on the type of operator etc.
-
+    # FIXME: I'm not sure this is the correct thing to do here
+    # may not scale well, seems to work though
+    def operator_equal(self, column, operator, arg):
+        date_arg = guess_date(arg)
+        dbh = DB.DBO(self.case)
+        dbh.execute("select id from pcap where ts_sec = '%s'" % (date_arg))
+        ids = [ str(row['id']) for row in dbh ]
+        return "%s in (%s)" % (self.escape_column_name(self.column), ",".join(ids))
+ 
 class IPType(ColumnType, LogParserMixin):
     """ Handles creating appropriate IP address ranges from a CIDR specification. """    
     ## Code and ideas were borrowed from Christos TZOTZIOY Georgiouv ipv4.py:
@@ -803,7 +828,7 @@ class IPType(ColumnType, LogParserMixin):
             raise RuntimeError("You specified a netmask range for an = comparison. You should probably use the netmask operator instead")
         return "%s = '%s'" % (self.escape_column_name(self.column), numeric_address)
 
-    def literal(self, column, operator, address):
+    def operator_literal(self, column, operator, address):
         return DB.expand("%s %s INET_ATON(%r)" ,
                          (self.escape_column_name(self.column), operator, address))
 
@@ -929,18 +954,54 @@ class InodeIDType(IntegerType):
             next_row = dbh.fetch()
             fsfd = FileSystem.DBFS(self.case)
             inode_id = row[self.name]
+            dbh.execute("select * from annotate where inode_id = %r limit 1",
+                        inode_id)
+            row2 = dbh.fetch()
 
             query.set('inode_id', inode_id)
+            query.default("mode", "Summary")
             report.display(query, result)
 
-            annotate = query.get('annotate','no')
-            
-            if annotate == 'yes':
-                query.set('annotate','no')
-                result.toolbar(icon='no.png', link = query, pane = 'pane')
-            else:
+            ## What should we do now - we basically set the type of
+            ## toolbar to show
+            action = "activate"
+
+            if query.has_key('annotate'):
+                dbh = DB.DBO(self.case)
+                ## We always do a delete in case there was a row there
+                dbh.delete('annotate',
+                           where = 'inode_id = %s' % inode_id,)
+
+                ## Then we do an insert to set the new value
+                if query['annotate'] == 'yes':
+                    category = query.get("new_annotate_category")
+                    if not category:
+                        category = query.get("annotate_category","Note")
+
+                    query.set("annotate_category",category)
+                    query.clear("new_annotate_category")
+                    
+                    dbh.insert('annotate',
+                               inode_id = inode_id,
+                               note = query.get("annotate_text","Tag"),
+                               category = category,
+                               )
+                    
+                    action = 'deactivate'
+                else:
+                    action = 'activate'
+
+            elif row2:
+                action = 'deactivate'
+
+            ## Now we show the appropriate toolbar
+            if action=='activate':
                 query.set('annotate','yes')
                 result.toolbar(icon='yes.png', link = query, pane = 'pane')
+            else:
+                query.set('annotate','no')
+                result.toolbar(icon='no.png', link = query, pane = 'pane',
+                               tooltip=row2 and row2['note'])
 
             query.clear('annotate')
 
@@ -960,7 +1021,43 @@ class InodeIDType(IntegerType):
                 new_query.set('inode_limit', limit + 1)
                 result.toolbar(icon = 'stock_right.png', link=new_query,
                                pane='self',tooltip = "Inode %s" % (limit + 1))
-                
+
+            def set_annotation_text(query,result):
+                query.default('annotate_text','Tag')
+                query.default("annotate_category", "Note")
+                result.decoration='naked'
+                result.heading("Set Annotation Text")
+                result.para("This text will be used for all quick annotation")
+                result.start_form(query, pane='parent_pane')
+                result.textarea("Annotation Text",'annotate_text')
+                TableActions.selector_display(None, "Category", "annotate_category",
+                                              result=result, table = 'annotate',
+                                              field='category', case=query['case'],
+                                              default='Note')
+                result.end_table()
+                result.end_form()
+
+            def goto_cb(query,result):
+                query.default('goto','0')
+                result.decoration='naked'
+                result.heading("Goto row number")
+                result.start_form(query, pane='parent_pane')
+                result.textfield("Row number",'inode_limit')
+                result.end_table()
+                result.end_form()
+
+            result.toolbar(
+                cb = set_annotation_text,
+                text = "Set Annotation Text",
+                icon = 'annotate.png', pane='popup',
+                )
+
+            result.toolbar(
+                cb = goto_cb,
+                text = "Goto row number (Current %s)" % query.get('inode_limit',1),
+                icon = 'stock_next-page.png',
+                pane = 'popup',)
+
         result.toolbar(cb = browse_cb, icon="browse.png",
                        tooltip = "Browse Inodes in table", pane='new')
 
@@ -1083,6 +1180,9 @@ class CounterType(IntegerType):
         
     def select(self):
         return "count(*)"
+
+    def order_by(self):
+        return "count"
 
 class PacketType(IntegerType):
     """ A Column type which links directly to the packet browser """
