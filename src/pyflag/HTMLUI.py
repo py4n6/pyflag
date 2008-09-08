@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -245,7 +246,7 @@ class HTMLUI(UI.GenericUI):
         example if we show a pop up window, we dont actually render
         the window until the user pops it up.
         """
-
+        #print "pushing to store %s" % FlagFramework.STORE.size()
         cb_key = FlagFramework.STORE.put(callback, prefix="CB")
         return cb_key
     
@@ -318,7 +319,7 @@ class HTMLUI(UI.GenericUI):
         
         if pane=='popup':
             id=self.get_unique_id()
-            return "window.open('f?%s&__pyflag_parent='+window.__pyflag_name+'&__pyflag_name=child_%s','child_%s',  'width=600, height=600,scrollbars=yes'); return false;" % (target, id,id)
+            return "window.open('f?%s&__pyflag_parent='+window.__pyflag_name+'&__pyflag_name=child_%s&__pane=naked','child_%s',  'width=600, height=600,scrollbars=yes'); return false;" % (target, id,id)
 
         if pane=='new':
             id=self.get_unique_id()
@@ -345,7 +346,8 @@ class HTMLUI(UI.GenericUI):
     def link(self,string,target=None,options=None,icon=None,tooltip=None, pane='main', **target_options):
         ## If the user specified a URL, we just use it as is:
         try:
-            self.result += expand("<a href='%s' target=_top>%s</a>",(target_options['url'],string))
+            self.result += expand("<a href='%s' target=_top>%s</a>",
+                                  (target_options['url'],string))
             return
         except KeyError:
             pass
@@ -432,10 +434,16 @@ class HTMLUI(UI.GenericUI):
         if tooltip:
             description = self.tooltipise(tooltip, description)
 
-        if reverse:
-            self.result+="<tr><td align=right><input type=checkbox name=\"%s\" value=\"%s\" %s></td><td>%s</td></tr>\n" % (name,value, opt_str, description)
+        checkbox_str = "<input type=checkbox name=\"%s\" value=\"%s\" %s>" % (name,value, opt_str)
+
+        if not description:
+            self.result += checkbox_str
+
+        elif reverse:
+            self.result+="<tr><td align=right>%s</td><td>%s</td></tr>\n" % (checkbox_str, description)
         else:
-            self.row(description,"<input type=checkbox name=\"%s\" value=\"%s\" %s>" % (name,value, opt_str), **options)
+            self.row(description,checkbox_str, **options)
+            
         if self.form_parms.has_key(name):
             del self.form_parms[name]
             
@@ -839,6 +847,7 @@ class HTMLUI(UI.GenericUI):
                         method = getattr(e,method_name)
                         doc = method.__doc__
                     except:
+                        doc = None
                         pass
                     if not doc:
                         try:
@@ -983,11 +992,13 @@ class HTMLUI(UI.GenericUI):
 
         More comments in TableRenderer()
         """
+        self.start_form(self.defaults)
         ## Create a renderer:
         r = UI.TableRenderer(**opts)
 
         ## Render with it:
         r.render(self.defaults, self)
+        self.renderer = r
         
     def text(self,*cuts,**options):
         wrap = config.WRAP
@@ -1235,16 +1246,16 @@ class HTMLUI(UI.GenericUI):
         if int(interval)>0:
             base = "window.setTimeout(function() {refresh('f?%s',%r);},%s);" % (query, pane, 1000*int(interval))
         else:
-            base = "refresh('f?%s',%r);" % (query,pane)
+            base = expand("refresh('f?%s',%r);", (query,pane))
 
         self.result += "<script>%s</script>" % base
 
     def icon(self, path, tooltip=None, **options):
         """ This allows the insertion of a small static icon picture. The image should reside in the images directory."""
         option_str = self.opt_to_str(options)
-        data = "<img border=0 src='images/%s' %s />" % (path, option_str)
+        data = expand("<img border=0 src='images/%s' %s />", (path, option_str))
         if tooltip:
-            data = "<abbr title=%r>%s</abbr>" % (quote_quotes(tooltip),data)
+            data = expand("<abbr title=%r>%s</abbr>",((quote_quotes(tooltip),data)))
         self.result += data
 
     def wizard(self,names=[],context="wizard",callbacks=[],title=''):
@@ -1407,10 +1418,11 @@ class HTMLUI(UI.GenericUI):
             del q[context]
             q[context]=i
 
+            js = self._calculate_js_for_pane(target = q, pane="self")
             if(i==context_str):
                 out+="<div class='TabActive'><span>%s</span></div>\n" % i
             else:
-                out+="<div class='Tab' onclick='document.location=\"f?%s\"'><span>%s</span></div>\n" % (q,i)
+                out+="<div class='Tab' onclick=\"%s\"><span>%s</span></div>\n" % (js, i)
         
 ##        out='\n<div id="notebook"><ul id="topmenu">'
         
