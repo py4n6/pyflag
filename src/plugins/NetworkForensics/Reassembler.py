@@ -117,7 +117,7 @@ class StreamFile(File):
         self.packet_list = None
 
     def make_tabs(self):
-        names, cbs = self.fd.make_tabs()
+        names, cbs = File.make_tabs(self)
 
         names.extend( [ "Show Packets", "Combined stream"])
         cbs.extend([ self.show_packets, self.combine_streams ])
@@ -151,9 +151,10 @@ class StreamFile(File):
         dbh = DB.DBO(self.case)
 
         ## This is a placeholder to reserve our inode_id
-        dbh.insert('inode', inode=self.inode)
+        dbh.insert('inode', inode=self.inode, _fast=True)
         self.inode_id = dbh.autoincrement()
-
+        dbh.delete('inode', where="inode_id=%s" % self.inode_id, _fast=True)
+        
         dbh2 = dbh.clone()
 
         ## These are the fds for individual streams
@@ -196,7 +197,7 @@ class StreamFile(File):
 
             # First time we saw this stream - the seq is the ISN
             if initials[index]:
-                deltas[index] -= row['seq']
+                deltas[index] -= row['seq'] - row['cache_offset']
                 initials[index] = False
 
             # We need to find if we grew the output file at all:
@@ -211,6 +212,7 @@ class StreamFile(File):
                 outfd_position = initial_len
 
             try:
+                #print "(Packet %s) Seeking to %s" % (row['packet_id'], outfd_position,),
                 out_fd.seek(outfd_position)
             except Exception,e:
                 print FlagFramework.get_bt_string(e)
@@ -219,7 +221,9 @@ class StreamFile(File):
             # Only try to write if there is a reverse file.
             if fds[index]>0:
                 fds[index].seek(row['cache_offset'])
-                out_fd.write(fds[index].read(row['length']))
+                data = fds[index].read(row['length'])
+                #print "Writing %s %r" % (row['length'],data)
+                out_fd.write(data)
 
             # Maintain the length of the file
             outfd_len = max(outfd_len, outfd_position+row['length'])
@@ -269,7 +273,7 @@ class StreamFile(File):
             metamtime=None
         
         ## Create VFS Entry 
-        self.inode_id = fsfd.VFSCreate(None, self.inode, pathname, size=outfd_len, mtime=metamtime)
+        self.inode_id = fsfd.VFSCreate(None, self.inode, pathname, size=outfd_len, mtime=metamtime, inode_id=self.inode_id)
         
         ##  We also now fill in the details for the combined stream in 
         ##  the connection_details table...
@@ -434,6 +438,6 @@ import pyflag.tests
 class NetworkForensicTests2(pyflag.tests.ScannerTest):
     """ Tests Reassembler with difficult to reassemble streams """
     test_case = "PyFlagTestCase"
-    test_file = "stdcapture_0.4.pcap.E01"
+    test_file = "stdcapture_0.4.pcap.e01"
     subsystem = "EWF"
     fstype = 'PCAP Filesystem'
