@@ -192,7 +192,7 @@ class OffsetFile(FileSystem.File):
         self.fd.explain(query,result)
 
         if self.size > 0:
-            extract = "Extract %s bytes starting at byte %s" % (self.size - self.offset,
+            extract = "Extract %s bytes starting at byte %s" % (self.size,
                                                                 self.offset)
         else:
             extract = 'Extract %s bytes after end of file'\
@@ -478,6 +478,8 @@ class CaseDBInit(FlagFramework.EventHandler):
         ## Make sure that the schema conforms
         dbh = DB.DBO()
         dbh.execute("select value from meta where property='flag_db'")
+        DB.check_column_in_table(None, 'sql_cache', 'status',
+                                 'enum("progress","dirty","cached")')
         for row in dbh:
             try:
                 DB.check_column_in_table(row['value'], 'sql_cache', 'status',
@@ -486,7 +488,6 @@ class CaseDBInit(FlagFramework.EventHandler):
 
 
         ## We now spawn the cache manager thread TODO
-        
         
     def exit(self, dbh, case):
         IO.IO_Cache.flush()

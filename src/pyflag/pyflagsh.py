@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Michael Cohen <scudette@users.sourceforge.net>
 # David Collett <daveco@users.sourceforge.net>
 # Gavin Jackson <gavz@users.sourceforge.net>
@@ -21,8 +22,10 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 """ An interactive shell for examining file systems loaded into flag """
-import sys
-sys.path.append("..")
+import sys,os
+
+sys.path.append(os.path.join(os.path.dirname(__file__),"pyflag"))
+sys.path.append(os.path.join(os.path.dirname(__file__),".."))
 
 try:
     import readline
@@ -120,7 +123,7 @@ class command_parse:
             command=Registry.SHELL_COMMANDS[args[0]](args[1:],env=self.environment)
             return command.execute()
         except KeyError:
-            raise ParserException("No such command %s" % args[0])
+            raise ParserException("No such command (%s)" % args[0])
 
 def escape(string):
     """ Escapes spaces in the string """
@@ -314,6 +317,8 @@ if __name__ == "__main__":
                 sys.exit(0)
             except KeyboardInterrupt:
                 print "\nInterrupted"
+            except ParserException, e:
+                print "Problem parsing the previous line: %s" % e
             except Exception,e:
                 print isinstance(e,ParserException)
                 print "Unknown error: %r %s" % (e,e)

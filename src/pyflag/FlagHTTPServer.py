@@ -30,6 +30,7 @@
 """ Main HTTP server module """
 import sys
 sys.path.append("..")
+sys.path.append("pyflag")
 
 import BaseHTTPServer, SimpleHTTPServer, SocketServer
 import pyflag.Reports as Reports
@@ -294,7 +295,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler, FlagFramework
         # Did the user asked for a complete render of the window?
         if query.has_key('__main__'):
             theme=pyflag.Theme.get_theme(query)
-            result = theme.menu(flag,query)
+            theme.menu(flag,query,result)
             result.defaults=query
             
         #Is this a request for a saved UI?
@@ -350,9 +351,13 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler, FlagFramework
                   #Did the user request a report?
                   if not query.has_key('family') or not query.has_key('report'):
                       theme=pyflag.Theme.get_theme(query)
-                      result = theme.menu(flag,query)
+                      theme.menu(flag,query,result)
                       result.defaults=query
                   else:
+                      try:
+                          result.decoration = query['__pane']
+                      except KeyError: pass
+                      
                       try:
                           self.process_request(query, result)
                       except FlagFramework.AuthError, e:
@@ -511,6 +516,9 @@ if __name__ == "__main__":
     if config.THEME=="AJAX":
         import pyflag.AJAXUI as AJAXUI
         UI.UI = AJAXUI.AJAXUI
+    elif config.THEME=="XML":
+        import pyflag.XMLUI as XMLUI
+        UI.UI = XMLUI.XMLUI
     else:
         import pyflag.HTMLUI as HTMLUI
         UI.UI = HTMLUI.HTMLUI
