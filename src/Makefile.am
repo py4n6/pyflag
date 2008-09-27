@@ -1,7 +1,8 @@
-SUBDIRS = lib mailtools indextools_ng network filesystems include pyflag mmedia
+SUBDIRS = lib mailtools indextools_ng network filesystems include pyflag mmedia distorm
 
 my_javascript		=       $(shell find javascript -not -name .\*)
 nobase_pkgdata_DATA	=	$(my_javascript)
+EXTRA_DIST		= 	$(nobase_pkgdata_DATA)
 
 # main pyflag (python) application
 ## The pyflag directory goes in the system site-packages
