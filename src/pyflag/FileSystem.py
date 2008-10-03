@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -75,7 +76,7 @@ class FileSystem:
     ## from this FS:
     cookie = 0
     
-    def __init__(self, case):
+    def __init__(self, case, query=None):
         """ Constructor for creating an new filesystem object
 
         @arg case: Case to use
@@ -136,7 +137,7 @@ class FileSystem:
             path, inode, inode_id = self.lookup(inode_id=inode_id)
 
         if not inode:
-            raise IOError('Inode not found for file')
+            raise IOError('Inode not found for file (inode_id %s, path %s)' % (inode_id,path))
 
         parts = inode.split('|')
         sofar = [] # the inode part up to the file we want
@@ -146,16 +147,16 @@ class FileSystem:
             sofar.append(part)
             try:
 ## This is some caching which should be faster, but doesnt seem to
-## make much different in practice???
-                
-##                try:
-##                    inode_so_far = '|'.join(sofar)
+## make much different in practice??? (It does make a difference with
+## memory images, for example - so we leave it on)
+                try:
+                    inode_so_far = '|'.join(sofar)
                     
-##                    retfd = FSCache.get(inode_so_far)
+                    retfd = FSCache.get(inode_so_far)
 ##                    print "Got %s from cache (%s)" % (inode_so_far, FSCache.size())
-##                except KeyError:
+                except KeyError:
                     retfd = Registry.VFS_FILES.vfslist[part[0]](self.case, retfd, '|'.join(sofar))
-##                    FSCache.put(retfd, key=inode_so_far)
+                    FSCache.put(retfd, key=inode_so_far)
                     
             except IndexError:
                 raise IOError, "Unable to open inode: %s, no VFS" % part
@@ -200,9 +201,10 @@ class FileSystem:
             fd.seek(0)
             data = fd.read(10240)
             if data:
-                magic = FlagFramework.Magic()
+                import pyflag.Magic as Magic
+                magic = Magic.MagicResolver()
                 result.ruler()
-                sig = magic.buffer(data)
+                sig, ct = magic.get_type(data)
                 result.row("Magic identifies this file as: %s" % sig,**{'colspan':50,'class':'hilight'})
                 fd.close()
                 metadata['magic'] = sig
@@ -222,12 +224,20 @@ class FileSystem:
     def listdir(self,path):
         """ standards compliant listdir, generates directory entries. """
         return self.ls(path)
+
+    ## These are the list of parameters which we need to fulfil for
+    ## this filesystem
+    parameters = []
+    def form(self, query, result):
+        """ We are able to ask for more optional variables here """
     
 class DBFS(FileSystem):
     """ Class for accessing filesystems using data in the database """
-    def __init__(self, case):
+    def __init__(self, case, query=None):
         """ Initialise the DBFS object """
         self.case = case
+        ## This allows us to get optional args
+        self.query = query
 
     def load(self, mount_point, iosource_name, loading_scanners = None):
         """ Sets up the schema for loading the filesystem.
@@ -250,6 +260,11 @@ class DBFS(FileSystem):
         self.VFSCreate(None, "I%s" % iosource_name, mount_point, 
                        directory=True)
 
+        dbh.insert("filesystems",
+                   iosource = iosource_name,
+                   property = 'mount point',
+                   value = mount_point)
+        
         ## Ensure that we have the IOSource available
         self.iosource = IO.open(self.case, iosource_name)
 
@@ -671,11 +686,17 @@ class File:
         return self.size
 
     def lookup_id(self):
+        ## A shortcut cached item
+        try:
+            if self.inode_id: return self.inode_id
+        except AttributeError: pass
+        
         dbh=DB.DBO(self.case)
         dbh.check_index('inode','inode')
         dbh.execute("select inode_id from inode where inode=%r", self.inode)
         res = dbh.fetch()
         try:
+            self.inode_id = res["inode_id"]
             return res["inode_id"]
         except:
             return None
@@ -837,7 +858,7 @@ class File:
                                              case   =query['case'],
                                              inode_id  =self.inode_id)
         
-        result.result = "<iframe height='100%%' width='100%%' src='f?%s'></iframe>" % new_query
+        result.result = "<iframe id='summaryFrame' name='summaryFrame' height='100%%' width='100%%' src='f?%s'></iframe><script>AdjustHeightToPageSize('summaryFrame');</script>" % new_query
         
     def download(self, query,result):
         """ Used for dumping the entire file into the browser """

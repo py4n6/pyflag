@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -378,11 +379,14 @@ class GenericUI:
                     for d in os.listdir(full_path):
                         filename = FlagFramework.sane_join(path,d)
                         full_filename = FlagFramework.sane_join(config.UPLOADDIR, filename)
-                        if not os.path.isdir(full_filename):
-                            s = os.stat(full_filename)
-                            dbh.mass_insert(filename = filename,
-                                            _timestamp = "from_unixtime(%d)" % s.st_mtime,
-                                            size = s.st_size)
+                        try:
+                            if not os.path.isdir(full_filename):
+                                s = os.stat(full_filename)
+                                dbh.mass_insert(filename = filename,
+                                                _timestamp = "from_unixtime(%d)" % s.st_mtime,
+                                                size = s.st_size)
+                        except OSError:
+                            pass
                     dbh.mass_insert_commit()
                 except OSError,e:
                     pass
@@ -407,11 +411,8 @@ class GenericUI:
                     )
 
                 ## Submit all the nodes in the display:
-                def submit_all(query,result):
-                    sql = result._make_sql(elements = elements, filter_elements = elements,
-                                           table = tablename, case=case, filter=query.get('filter',''),
-                                           order = query.get('order',0))
-
+                def submit_all(query,new_result):
+                    sql = result.renderer._make_sql(query)
                     dbh.execute(sql)
                     new_query = query.clone()
 #                    new_query.remove('callback_stored',self.callback)
@@ -420,7 +421,7 @@ class GenericUI:
                     for row in dbh:
                         new_query[name] = row['Filename']
 
-                    result.refresh(0,new_query, pane='parent')
+                    new_result.refresh(0,new_query, pane='parent')
 
                 result.toolbar(cb=submit_all, text="Submit all", icon='yes.png')
 
@@ -468,7 +469,7 @@ def _make_join_clause(total_elements):
     ## widget automatically.
     tables = []
     for e in total_elements:
-        if e.table not in tables: tables.append(e.table)
+        if e.table and e.table not in tables: tables.append(e.table)
 
     ## Now generate the join clause:
     query_str += " from %s " % tables[0]
@@ -574,15 +575,10 @@ class TableRenderer:
         """  This returns the total number of rows in this table - it
         could take a while which is why its a popup."""
         def count_cb(query, result):
-            try:
-                filter_str = query[self.filter]
-                sql = parser.parse_to_sql(filter_str, self.elements)
-            except KeyError:
-                sql = 1
+            sql = self._make_sql(query).split("from",1)[1]
 
             dbh=DB.DBO(self.case)
-            dbh.execute("select count(*) as total from %s where (%s and %s)", (
-                self.table, self.where, sql))
+            dbh.execute("select count(*) as total from " + sql)
             row=dbh.fetch()
             result.heading("Total rows")
             result.para("%s rows" % row['total'])
@@ -828,19 +824,19 @@ class TableRenderer:
                     tmp = result.__class__(result)
                     new_query.set('order', e)
                     new_query.set('direction',0)
-                    tmp.link("%s<img src='images/increment.png'>" % n, target= new_query, pane='self')
+                    tmp.link("%s<img src='images/increment.png'>" % n, target= new_query, pane='pane')
                     result.result+="<th>%s</th>" % tmp
                 else:
                     tmp = result.__class__(result)
                     new_query.set('order', e)
                     new_query.set('direction',1)
-                    tmp.link("%s<img src='images/decrement.png'>" % n, target= new_query, pane='self')
+                    tmp.link("%s<img src='images/decrement.png'>" % n, target= new_query, pane='pane')
                     result.result+="<th>%s</th>" % tmp
             else:
                 tmp = result.__class__(result)
                 new_query.set('order', e)
                 new_query.set('direction',1)
-                tmp.link(n, target= new_query, pane='self')
+                tmp.link(n, target= new_query, pane='pane')
                 result.result+="<th>%s</th>" % tmp
 
         result.result+='''</tr></thead><tbody class="scrollContent">'''
