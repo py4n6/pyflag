@@ -42,7 +42,7 @@ import reassembler
 from NetworkScanner import *
 import pypcap
 import cStringIO
-from pyflag.ColumnTypes import StringType, IntegerType, TimestampType, InodeIDType, CounterType, BigIntegerType, ShortIntegerType, IPType
+from pyflag.ColumnTypes import StringType, IntegerType, TimestampType, InodeIDType, CounterType, BigIntegerType, ShortIntegerType, IPType, StateType
 import pyflag.CacheManager as CacheManager
 
 description = "Network Forensics"
@@ -56,6 +56,7 @@ class NetworkingInit(FlagFramework.EventHandler):
         ### find the data section of this packet.
         case_dbh.execute("""CREATE TABLE if not exists `pcap` (
         `id` INT NOT NULL auto_increment,
+        `ipid` SMALLINT UNSIGNED NOT NULL default 0,
         `iosource` varchar(50),
         `offset` BIGINT NOT NULL ,
         `length` INT NOT NULL ,
@@ -119,7 +120,8 @@ class ConnectionDetailsTable(FlagFramework.CaseTable):
         [ IPType, dict(name='Destination IP', column='dest_ip')],
         [ ShortIntegerType, dict(name='Destination Port', column='dest_port')],
         [ IntegerType, dict(name='ISN', column='isn'), 'unsigned default 0'],
-        [ TimestampType, dict(name='Timstamp', column='ts_sec')]
+        [ TimestampType, dict(name='Timestamp', column='ts_sec')],
+        [ StateType, dict(name='Type', column='type', states={'tcp':'tcp', 'udp':'udp'})]
         ]
         
 class PCAPFS(DBFS):
@@ -146,9 +148,10 @@ class PCAPFS(DBFS):
         ## incremental_loader is used because small files may be
         ## processed.
         pdbh = DB.DBO()
+        cookie = int(time.time())
+
         if scanners:
             scanner_string = ','.join(scanners)
-            cookie = int(time.time())
 
         def Callback(mode, packet, connection):
             """ This callback is called for each packet with the following modes:
@@ -158,8 +161,9 @@ class PCAPFS(DBFS):
             end - called when the connection is destroyed.
             """
             if mode=='est':
-                tcp = packet.find_type("TCP")
                 ip = packet.find_type("IP")
+                tcp = ip.payload
+                ##tcp = packet.find_type("TCP")
 
                 ## Connection id have not been set yet:
                 if not connection.has_key('inode_id'):
@@ -189,19 +193,26 @@ class PCAPFS(DBFS):
 
                 ## Record the stream in our database:
                 connection['mtime'] = packet.ts_sec
+                args = dict(
+                    inode_id = connection['inode_id'],
+                    reverse = connection['reverse']['inode_id'],
+                    
+                    ## This is the src address as an int
+                    src_ip=ip.src,
+                    type = tcp.get_name(),
+                    src_port=tcp.source,
+                    dest_ip=ip.dest,
+                    dest_port=tcp.dest,
+                    _ts_sec="from_unixtime('%s')" % connection['mtime'],
+                    _fast = True)
+
+                try:
+                    args['isn']=tcp.seq
+                except KeyError:
+                    pass
+
                 dbh.insert('connection_details',
-                           inode_id = connection['inode_id'],
-                           reverse = connection['reverse']['inode_id'],
-                           
-                           ## This is the src address as an int
-                           src_ip=ip.src,
-                           src_port=tcp.source,
-                           dest_ip=ip.dest,
-                           dest_port=tcp.dest,
-                           isn=tcp.seq,
-                           _ts_sec="from_unixtime('%s')" % connection['mtime'],
-                           _fast = True
-                           )
+                           **args)
 
                 ## This is where we write the data out
                 connection['data'] = CacheManager.MANAGER.create_cache_fd(
@@ -212,7 +223,8 @@ class PCAPFS(DBFS):
                     Callback('data', packet, connection)
 
             elif mode=='data':
-                tcp = packet.find_type("TCP")
+                ip = packet.find_type("IP")
+                tcp = ip.payload
                 data = tcp.data
                 fd = connection['data']
 
@@ -221,14 +233,20 @@ class PCAPFS(DBFS):
                 except TypeError:
                     datalen = 0
 
-                dbh.insert("connection",
-                           inode_id = connection['inode_id'],
-                           packet_id = packet.id,
-                           cache_offset = fd.offset,
-                           length = datalen,
-                           seq = tcp.seq,
-                           _fast=True
-                           )
+                args = dict(
+                    inode_id = connection['inode_id'],
+                    packet_id = packet.id,
+                    cache_offset = fd.offset,
+                    length = datalen,
+                    _fast=True
+                    )
+
+                try:
+                    args['seq'] = tcp.seq
+                except KeyError:
+                    args['seq'] = 0
+                
+                dbh.insert("connection", **args)
                 
                 if data: fd.write(data)
 
@@ -334,14 +352,20 @@ class PCAPFS(DBFS):
                 ## insert but this will break when we have multiple
                 ## concurrent loaders.  Record the packet in the pcap
                 ## table:
-                pcap_dbh.mass_insert(
+                args = dict(
                     iosource = iosource_name,
                     offset = packet.offset,
                     length = packet.caplen,
                     _ts_sec =  "from_unixtime('%s')" % packet.ts_sec,
                     ts_usec = packet.ts_usec,
                     )
-                
+
+                ## Try to insert the ipid field
+                try:
+                    args['ipid']= packet.root.eth.payload.id
+                except: pass
+
+                pcap_dbh.mass_insert(**args)
                 #pcap_id = pcap_dbh.autoincrement()
                 pcap_id = max_id
                 pcap_file.set_id(pcap_id)
@@ -406,8 +430,12 @@ class PCAPFile(File):
         self.private_dbh = dbh.clone()
         dbh.execute("select max(id) as max from pcap")
         row=dbh.fetch()
-        self.size = row['max']
-        self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap")
+        if row['max']:
+            self.size = row['max']
+        else:
+            self.size = 0
+        
+        self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap where id>%r" % int(self.size))
         self.iosource = fd
 
     def read(self,length=None):
@@ -419,14 +447,14 @@ class PCAPFile(File):
         ## Find out the offset in the file of the packet:
         row=self.private_dbh.fetch()
 
+        if not row:
+            self.readptr+=1
+            return '\x00'
+        
         ## Is this the row we were expecting?
         if row['id'] != self.readptr:
             self.private_dbh.execute("select id,offset,link_type,ts_sec,length from pcap where id=%r", self.readptr)
             row=self.private_dbh.fetch()
-
-        if not row:
-            self.readptr+=1
-            return '\x00'
 
         self.packet_offset = row['offset']
         self.fd.seek(row['offset'])
@@ -562,6 +590,8 @@ class NetworkingSummary(Reports.report):
     """
     name = "Networking Summary"
     family = "Network Forensics"
+    ## Disabled for now, broken since 0.85
+    hidden = True
     
     def display(self,query,result):
     
@@ -612,18 +642,3 @@ class NetworkingSummary(Reports.report):
                 )
         except DB.DBError,args:
             result.para("No networking tables found, you probably haven't run the correct scanners: %s" % args)
-
-
-## UnitTests:
-import unittest
-import pyflag.pyflagsh as pyflagsh
-from pyflag.FileSystem import DBFS
-import pyflag.tests as tests
-
-class NetworkForensicTests(pyflag.tests.ScannerTest):
-    """ Tests network forensics """
-    test_case = "PyFlag Network Test Case"
-    test_file = "stdcapture_0.3.pcap.sgz"
-    subsystem = "SGZip"
-    fstype = 'PCAP Filesystem'
-        
