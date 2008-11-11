@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """ This is an implementation of a HTML parser using the pyflag lexer. 
 
 We do not use pythons native sgml parser because that is too fragile
@@ -15,6 +16,7 @@ import pyflag.DB as DB
 from pyflag.DB import expand
 from FlagFramework import query_type, normpath, get_bt_string, smart_str, smart_unicode, iri_to_uri
 import pyflag.FileSystem as FileSystem
+import pyflag.FlagFramework as FlagFramework
 
 XML_SPECIAL_CHARS_TO_ENTITIES = { "'" : "squot",
                                   '"' : "quote",
@@ -246,12 +248,24 @@ class SanitizingTag(Tag):
 
     def css_filter(self, data):
         def resolve_css_references(m):
-            result = self.resolve_reference(m.group(1), build_reference = False)
-            return "url(%s)" % result
+            action = m.group(1)
+            url = m.group(2)
+            args={}
+            ## This is a bit of a hack - magic detection of css is
+            ## quite hard
+            if url.endswith("css"):
+                args['hint'] = 'text/css'
+                
+            result = self.resolve_reference(url, build_reference = False, **args)
+            return "%s(%s)" % (action,result)
         
-        return re.sub("(?i)url\(\"?([^\)\"]+)\"?\)",
+        data = re.sub("(?i)(url)\(\"?([^\)\"]+)\"?\)",
                       resolve_css_references,
                       data)
+        data = re.sub("(?i)(@import)\s+'([^']+)'",
+                      resolve_css_references,
+                      data)
+        return data
 
     def __str__(self):
         ## Some tags are never allowed to be outputted
@@ -334,7 +348,10 @@ def get_url(inode_id, case):
         dbh = DB.DBO(case)
         dbh.execute("select url from http where inode_id=%r limit 1", inode_id)
         row = dbh.fetch()
-
+        if not row:
+            dbh.execute("select url from http_sundry where id=%r limit 1", inode_id)
+            row = dbh.fetch()
+            
         if row:
             url = row['url']
         else:
@@ -412,6 +429,9 @@ class ResolvingHTMLTag(SanitizingTag):
         elif self.method:
             ## FIXME: This leads to references without methods:
             reference="%s/%s" % (self.base_url, reference)
+            if reference.startswith("http://"):
+                reference='http:/'+FlagFramework.normpath(reference[6:])
+
         ## If we get here the reference is not absolute, and we dont
         ## have a method - chances are that its in the VFS:
         else:
@@ -429,7 +449,9 @@ class ResolvingHTMLTag(SanitizingTag):
         reference = url_unquote(decode_entity(reference))
 
         dbh = DB.DBO(self.case)
-        dbh.execute("select status,inode_id from http where url=%r and not isnull(http.inode_id) limit 1", reference)
+        dbh.execute("select http.status,http.inode_id from http join inode on "\
+                    "inode.inode_id=http.inode_id where url=%r and not "\
+                    "isnull(http.inode_id) and size > 0 limit 1", reference)
         row = dbh.fetch()
         if row and row['inode_id']:
             ## This is needed to stop dbh leaks due to the highly
