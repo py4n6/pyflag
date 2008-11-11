@@ -93,7 +93,7 @@ class ZipScan(GenScanFactory):
                 inodes.append(inode)
                 
                 inode_id = self.ddfs.VFSCreate(None,
-                                               inode,pathname+"/"+namelist[i],
+                                               inode,DB.expand("%s/%s",(pathname,namelist[i])),
                                                size=info.file_size,
                                                mtime=t)
                 
@@ -178,6 +178,7 @@ class TarScan(GenScanFactory):
             tar=tarfile.TarFile(name='/', fileobj=fd)
             
             ## List all the files in the tar file:
+            inodes = []
             dircount = 0
             namelist = tar.getnames()
             for i in range(len(namelist)):
@@ -196,8 +197,10 @@ class TarScan(GenScanFactory):
                     )
                 
                 new_inode="%s|T%s" % (self.inode,i)
+                inodes.append(new_inode)
+            for inode in inodes:
                 ## Scan the new file using the scanner train:
-                fd=self.ddfs.open(inode=new_inode)
+                fd=self.ddfs.open(inode=inode)
                 Scanner.scanfile(self.ddfs,fd,self.factories)
 
 ZIPCACHE = Store.Store(max_size=5)
@@ -251,8 +254,8 @@ class ZipFile(File):
         self.left_over = ''
         self.blocksize = 1024*10
         self.clength = self.compressed_length
-        offset = self.header['data'].buffer.offset
-        
+        offset = self.header.buffer.offset + self.header.size()
+
         ## Seek our fd to there:
         self.fd.seek(offset)
         
@@ -498,6 +501,7 @@ class Tar_file(File):
     def close(self):
         pass
 
+## These are characters which are invalid for a file name
 invalid_filename = re.compile('[^a-zA-Z0-9!@#$%^&()_+-=*{}\\|]')
 class ZipFileCarver(Scanner.Carver):
     """ This is a special carver for zip files """
