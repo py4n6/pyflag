@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -179,7 +180,7 @@ class GenScanFactory:
         path = path_glob
         if not path.endswith("*"): path = path + "*"  
         db = DB.DBO(self.case)
-        db.execute("update inode join file on file.inode = inode.inode set scanner_cache = REPLACE(scanner_cache, %r, '') where file.path rlike %r" % (self.__class__.__name__, fnmatch.translate(path)))
+        db.execute("update inode join file on file.inode = inode.inode set scanner_cache = REPLACE(scanner_cache, %r, '') where file.path rlike %r",(self.__class__.__name__, fnmatch.translate(path)))
         
     ## Relative order of scanners - Higher numbers come later in the order
     order=10
@@ -275,10 +276,14 @@ class StoreAndScan(BaseScanner):
                 self.file.close()
             except: pass
             
-            ## Reopen the file to read
-            fd = open(self.name,'rb')
+            ## We reuse our own fd for this - each external process
+            ## gets the same fd but we rewind it first. External
+            ## processes can act on the fd directly or call
+            ## CacheManager.MANAGER.provide_cache_filename() to get a
+            ## cached filename.
+            fd = self.fd
+            fd.seek(0)
             self.external_process(fd)
-            fd.close()
 
         if self.file:
             self.file.close()
@@ -448,7 +453,7 @@ def scanfile(ddfs,fd,factories):
 
             ## If there are not enough blocks to do a reasonable chunk of the file, we skip them as well...
             if c>0 and c*fd.block_size<fd.size:
-                pyflaglog.log(pyflaglog.WARNING,"Skipping inode %s because there are not enough blocks %s < %s" % (fd.inode,c*fd.block_size,fd.size))
+                pyflaglog.log(pyflaglog.WARNING, "Skipping inode %s because there are not enough blocks %s < %s", fd.inode,c*fd.block_size,fd.size)
                 return
 
         except AttributeError:
