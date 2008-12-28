@@ -63,6 +63,13 @@ class LoadPresetLog(Reports.report):
         result.para("Successfully uploaded the following files into case %s, table %s:" % (query['case'],query['table']))
         for fn in query.getarray('datafile'):
             result.para(fn)
+
+        try:
+            if len(query['filter'])>1:
+                result.text("Log was filtered with: %s\n" % query['filter'], style='red')
+        except KeyError:
+            pass
+        
         result.link("Browse this log file",
                     query_type(case=query['case'],
                                family="Log Analysis",
@@ -186,6 +193,14 @@ class LoadIOSource(Reports.report):
         ## Try to instantiate the image:
         try:
             image = Registry.IMAGES.dispatch(query['subsys'])()
+        except Exception,e:
+            result.heading("Error: Unable to create IO Source")
+            result.para("Could not find a driver for requested IO"\
+                        " subsystem (%s). Are you sure you spelt it "\
+                        "correctly? It's case sensitive!" % query['subsys'])
+            return
+    
+        try:
             ## Correct the filenames to stem at the UPLOADDIR:
             filenames = query.getarray('filename')
             query.clear('filename')
@@ -328,6 +343,7 @@ class ScanFS(Reports.report):
 
     def analyse(self,query):
         scanner_names = self.calculate_scanners(query)
+        print "Scanner names %s" % (scanner_names,)
 
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Asking pyflash to scan the path: %s with scanners %s" % (query['path'], scanner_names))
             
@@ -337,6 +353,7 @@ class ScanFS(Reports.report):
                              argv=[query['path'], scanner_names])
 
     def progress(self,query,result):
+        result.decoration='naked'
         result.heading("Scanning path %s" % (query['path']))
         scanners = self.calculate_scanners(query)
         dbh = DB.DBO()
@@ -354,11 +371,68 @@ class ScanFS(Reports.report):
                                 case=query['case'], path=query['path'])
 
         ## Browse the filesystem instantly
-        result.refresh(0, FlagFramework.query_type((),case=query['case'],
-           family='Disk Forensics', report='BrowseFS',
-           open_tree = query['path'])
-                       )
- 
+        result.refresh(0,
+                       FlagFramework.query_type(case=query['case'],
+                                                family='Disk Forensics', report='BrowseFS',
+                                                open_tree = query['path']), pane='parent')
+
+class ScanInode(ScanFS):
+    parameters = {'inode':'any', 'case':'any'}
+    name = "Scan Inode"
+    description = "Scan a single inode using the specified scanners"
+    hidden = True
+
+    def form(self,query,result):
+        try:
+            ## Draw the form for each scan group:
+            result.text(DB.expand("Scanning Inode %s", (query['inode'])))
+            groups = []
+            for cls in ScannerUtils.scan_groups_gen():
+                try:
+                    drawer = cls.Drawer()
+                    if drawer.group in groups: continue
+                    groups.append(drawer.group)
+                    drawer.form(query,result)
+                except RuntimeError:
+                    pass
+            result.checkbox('Click here when finished','final','ok')
+        except KeyError:
+            return result
+
+    def analyse(self,query):
+        scanner_names = self.calculate_scanners(query)
+        pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Asking pyflash to scan the inode: %s with scanners %s" % (query['inode'], scanner_names))
+        
+        #Use pyflash to do all the work
+        print scanner_names
+        env = pyflagsh.environment(case=query['case'])
+        pyflagsh.shell_execv(env=env, command="scan",
+                             argv=[query['inode'],] + scanner_names)
+
+    def progress(self,query,result):
+        result.decoration='naked'
+        result.heading("Scanning inode %s" % (query['inode']))
+        scanners = self.calculate_scanners(query)
+        dbh = DB.DBO()
+        dbh.execute("select count(*) as jobs from jobs")
+        jobs = dbh.fetch()['jobs']
+
+        result.para("%s jobs pending (all cases)" % jobs)
+        result.para("The following scanners are used: %s" % scanners)
+        pyflaglog.render_system_messages(result)
+
+    def display(self,query,result):
+        ## Reset the report cache for us - this eliminates the bug
+        ## where a re-scan on the same directory doesnt work.
+        FlagFramework.reset_all(family = query['family'], report=query['report'],
+                                case=query['case'], path=query['inode'])
+
+        ## Browse the filesystem instantly
+        result.refresh(0,
+                       FlagFramework.query_type(case=query['case'],
+                                                family='Disk Forensics', report='ViewFile',
+                                                inode = query['inode']))
+
 class ResetScanners(ScanFS):
     """ This report will reset the specified scanners.
 
@@ -376,21 +450,25 @@ class ResetScanners(ScanFS):
 
     def display(self,query, result):
         
-        dbh=DB.DBO(query['case'])
-        fsfd = Registry.FILESYSTEMS.fs['DBFS'](query['case'])
+        # We use to call all the scanners from here, but now
+        # we just call pyflash to do all the work
+
+        #dbh=DB.DBO(query['case'])
+        #fsfd = Registry.FILESYSTEMS.fs['DBFS'](query['case'])
+        #
+        #
+        #scanners = [ ]
+        #for i in scanner_names:
+        #    try:
+        #        tmp  = Registry.SCANNERS.dispatch(i)
+        #        scanners.append(tmp(fsfd))
+        #    except Exception,e:
+        #        pyflaglog.log(pyflaglog.ERRORS,"Unable to initialise scanner %s (%s)" % (i,e))
+        #
+        #pyflaglog.log(pyflaglog.DEBUG,"Will reset the following scanners: %s" % scanners)
 
         scanner_names = self.calculate_scanners(query)
         
-        scanners = [ ]
-        for i in scanner_names:
-            try:
-                tmp  = Registry.SCANNERS.dispatch(i)
-                scanners.append(tmp(fsfd))
-            except Exception,e:
-                pyflaglog.log(pyflaglog.ERRORS,"Unable to initialise scanner %s (%s)" % (i,e))
-
-        pyflaglog.log(pyflaglog.DEBUG,"Will reset the following scanners: %s" % scanners)
-
         ## Use pyflash to do all the work
         env = pyflagsh.environment(case=query['case'])
         pyflagsh.shell_execv(env=env, command="scanner_reset_path",
@@ -429,7 +507,19 @@ class LoadFS(Reports.report):
     order = 20
 
     progress_str=None
-    
+
+    def __init__(self, flag, ui=None):
+        if ui:
+            try:
+                c = Registry.FILESYSTEMS.dispatch(ui.defaults['fstype'])
+                c = c(ui.defaults['case'], ui.defaults)
+                for p in c.parameters:
+                    self.parameters[p] = 'any'
+            except KeyError:
+                pass
+
+        Reports.report.__init__(self, flag, ui)
+
     def form(self,query,result):
         result.start_table()
         try:
@@ -447,7 +537,7 @@ class LoadFS(Reports.report):
             metadata = {}
             order = []
             for c in Registry.FILESYSTEMS.classes:
-                c = c(query['case'])
+                c = c(query['case'], query)
                 guess = c.guess(fd, result, metadata)
                 if guess>0:
                     order.append((guess , c.name))
@@ -469,6 +559,15 @@ class LoadFS(Reports.report):
 
             result.textfield("VFS Mount Point:","mount_point")
             result.ruler()
+
+            ## Allow the filesystem to draw a form:
+            try:
+                c = Registry.FILESYSTEMS.dispatch(query['fstype'])
+                c = c(query['case'], query)
+                c.form(query, result)
+            except KeyError:
+                pass
+
         except IOError,e:
             result.text("IOError %s" % e,style='red')
         except (KeyError,TypeError),e:
@@ -481,7 +580,7 @@ class LoadFS(Reports.report):
         self.progress_str=None
 
         # call on FileSystem to load data
-        fsobj=Registry.FILESYSTEMS.dispatch(query['fstype'])(query['case'])
+        fsobj=Registry.FILESYSTEMS.dispatch(query['fstype'])(query['case'],query)
         mount_point = FlagFramework.normpath("/"+query['mount_point'])
         fsobj.load(mount_point, query['iosource'])
         dbh.set_meta("mount_point_%s" % query['iosource'] , mount_point)
