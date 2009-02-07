@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Michael Cohen <scudette@users.sourceforge.net>
 #
 # ******************************************************
@@ -85,7 +86,7 @@ class ScannerTest(unittest.TestCase):
     mount_point = '/'
     TZ="SYSTEM"
 
-    def test00preLoadCase(self):
+    def setUp(self):
         """ Load test Case"""
         try:
             pyflagsh.shell_execv(command="execute",
@@ -106,7 +107,8 @@ class ScannerTest(unittest.TestCase):
                                    "TZ=%s" % self.TZ
                                    ])
 
-        pyflagsh.shell_execv(command="execute",
+        if self.fstype:
+            pyflagsh.shell_execv(command="execute",
                              argv=["Load Data.Load Filesystem image",'case=%s' % self.test_case,
                                    "iosource=test",
                                    "fstype=%s" % self.fstype,
