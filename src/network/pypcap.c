@@ -30,12 +30,14 @@ static int PyPCAP_fill_buffer(PyPCAP *self, PyObject *fd) {
   if(!buff) return -1;
 
   // Append the data to the end:
+  CALL(self->buffer, skip, self->buffer->readptr);
   CALL(self->buffer, seek, 0, SEEK_END);
 
   // Copy the data into our buffer:
   CALL(self->buffer, write, buff, len);
+  CALL(self->buffer, seek, 0, SEEK_SET);
 
-  self->buffer->readptr = current_readptr;
+  //  self->buffer->readptr = current_readptr;
 
   // Finished with the data
   Py_DECREF(data);
@@ -66,7 +68,9 @@ static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
     } else if(!strcmp(output,"little")) {
       self->output_format = FORCE_LITTLE_ENDIAN;
     } else {
-      return PyErr_Format("Unknown value (%s) for endianess - can be only 'big' or 'little'\n", output);
+      PyErr_Format(PyExc_KeyError, 
+		   "Unknown value (%s) for endianess - can be only 'big' or 'little'\n", output);
+      goto fail;
     };
   };
 
@@ -75,6 +79,8 @@ static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
 
   //Fill it up:
   if(PyPCAP_fill_buffer(self, fd)<=0) {
+      PyErr_Format(PyExc_IOError, 
+		   "Cant read file");
     goto fail;
   };
 
@@ -103,7 +109,7 @@ static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
   self->pcap_offset = self->buffer->readptr;
 
   // Skip over the file header:
-  CALL(self->buffer, skip, self->buffer->readptr);
+  //  CALL(self->buffer, skip, self->buffer->readptr);
 
   // Take over the fd
   self->fd = fd;
@@ -211,13 +217,16 @@ static PyObject *PyPCAP_dissect(PyPCAP *self, PyObject *args, PyObject *kwds) {
 static PyObject *PyPCAP_next(PyPCAP *self) {
   PyObject *result;
   int len;
+  int packet_offset;
 
   // Make sure our buffer is full enough:
-  if(self->buffer->size < MAX_PACKET_SIZE) {
+  if(self->buffer->size - self->buffer->readptr < MAX_PACKET_SIZE) {
     len = PyPCAP_fill_buffer(self, self->fd);
     
     if(len<0) return NULL;
   };
+
+  packet_offset = self->buffer->readptr;
 
   /** This is an interesting side effect of the talloc reference model:
       
@@ -262,8 +271,8 @@ static PyObject *PyPCAP_next(PyPCAP *self) {
   self->packet_header->header.offset = self->pcap_offset;
 
   // Keep track of our own file offset:
-  self->pcap_offset += self->buffer->readptr;
-  CALL(self->buffer, skip, self->buffer->readptr);
+  self->pcap_offset += self->buffer->readptr - packet_offset;
+  // CALL(self->buffer, skip, self->buffer->readptr);
 
   // Adjust the output endianess if needed
   switch(self->output_format) {
