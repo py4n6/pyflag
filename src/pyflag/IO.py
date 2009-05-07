@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # ******************************************************
 # Copyright 2004: Commonwealth of Australia.
 #
@@ -37,7 +38,7 @@
     The base Image class provides the 
 
 """
-import iosubsys
+#import iosubsys
 #import pexpect
 import pyflag.FlagFramework as FlagFramework
 from pyflag.FlagFramework import query_type
@@ -154,7 +155,8 @@ def open(case, iosource):
 
 ## IO subsystem unit tests:
 import unittest
-import md5,random,time
+import random,time
+from hashlib import md5
 
 def test_read_random(io1,io2, size, sample_size, number):
     """ Tests if both ios return the same data for random input """
