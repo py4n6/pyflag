@@ -9,7 +9,7 @@ my_examples		=	$(shell find examples -not -name .\*)
 bin_SCRIPTS		=	pyflag pyflash pyflag_launch src/pyflag/conf.py
 pkgdata_DATA		=	$(my_data) \
 				data/magic.mgc data/magic.mime.mgc \
-				images/changelog.html
+				changelog
 pkgpython_PYTHON        =       src/pyflag/conf.py
 nobase_pkgdata_DATA	=	$(my_images) $(my_utilities) $(my_examples)
 man_MANS		=	pyflag.1
@@ -57,7 +57,9 @@ deb-pkg:
 	chmod 744 debian/rules
 	dpkg-buildpackage -rfakeroot
 
-images/changelog.html:
+.PHONEY: changelog
+
+changelog:
 	echo "<html><body><pre>" > images/changelog.html
 	cat _darcs/inventory >> images/changelog.html || hg log >> images/changelog.html
 	echo "</pre></body></html>" >> images/changelog.html

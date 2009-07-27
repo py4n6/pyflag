@@ -78,6 +78,7 @@ static PyObject *PyPacket_list_fields(PyPacket *self, PyObject *args) {
 };
 
 static PyObject *PyPacket_get_item_string(PyPacket *self, char *field);
+static PyObject *PyPacket_set_item_string(PyPacket *self, PyObject *obj, char *field);
 
 /* Here we get the property named by field. 
 */
@@ -90,6 +91,87 @@ static PyObject *PyPacket_getattr(PyPacket *self, char *field) {
   PyErr_Clear();
 
   return PyPacket_get_item_string(self,field);
+};
+
+/* Here we get the property named by field. 
+*/
+static int PyPacket_setattr(PyPacket *self, char *field, PyObject *obj) {
+  PyObject *result = PyPacket_set_item_string(self,obj, field);
+  if(!result) {
+    PyErr_Format(PyExc_AttributeError, "Attribute setting failed\n");
+    return -1;
+  };
+  return 0;
+};
+
+/** Given a python object we assign the object to the property in *p */
+static PyObject *decode_property(Packet packet, PyObject *obj, struct struct_property_t *p){
+  void *item;
+  unsigned int size;
+
+  item = (void *) ((char *)(packet->struct_p) + p->item);
+  
+  if(!p->size) {
+    size = *(int *)((char *)(packet->struct_p) + p->size_p);
+  } else 
+    size=p->size;
+
+  PyErr_Clear();
+
+  /** Now code the return value according to the node and property
+      returned 
+  */    
+  switch(p->field_type) {
+  case FIELD_TYPE_INT:
+  case FIELD_TYPE_INT_X:
+    *(unsigned long int *)item = (unsigned long int)PyLong_AsUnsignedLong(obj); break;
+    
+  case FIELD_TYPE_INT32:
+  case FIELD_TYPE_INT32_X:
+    *(uint32_t *)item = (uint32_t)PyLong_AsUnsignedLong(obj); break;
+    
+  case FIELD_TYPE_INT_64:
+  case FIELD_TYPE_INT_X_64:
+    *(uint64_t *)item = (uint64_t)PyLong_AsUnsignedLongLong(obj); break;
+
+  case FIELD_TYPE_CHAR_X:
+  case FIELD_TYPE_CHAR:
+    *(char *)item = (char)PyLong_AsUnsignedLong(obj); break;
+
+  case FIELD_TYPE_SHORT_X:
+  case FIELD_TYPE_SHORT:
+    *(uint16_t *)item = (uint16_t)PyLong_AsUnsignedLong(obj); break;
+
+  case FIELD_TYPE_IP_ADDR:
+    {
+      struct in_addr temp;
+      char *str = PyString_AsString(obj);
+
+      if(!str) return PyErr_Format(PyExc_TypeError,
+				   "Argument must be an IP address in string notation");
+      if(!inet_aton(str, &temp)) return PyErr_Format(PyExc_TypeError,
+						     "'%s' is not a valid IP address", str);
+      break;
+    };
+    
+  case FIELD_TYPE_STRING_X:
+  case FIELD_TYPE_STRING: 
+  case FIELD_TYPE_HEX:
+  case FIELD_TYPE_ETH_ADD:
+  case FIELD_TYPE_PACKET:
+  default:
+    // Not implemented
+    {
+      return PyErr_Format(PyExc_RuntimeError,
+			  "Unable to process field of type %u\n", p->field_type);
+    };
+  };
+  
+  // Did something go wrong?
+  if(PyErr_Occurred()) return NULL;
+
+  Py_INCREF(Py_None);
+  return Py_None;
 };
 
 static PyObject *encode_property(Packet packet, struct struct_property_t *p) {
@@ -204,6 +286,24 @@ static PyObject *PyPacket_get_item_string(PyPacket *self, char *field) {
     return PyErr_Format(PyExc_KeyError, "Field %s not found", field);
   
   return encode_property(self->obj, found);
+}
+
+static PyObject *PyPacket_set_item_string(PyPacket *self, PyObject *obj, char *field) {
+  struct struct_property_t *p, *found=NULL;
+
+  list_for_each_entry(p, &(self->obj->properties.list), list) {
+    if(!p->name) break;
+
+    if(!strcmp(p->name, field)) {
+      found =p;
+      break;
+    };
+  };
+
+  if(!found)
+    return PyErr_Format(PyExc_KeyError, "Field %s not found", field);
+  
+  return decode_property(self->obj, obj, found);
 }
 
 static PyObject *PyPacket_get_field(PyPacket *self, PyObject *args) {
@@ -321,7 +421,7 @@ static PyTypeObject PyPacketType = {
     (destructor)PyPacket_dealloc, /* tp_dealloc */
     0,                         /* tp_print */
     PyPacket_getattr,        /* tp_getattr */
-    0,                         /* tp_setattr */
+    PyPacket_setattr,        /* tp_setattr */
     0,                         /* tp_compare */
     0,                         /* tp_repr */
     0,                         /* tp_as_number */

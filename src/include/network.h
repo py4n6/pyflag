@@ -266,6 +266,7 @@ struct udp_struct {
   // as a stream.
   uint32_t seq;
 
+  unsigned int data_offset;
   int data_len;
   char *data;
 };

@@ -391,6 +391,7 @@ int UDP_Read(Packet self, StringIO input) {
 
   /** UDP has no options, data starts right away. */
   this->packet.data_len = min(this->packet.length, input->size) - len;
+  this->packet.data_offset = self->start + 8;
   this->packet.data = talloc_memdup(self, input->data + input->readptr,
 				    this->packet.data_len);
 
@@ -409,6 +410,7 @@ VIRTUAL(UDP, Packet)
      NAME_ACCESS_SIZE(packet, data, data, FIELD_TYPE_STRING, data_len);
      NAME_ACCESS(packet, data_len, data_len, FIELD_TYPE_INT);
      NAME_ACCESS(packet, seq, seq, FIELD_TYPE_INT32);
+     NAME_ACCESS(packet, data_offset, data_offset, FIELD_TYPE_INT);
 
      VMETHOD(super.Read) = UDP_Read;
 END_VIRTUAL
