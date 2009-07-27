@@ -1,0 +1,33 @@
+# use glob syntax.
+syntax: glob
+
+*.elc
+*.pyc
+*~
+*.o
+*.Plo
+*.lo
+*.Po
+*.la
+*.in
+Makefile
+*.a
+*config.h
+config/*
+autom4te*
+*.m4
+config*
+libtool
+stamp-h*
+*.mgc
+images/changelog.html
+conf.py
+.libs/
+*.so
+pyflag
+pyflag_launch
+pyflash
+src/lib/evtool
+src/lib/sgzip
+src/mailtools/readpst
+src/regtools/reglookup

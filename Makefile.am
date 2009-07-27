@@ -59,7 +59,7 @@ deb-pkg:
 
 images/changelog.html:
 	echo "<html><body><pre>" > images/changelog.html
-	cat _darcs/inventory >> images/changelog.html
+	cat _darcs/inventory >> images/changelog.html || hg log >> images/changelog.html
 	echo "</pre></body></html>" >> images/changelog.html
 
 data/magic.mgc: data/magic
