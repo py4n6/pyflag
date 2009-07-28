@@ -20,45 +20,35 @@ from pyflag.FileSystem import DBFS, File
 import pyflag.FlagFramework as FlagFramework
 from pyflag.ColumnTypes import StringType
 import pyflag.DB as DB
+import pdb
 
 #aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
 
 ## This is a persistent resolver in the database
-PDBO = DB.DBO()
+NEW_OBJECTS = []
+
+## All the attributes we know about
+ATTRIBUTES = {}
 
 class DBURNObject(aff4.URNObject):
     def __init__(self, urn):
         aff4.URNObject.__init__(self, urn)
         self.properties = {}
         self.urn = urn
-        global PDBO
+        NEW_OBJECTS.append(self)
 
-        PDBO.execute("select attribute, value from AFF4 where urn = %r", urn)
-        for row in PDBO:
-            print row
-            aff4.URNObject.add(self, row['attribute'], row['value'])
+        PDBO = DB.DBO()
+        PDBO.execute("select urn_id from AFF4_urn where urn = %r limit 1", urn)
+        row = PDBO.fetch()
 
-    def set(self, attribute, value):
-        self.delete(attribute)
-        aff4.URNObject.set(self, attribute, value)
-        global PDBO        
-
-        PDBO.insert("AFF4", _fast=True,
-                    urn = self.urn, attribute=attribute, value=value)
+        if row:
+            self.urn_id = row['urn_id']
+            PDBO.execute("select attribute, value from AFF4_attribute "
+                         "join AFF4 on AFF4.attribute_id = "
+                         "AFF4_attribute.attribute_id where urn_id = %r", self.urn_id)
         
-    def add(self, attribute, value):
-        aff4.URNObject.add(self, attribute, value)
-        global PDBO
-
-        PDBO.insert("AFF4", _fast=True,
-                    urn = self.urn, attribute=attribute, value=value)
-        
-    def delete(self, attribute):
-        aff4.URNObject.delete(self, attribute)
-        global PDBO
-
-        PDBO.execute("delete from AFF4 where urn = %r and attribute = %r",
-                         self.urn, attribute)
+            for row in PDBO:
+                aff4.URNObject.add(self, row['attribute'], row['value'])
 
 ## Install this new implementation in the resolver
 aff4.oracle.urn_obj_class = DBURNObject
@@ -109,7 +99,10 @@ class LoadAFF4Volume(Reports.report):
                     
         aff4.oracle.register_set_hook(VFS_Update)
         aff4.oracle.register_add_hook(VFS_Update)
-
+        global NEW_OBJECTS, ATTRIBUTES
+        
+        NEW_OBJECTS = []
+        
         for f in filenames:
             ## Filenames are always specified relative to the upload
             ## directory
@@ -118,7 +111,39 @@ class LoadAFF4Volume(Reports.report):
             result.row(f)
 
         aff4.oracle.clear_hooks()
+        PDBO = DB.DBO()
+        for obj in NEW_OBJECTS:
+            for attribute,values in obj.properties.items():
+                try:
+                    attribute_id = ATTRIBUTES[attribute]
+                except KeyError:
+                    PDBO.execute('select attribute_id from AFF4_attribute where attribute = %r',
+                                attribute)
+                    row = PDBO.fetch()
+                    if row:
+                        attribute_id = row['attribute_id']
+                    else:
+                        PDBO.insert("AFF4_attribute", _fast=True,
+                                    attribute = attribute)
+                        attribute_id = PDBO.autoincrement()
+                        ATTRIBUTES[attribute] = attribute_id
+                        
+                for value in values:
+                    try:
+                        ## URN ID is already known
+                        urn_id = obj.urn_id
+                    except:
+                        ## Make a new URN ID
+                        PDBO.insert("AFF4_urn", _fast=True,
+                                    case = query['case'],
+                                    urn = obj.urn)
+                        obj.urn_id = urn_id = PDBO.autoincrement()
 
+                    PDBO.insert("AFF4",
+                                urn_id = urn_id,
+                                attribute_id=attribute_id,
+                                value=value)
+        
 import pdb
 
 class AFF4File(File):
@@ -155,15 +180,32 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     """ Create tables for the AFF4 universal resolver. """
     
     def init_default_db(self, dbh, case):
-        dbh.execute("""CREATE TABLE AFF4 (
+        ## Denormalise these tables for speed and efficiency
+        dbh.execute("""CREATE TABLE if not exists
+        AFF4_urn (
+        `urn_id` int unsigned not null auto_increment primary key,
         `case` varchar(50) default NULL,
-        `urn` varchar(2000) default NULL,
-        `attribute` varchar(2000) default NULL,
+        `urn` varchar(2000) default NULL
+        ) engine=MyISAM""")
+
+        dbh.execute("""CREATE TABLE if not exists
+        AFF4_attribute (
+        `attribute_id` int unsigned not null auto_increment primary key,
+        `attribute` varchar(2000) default NULL
+        ) engine=MyISAM;""")
+
+        dbh.execute("""CREATE TABLE if not exists
+        AFF4 (
+        `urn_id` int unsigned not null ,
+        `attribute_id` int unsigned not null ,
         `value` varchar(2000) default NULL
         ) engine=MyISAM;""")
-        dbh.check_index("AFF4", "urn", 100)
-        dbh.check_index("AFF4", "attribute", 100)
-
+        
+        dbh.check_index("AFF4_urn", "urn", 100)
+        dbh.check_index("AFF4_attribute", "attribute", 100)
+        dbh.check_index("AFF4", "urn_id")
+        dbh.check_index("AFF4", "attribute_id")
+        
     def startup(self):
         dbh = DB.DBO()
         try:

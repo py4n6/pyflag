@@ -2249,7 +2249,8 @@ def load_volume(filename, autoload=True):
     volume = ZipVolume(None, 'r')
     try:
         volume.load_from(filename)
-    except:
+    except Exception,e:
+        DEBUG(_DEBUG, "Cant load volume %s" % e)
         return []
 
     ## Load identities from this volume:
