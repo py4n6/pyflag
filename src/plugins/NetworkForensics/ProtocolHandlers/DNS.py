@@ -32,7 +32,7 @@ from pyflag.ColumnTypes import StringType, PacketType, IPType
 import pyflag.conf
 config=pyflag.conf.ConfObject()
 from plugins.NetworkForensics.NetworkScanner import StreamScannerFactory
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, guess_date, PCAPTime, IPType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType, guess_date, PCAPTime, IPType
 
 class DNSString(STRING):
     """ This parses names encoded in DNS. We support standard DNS
@@ -204,7 +204,7 @@ class DNSCaseTable(FlagFramework.CaseTable):
     """ DNS Table - Stores DNS transactions """
     name = 'dns'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ StringType, dict(name = 'DNS Name', column='name') ],
         [ IPType, dict(name = 'IP Address', column='ip_addr') ],
         ]

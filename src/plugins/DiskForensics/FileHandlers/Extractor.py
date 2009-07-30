@@ -3,7 +3,7 @@ about some files.
 """
 from pyflag.Scanner import *
 import pyflag.Reports as Reports
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType
+from pyflag.ColumnTypes import StringType, TimestampType
 
 active = False
 

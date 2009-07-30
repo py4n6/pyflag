@@ -31,7 +31,7 @@ import pyflag.Reports as Reports
 import pyflag.DB as DB
 import os.path
 from pyflag.Scanner import *
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, FilenameType, ColumnType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, ColumnType
 
 from hashlib import md5
 
@@ -51,7 +51,7 @@ class HashType(ColumnType):
 class HashCaseTable(FlagFramework.CaseTable):
     """ Hash Table - Lists MD5 hashes and NSRL Matches """
     name = 'hash'
-    columns = [ [ InodeIDType, dict() ],
+    columns = [ [ AFF4URN, dict() ],
                 [ HashType, {} ],
                 [ StringType, dict(name='NSRL Product',
                                    column='NSRL_product',
@@ -173,7 +173,7 @@ class HashComparison(Reports.report):
         
         try:
             result.table(
-                elements = [ InodeIDType(case=query['case']),
+                elements = [ AFF4URN(case=query['case']),
                              FilenameType(case=query['case']),
                              StringType('File Type', 'type', table='type'),
                              StringType('NSRL Product','NSRL_product', table='hash'),

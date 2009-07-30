@@ -27,7 +27,7 @@ Users may annotate important things for later reference.
 """
 import pyflag.Reports as Reports
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import StringType,TimestampType,EditableStringType,InodeIDType,FilenameType, IntegerType, IPType, add_display_hook, clear_display_hook
+from pyflag.ColumnTypes import StringType,TimestampType,EditableStringType,AFF4URN, FilenameType, IntegerType, IPType, add_display_hook, clear_display_hook
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.TableObj as TableObj
@@ -37,7 +37,7 @@ import pyflag.FileSystem as FileSystem
 class AnnotatedInode(FlagFramework.CaseTable):
     """ Annotation table - Annotates and categorizes Inodes """
     name = 'annotate'
-    columns = [ [InodeIDType, {} ],
+    columns = [ [AFF4URN, {} ],
                 [StringType, dict(name = 'Note', column='note')],
                 [StringType, dict(name = 'Category', column='category')],
                 [IntegerType, dict(name = 'ID', column='id', auto_increment=True)],
@@ -85,7 +85,7 @@ class ViewCaseReport(Reports.report):
         def Annotated_inodes(query, result):
             result.table(
                 elements = [ TimestampType(name='Time',column='mtime', table='inode'),
-                             InodeIDType(case=query['case']),
+                             AFF4URN(case=query['case']),
                              FilenameType(case=query['case']),
                              StringType('Category','category'),
                              StringType('Note','note'),
@@ -205,8 +205,6 @@ def render_annotate_inode_id(self, inode_id, row, result):
                                     report='ViewFile',
                                     mode = 'Summary',
                                     inode_id = inode_id)
-    ## This is the table object which is responsible for the
-    ## annotate table:
     original_query = result.defaults
 
     def annotate_cb(query, result):
@@ -262,12 +260,6 @@ def render_annotate_inode_id(self, inode_id, row, result):
         result.toolbar(cb=del_annotation, icon='delete.png',tooltip="Click here to delete this annotation")
 
     ## Check to see if the inode exists at all:
-    dbh = DB.DBO(self.case)
-    dbh.execute("select inode,inode_id from inode where inode.inode_id = %r", inode_id)
-    row = dbh.fetch()
-    if not row: return ''
-
-    inode = row['inode']
     annotate = AnnotationObj(case=self.case)
     row = annotate.select(inode_id=inode_id)
 
@@ -279,11 +271,7 @@ def render_annotate_inode_id(self, inode_id, row, result):
     else:
         tmp1.popup(annotate_cb, "Annotate", icon="pen.png")
 
-    if inode and len(inode)> 15:
-        value1="..%s" % inode[-13:]
-    else:
-        value1 = inode
-    tmp2.link(value1, tooltip = inode, target=link, pane="new")
+    tmp2.link(inode_id, tooltip = inode, target=link, pane="new")
 
     ## Add a checkbox for mass annotations:
     tmp0.checkbox(None, "annotate_inode", inode_id)
@@ -360,11 +348,11 @@ def column_decorator(self, table, sql, query, result):
 
     return self.name
 
-add_display_hook(InodeIDType, "render_annotate_inode_id", render_annotate_inode_id)
-InodeIDType.operator_annotated = operator_annotated
-if InodeIDType.column_decorator != column_decorator:
-    original_column_decorator = InodeIDType.column_decorator
-    InodeIDType.column_decorator = column_decorator
+add_display_hook(AFF4URN, "render_annotate_inode_id", render_annotate_inode_id)
+AFF4URN.operator_annotated = operator_annotated
+if AFF4URN.column_decorator != column_decorator:
+    original_column_decorator = AFF4URN.column_decorator
+    AFF4URN.column_decorator = column_decorator
 
 class InterestingIPObj(TableObj.TableObj):
     table = "interesting_ips"

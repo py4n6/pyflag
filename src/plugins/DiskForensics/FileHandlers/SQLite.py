@@ -32,7 +32,7 @@ import pyflag.tests
 import pyflag.Scanner as Scanner
 import pyflag.CacheManager as CacheManager
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import InodeIDType, IntegerType, StringType, TimestampType, BlobType
+from pyflag.ColumnTypes import AFF4URN, IntegerType, StringType, TimestampType, BlobType
 import os, subprocess
 import pyflag.conf
 config=pyflag.conf.ConfObject()
@@ -67,7 +67,7 @@ class SQLiteCaseTable(FlagFramework.CaseTable):
     """ SQLite Tables """
     name = 'sqlite'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ SQLiteColumn, dict(name = 'Name', column='name')],
         [ StringType, dict(name = 'Table Definition', column='definition')]
         ]
@@ -148,7 +148,7 @@ def build_case_table(prefix, definition):
     
     case_table = FlagFramework.CaseTable()
     case_table.name = "%s_%s" % (prefix, result[0])
-    case_table.columns = [(InodeIDType, {}),]
+    case_table.columns = [(AFF4URN, {}),]
     case_table.column_names = []
     case_table.sql_filters = []
     

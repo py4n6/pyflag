@@ -130,8 +130,8 @@ class Thumbnailer(Image):
         import pyflag.Magic as Magic
 
         magic = Magic.MagicResolver()
-        self.magic, self.content_type = magic.find_inode_magic(self.fd.case,
-                                                               inode_id = self.fd.lookup_id())
+        self.magic, self.content_type = magic.find_inode_magic(fd.case,
+                                                               urn_id = fd.urn_id)
 
         ## Now use the magic to dispatch the correct handler:
         ## Use the content type to access the thumbnail

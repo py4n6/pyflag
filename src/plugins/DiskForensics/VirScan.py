@@ -32,7 +32,7 @@ import pyflag.DB as DB
 import os.path
 import pyflag.pyflaglog as pyflaglog
 from pyflag.Scanner import *
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, FilenameType, IntegerType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, IntegerType
 
 WARNING_ISSUED = False
 
@@ -66,7 +66,7 @@ except (pyclamd.ScanError, TypeError, ValueError):
 class VirusTable(FlagFramework.CaseTable):
     """ Virus Table - Lists Viruses/Tojans detected """
     name = 'virus'
-    columns = [ [ InodeIDType, dict(case = None) ],
+    columns = [ [ AFF4URN, dict(case = None) ],
                 [ StringType, dict(name='Virus', column = 'virus')],
                 ]
     index = [ 'inode_id']
@@ -111,7 +111,7 @@ class VirusScan(Reports.report):
         result.heading("Virus Scan Results")
         dbh=self.DBO(query['case'])
         result.table(
-            elements = [ InodeIDType(case=query['case']),
+            elements = [ AFF4URN(case=query['case']),
                          FilenameType(case=query['case']),
                          StringType('Virus Detected','virus') ],
             table='virus',
@@ -150,7 +150,7 @@ class VirusStats(Stats.Handler):
         else:
             t = branch[1].replace("__",'/')
             result.table(
-                elements = [ InodeIDType(case = self.case),
+                elements = [ AFF4URN(case = self.case),
                              FilenameType(case = self.case),
                              IntegerType('Size','size', table = 'inode'),
                              TimestampType('Timestamp','mtime', table='inode')],

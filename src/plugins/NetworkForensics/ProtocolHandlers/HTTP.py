@@ -36,7 +36,7 @@ import plugins.NetworkForensics.PCAPFS as PCAPFS
 import FileFormats.HTML as HTML
 import re,time,cgi,Cookie
 import TreeObj
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, guess_date, PCAPTime
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType, guess_date, PCAPTime
 import pyflag.Time as Time
 import pyflag.CacheManager as CacheManager
 
@@ -195,7 +195,7 @@ class HTTPCaseTable(FlagFramework.CaseTable):
     """ HTTP Table - Stores all HTTP transactions """
     name = 'http'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ IntegerType, dict(name = 'Parent', column = 'parent') ],
         [ PacketType, dict(name = 'Request Packet', column='request_packet') ],
         [ StringType, dict(name='Method', column='method', width=10)],
@@ -231,7 +231,7 @@ class HTTPParameterCaseTable(FlagFramework.CaseTable):
     """ HTTP Parameters - Stores request details """
     name = 'http_parameters'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ StringType, dict(name = 'Parameter', column = 'key') ],
         [ StringType, dict(name = 'Value', column = 'value')],
         [ AttachmentColumnType, {}],
@@ -636,7 +636,7 @@ class BrowseHTTPRequestsXXX(Reports.report):
                              #TimestampType(name='Date',column='date'),
                              PacketType(name='Request Packet',column='request_packet',
                                         case=query['case']),
-                             InodeIDType(),
+                             AFF4URN(),
                              StringType('Method','method'),
                              StringType('URL','url'),
                              StringType('Content Type','content_type') ],

@@ -44,7 +44,7 @@ import pyflag.pyflaglog as pyflaglog
 import os
 import pyflag.FlagFramework as FlagFramework
 import pyflag.Registry as Registry
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, FilenameType, IntegerType, DeletedType, SetType, BigIntegerType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, IntegerType, DeletedType, SetType, BigIntegerType
 
 config.add_option("SCHEMA_VERSION", default=3, absolute=True,
                   help="Current schema version")
@@ -510,7 +510,7 @@ class CaseDBInit(FlagFramework.EventHandler):
 class FileTable(FlagFramework.CaseTable):
     """ File table - Complements the VFS inodes with filenames """
     name = 'file'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ StringType, dict(name = 'Inode String', column = 'inode')],
                 [ StringType, dict(name = 'Mode', column = 'mode', width=3)],
                 [ StringType, dict(name = 'Status', column = 'status', width=8)],
@@ -522,7 +522,7 @@ class InodeTable(FlagFramework.CaseTable):
     """ Inode Table - stores information related to VFS Inodes """
     name = 'inode'
     primary = 'inode_id'
-    columns = [ [ InodeIDType, {}, "auto_increment" ],
+    columns = [ [ AFF4URN, {}, "auto_increment" ],
                 [ StringType, dict(name = 'Inode String', column = 'inode')],
                 [ DeletedType, {} ],
                 [ IntegerType, dict(name = 'UID', column = 'uid')],

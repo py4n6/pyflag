@@ -857,6 +857,7 @@ def delete_case(case):
                 os.rmdir(join(root, name))
 
         os.rmdir(temporary_dir)
+        ok.remove("%s/%s.aff4" % (config.RESULTDIR, case))
     except Exception,e:
         print e
 

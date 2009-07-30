@@ -42,45 +42,10 @@ import pyflag.Scanner as Scanner
 import pyflag.ScannerUtils as ScannerUtils
 import pyflag.Registry as Registry
 import pyflag.parser as parser
-from pyflag.ColumnTypes import IntegerType,TimestampType,InodeIDType,FilenameType, StringType, StateType
+from pyflag.ColumnTypes import IntegerType,TimestampType,FilenameType, StringType, StateType
 from pyflag.ColumnTypes import DeletedType, BinaryType
 
-description = "Disk Forensics"
-order=30
-
-BLOCKSIZE=20
-
-def make_inode_link(fd, query,ui, variable='inode'):
-    """ Returns a ui based on result with links to each level of the
-    inode"""
-    result = []
-    tmp =  query[variable].split('|')
-
-    for i in range(len(tmp)-1,-1,-1):
-        new_query = query.clone()
-        del new_query[variable]
-        tmp_result = ui.__class__(ui)
-        try:
-            inode_id = fd.lookup_id()
-        except: continue
-        
-        if inode_id:
-            new_query.set("inode_id",inode_id)
-            tmp_result.link(tmp[i],target=new_query, pane='pane')
-        else:
-            tmp_result.text(tmp[i])
-        fd = fd.fd
-
-        result.insert(0, tmp_result)
-
-    out = result[0]
-    for i in range(1,len(result)):
-        out.text("|")
-        out.text(result[i])
-
-    return out
-
-class BrowseFS(Reports.report):
+class BrowseFS(Reports.CaseTableReports):
     """
     Browsing the FileSystem
     -----------------------
@@ -108,53 +73,24 @@ class BrowseFS(Reports.report):
     name = "Browse Filesystem"
     family = "Disk Forensics"
     description = "Display filesystem in a browsable format"
+    default_table = "AFF4VFS"
     
     def display(self,query,result):
         result.heading("Browsing Virtual Filesystem")
-        dbh = self.DBO(query['case'])
-        main_result=result
-        
-        branch = ['']
-        new_query = result.make_link(query, '')
-
         def tabular_view(query,result):
-            result.table(
-                elements = [ InodeIDType(case=query['case']),
-                             StringType(name='Mode',column = 'mode', table='file'),
-                             FilenameType(case=query['case']),
-                             DeletedType(),
-                             IntegerType(name='File Size',column='size'),
-                             TimestampType(name='Last Modified',column='mtime'),
-                             TimestampType(name='Last Accessed',column='atime'),
-                             TimestampType(name='Created',column='ctime'),
-                             ],
-                table='inode',
-                case=query['case'],
-                filter="filter1",
-                )
+            self.make_table_widget(['URN', 'Filename',
+                                    'Size', 'Modified'],
+                                   query, result)
 
         def tree_view(query,result):
-            if (query.has_key("open_tree") and query['open_tree'] != '/'):
-                br = query['open_tree']
-            else:
-                br = '/'
-                
-            if not query.has_key('open_tree'): query['open_tree']='/'
             def tree_cb(path):
-                ## We expect a directory here:
-                if not path.endswith('/'): path=path+'/'
-                
-                ## We need a local copy of the filesystem factory so
-                ## as not to affect other instances!!!
-                fsfd = FileSystem.DBFS( query["case"])
+                fsfd = FileSystem.DBFS(query["case"])
 
-                dirs = []
-                for i in fsfd.dent_walk(path): 
-                    if i['mode']=="d/d" and i['status']=='alloc' and i['name'] not in dirs:
-                        dirs.append(i['name'])
+                for i in fsfd.longls(path):
+                    if i['type'] == 'directory':
                         yield(([i['name'],i['name'],'branch']))
 
-            def pane_cb(path,tmp):
+            def pane_cb(path,result):
                 query['order']='Filename'
 
                 ## If we are asked to show a file, we will show the
@@ -163,31 +99,19 @@ class BrowseFS(Reports.report):
                 if not fsfd.isdir(path):
                     path=os.path.dirname(path)
 
-                tmp.table(
-                    elements = [ InodeIDType(case=query['case']),
-                                 FilenameType(basename=True, case=query['case']),
-                                 DeletedType(),
-                                 IntegerType('File Size','size'),
-                                 TimestampType('Last Modified','mtime'),
-                                 StringType('Mode','mode', table='file') ],
-                    table='inode',
-                    where=DB.expand("file.path=%r and file.mode!='d/d'", (path+'/')),
-                    case=query['case'],
-                    pagesize=10,
-                    filter="filter2",
-                    )
-
-                target = tmp.defaults.get('open_tree','/')
-                tmp.toolbar(text=DB.expand("Scan %s",target),
-                            icon="examine.png",
-                            link=query_type(family="Load Data", report="ScanFS",
-                                            path=target,
-                                            case=query['case']), pane='popup'
-                            )
-
-
-        
-            result.tree(tree_cb = tree_cb,pane_cb = pane_cb, branch = branch )
+                self.make_table_widget(['URN','Name',
+                                        'Size','Modified'],
+                                       query, result,
+                                       where=DB.expand("path=%r and (isnull(type) or type!='directory')", (path)),)
+                
+                result.toolbar(text=DB.expand("Scan %s",path),
+                               icon="examine.png",
+                               link=query_type(family="Load Data", report="ScanFS",
+                                               path=path,
+                                               case=query['case']), pane='popup'
+                               )
+    
+            result.tree(tree_cb = tree_cb,pane_cb = pane_cb)
         
         result.notebook(
             names=["Tree View","Table View"],
@@ -199,8 +123,7 @@ class BrowseFS(Reports.report):
 
 class ViewFile(Reports.report):
     """ Report to browse the filesystem """
-    #parameters = {'inode':'string'}
-    hidden = True
+    parameters = {'inode_id':'numeric'}
     family = "Disk Forensics"
     name = "View File Contents"
     description = "Display the contents of a file"
@@ -210,31 +133,22 @@ class ViewFile(Reports.report):
         if not query.has_key('limit'): query['limit']= 0
         dbh = self.DBO(query['case'])
 
-        fsfd = FileSystem.DBFS( query["case"])
+        fsfd = FileSystem.DBFS(query["case"])
         ## If this is a directory, only show the stats
-        if query.has_key('inode_id'):
-            fd = fsfd.open(inode_id=query['inode_id'])
-            fd.inode_id = query['inode_id']
-            query['inode'] = fd.inode
-        else:
-            fd = fsfd.open(inode=query['inode'])
-
+        fd = fsfd.open(inode_id=query['inode_id'])
         if not fd: return
-        image = Graph.Thumbnailer(fd,300)
-        
-        ## Make a series of links to each level of this inode - this
-        ## way we can view parents of this inode.
+
         tmp = result.__class__(result)
-        tmp.text("Viewing file in inode ",make_inode_link(fd, query,result))
+        tmp.text("Viewing ", fd.urn)
         result.heading(tmp)
         
-        try:
-            result.text("Classified as %s by magic" % image.GetMagic())
-        except IOError,e:
-            result.text("Unable to classify file, no blocks: %s" % e)
-            image = None
-        except:
-            pass
+#         try:
+#             result.text("Classified as %s by magic" % )
+#         except IOError,e:
+#             result.text("Unable to classify file, no blocks: %s" % e)
+#             image = None
+#         except:
+#             pass
 
         names, callbacks = fd.make_tabs()
         
@@ -246,198 +160,14 @@ class ViewFile(Reports.report):
         
         result.toolbar(text="Scan this File",icon="examine.png",
                        link=query_type(family="Load Data", report="ScanInode",
-                                       inode = query['inode'],
+                                       inode_id = query['inode_id'],
                                        case=query['case']
                                        ),
                        pane = 'pane'
                        )
 
     def form(self,query,result):
-        result.defaults = query
         result.case_selector()
-        result.textfield('Inode','inode')
+        result.textfield('URN','urn')
         return result
 
-class MACTimes(FlagFramework.EventHandler):
-    def create(self, dbh, case):
-        dbh.execute("""create table if not exists mac(
-        `inode_id` INT NOT NULL default 0,
-        `status` varchar(8) default '',
-        `time` timestamp NOT NULL default '0000-00-00 00:00:00',
-        `m` int default NULL,
-        `a` tinyint default NULL,
-        `c` tinyint default NULL,
-        `d` tinyint default NULL,
-        `name` text
-        ) """)
-
-class Timeline(Reports.report):
-    """ View file MAC times in a searchable table """
-    name = "View File Timeline"
-    family = "Disk Forensics"
-    description = "Browse file creation, modification, and access times"
-
-    def form(self, query, result):
-        result.case_selector()
-
-    def analyse(self, query):
-        dbh = self.DBO(query['case'])
-        temp_table = dbh.get_temp()
-        dbh.check_index("inode","inode")
-        dbh.execute("create temporary table %s select i.inode_id,f.status,mtime as `time`,1 as `m`,0 as `a`,0 as `c`,0 as `d`,concat(path,name) as `name` from inode as i left join file as f on i.inode=f.inode" %
-                    (temp_table, ));
-        dbh.execute("insert into %s select i.inode_id,f.status,atime,0,1,0,0,concat(path,name) from inode as i left join file as f on i.inode_id=f.inode_id" % (temp_table,))
-        dbh.execute("insert into %s select i.inode_id,f.status,ctime,0,0,1,0,concat(path,name) from inode as i left join file as f on i.inode_id=f.inode_id" % (temp_table, ))
-        dbh.execute("insert into %s select i.inode_id,f.status,dtime,0,0,0,1,concat(path,name) from inode as i left join file as f on i.inode_id=f.inode_id" % (temp_table, ))
-        dbh.execute("insert into mac select inode_id,status,time,sum(m) as `m`,sum(a) as `a`,sum(c) as `c`,sum(d) as `d`,name from %s where time>0 group by time,name order by time,name" % temp_table)
-        dbh.check_index("mac","inode_id")
-        
-    def progress(self, query, result):
-        result.heading("Building Timeline")
-    
-    def display(self, query, result):
-        dbh = self.DBO(query['case'])
-        result.heading("File Timeline for Filesystem")
-        result.table(
-            elements=[ TimestampType('Timestamp','time'),
-                       InodeIDType(case=query['case']),
-                       DeletedType(),
-                       BinaryType('m',"m"),
-                       BinaryType('a',"a"),
-                       BinaryType('c',"c"),
-                       BinaryType('d',"d"),
-                       FilenameType(),
-                       ],
-            table='mac',
-            case=query['case'],
-            )
-
-    def reset(self, query):
-        dbh = self.DBO(query['case'])
-        dbh.execute("drop table mac")
-
-## FIXME - This is deprecated. Sleuthkit files are read using the K
-## driver now. There may be some use for this kind of driver though (a
-## file which is completely specified by a sequence of blocks).
-class DBFS_file(FileSystem.File):
-    """ Class for reading files within a loaded dd image, supports typical file-like operations, seek, tell, read """
-    
-    specifier = 'D'
-    def __init__(self, case, fd, inode):
-        FileSystem.File.__init__(self, case, fd, inode)
-
-        self.stat_names.extend(["Text"])
-        self.stat_cbs.extend([self.textdump])
-
-        ## This is kind of a late initialization. We get the indexes
-        ## on demand later.
-        self.index=None
-        
-    def getval(property):
-        try:
-            return self.data[property]
-        except KeyError:
-            return None
-
-    def read(self, length=None):
-        ## Call our baseclass to see if we have cached data:
-        try:
-            return FileSystem.File.read(self,length)
-        except IOError:
-            pass
-
-        dbh=DB.DBO(self.case)
-        ## We need to fetch the blocksize if we dont already know it:
-        if not self.index:
-            # fetch inode data
-            dbh.check_index("inode" ,"inode")
-            dbh.execute("select * from inode where inode=%r limit 1", (self.inode))
-            self.data = dbh.fetch()
-            if not self.data:
-                raise IOError("Could not locate inode %s"% self.inode)
-
-            self.size = self.data['size']
-            dbh.check_index("block" ,"inode")
-            dbh.execute("select block,count,`index` from block where inode=%r order by `index`", (self.inode))
-            try:
-                self.blocks = [ (row['block'],row['count'],row['index']) for row in dbh ]
-            except KeyError:
-                self.blocks = None
-                
-            self.index = [ d[2] for d in self.blocks ]
-
-        if (length == None) or ((length + self.readptr) > self.size):
-            length = self.size - self.readptr
-
-        if length == 0:
-            return ''
-
-        if not self.blocks:
-            # now try to find blocks in the resident table
-            dbh.check_index("resident","inode")
-            dbh.execute("select data from resident where inode=%r limit 1", (self.data['inode']));
-            row = dbh.fetch()
-            if not row:
-                raise IOError("Cant find any file data")
-            data = row['data'][self.readptr:length+self.readptr]
-	    self.readptr += length
-	    return data
-
-        fbuf=''
-        while length>0:
-        ## Where are we in the chunk?
-            ddoffset,bytes_left = self.offset(self.readptr)
-            
-            self.fd.seek(ddoffset)
-            if(bytes_left > length):
-                fbuf += self.fd.read(length)
-                self.readptr+=length
-                return fbuf
-            else:
-                fbuf += self.fd.read(bytes_left)
-                length-=bytes_left
-                self.readptr+=bytes_left
-
-        return fbuf
-
-    def offset(self,offset):
-        """ returns the offset into the current block group where the given offset is found"""
-        ## The block in the file where the offset is found
-        block = int(offset/self.fd.block_size)
-
-        ##Obtain the index of blocks array where the chunk is. This is the index at which self.index is 
-        blocks_index=0
-        try:
-            while 1:
-                if self.index[blocks_index]<=block<self.index[blocks_index+1]: break
-                blocks_index+=1
-
-        except IndexError:
-            blocks_index=len(self.index)-1
-
-        #If the end of the chunk found occurs before the block we seek, there is something wrong!!!
-        if self.blocks[blocks_index][1]+self.blocks[blocks_index][2]<=block:
-            raise IOError("Block table does not span seek block %s"%block,offset)
-
-        ## Look the chunk up in the blocks array
-        ddblock,count,index=self.blocks[blocks_index]
-
-        ## The offset into the chunk in bytes
-        chunk_offset = offset-index*self.fd.block_size
-
-        ## The dd offset in bytes
-        ddoffset=ddblock*self.fd.block_size+chunk_offset
-
-        ## The number of bytes remaining in this chunk
-        bytes_left = count*self.fd.block_size-chunk_offset
-        
-        return ddoffset,bytes_left
-
-    def textdump(self, query,result):
-        """ Dumps the file in a text window """
-        max=config.MAX_DATA_DUMP_SIZE
-        def textdumper(offset,data,result):
-            result.text(data,sanitise='full',font='typewriter',
-                        style="red",wrap="full")
-
-        return self.display_data(query,result,max, textdumper)

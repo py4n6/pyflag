@@ -35,7 +35,7 @@ from pyflag.FlagFramework import query_type
 from NetworkScanner import *
 import plugins.NetworkForensics.PCAPFS as PCAPFS
 import TreeObj
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, IPType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType, IPType
 
 import dissect,sys,struct,sys,cStringIO, re, time, cgi
 
@@ -558,7 +558,7 @@ class BrowseFTPRequests(Reports.report):
         def sessions(query, result):
             result.table(
                 elements = [ #IntegerType("FTP Session id", "ftp_session_id"),
-                             InodeIDType(case=query['case']),
+                             AFF4URN(case=query['case']),
                              TimestampType("Start Time", "start_time"), 
                              IPType("Client IP", "client_ip", case=query['case']),
                              IPType("Server IP", "server_ip", case=query['case']),
@@ -589,7 +589,7 @@ class BrowseFTPRequests(Reports.report):
                                                   report = "Browse FTP Data")),
                              TimestampType("Time Created", "time_created"),
                              StringType("Purpose", "purpose"),
-                             InodeIDType(case=query['case'])],
+                             AFF4URN(case=query['case'])],
                 table = 'ftp_data_streams',
                 case = query['case'])
 

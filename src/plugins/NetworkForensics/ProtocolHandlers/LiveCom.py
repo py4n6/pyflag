@@ -73,7 +73,7 @@ itself. To get the post values look at the http_parameters table for
 that HTTP object id.
 """
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType
 import FileFormats.HTML as HTML
 import pyflag.DB as DB
 import pyflag.Scanner as Scanner
@@ -127,8 +127,8 @@ class WebMailTable(FlagFramework.CaseTable):
     """ Table to store Web mail related information """
     name = 'webmail_messages'
     columns = [
-        [ InodeIDType, {} ],
-        [ InodeIDType, dict(column = 'parent_inode_id')],
+        [ AFF4URN, {} ],
+        [ AFF4URN, dict(column = 'parent_inode_id')],
         [ StringType, dict(name="Service", column='service')],
         [ StringType, dict(name='Type', column='type')],
         [ HTMLStringType, dict(name='From', column='From')],
@@ -145,8 +145,8 @@ class WebMailAttachmentTable(FlagFramework.CaseTable):
     """ Table to store web mail attachment references """
     name = "webmail_attachments"
     columns = [
-        [ InodeIDType, dict(name = "Message Inode") ],
-        [ InodeIDType, dict(name = "Attachment", column="attachment") ],
+        [ AFF4URN, dict(name = "Message Inode") ],
+        [ AFF4URN, dict(name = "Attachment", column="attachment") ],
         [ StringType, dict(name = "URL", column='url')],
         ]
 
@@ -534,7 +534,7 @@ class LiveAttachements(FlagFramework.EventHandler):
                                         attachment = attachment)
         
 
-class AttachmentColumn(InodeIDType):
+class AttachmentColumn(AFF4URN):
     """ Displays the attachments related to the webmail message """
     def display(self, value, row, result):
         dbh = DB.DBO(self.case)
@@ -582,7 +582,7 @@ class WebMailMessages(Reports.report):
     def display(self, query, result):
         result.table(
             elements = [ TimestampType('Timestamp','mtime', table='inode'),
-                         InodeIDType(case = query['case']),
+                         AFF4URN(case = query['case']),
                          StringType('From', 'From'),
                          StringType('To', 'To'),
                          StringType('CC', 'CC'),

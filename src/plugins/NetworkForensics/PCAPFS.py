@@ -42,7 +42,7 @@ import reassembler
 from NetworkScanner import *
 import pypcap
 import cStringIO
-from pyflag.ColumnTypes import StringType, IntegerType, TimestampType, InodeIDType, CounterType, BigIntegerType, ShortIntegerType, IPType, StateType
+from pyflag.ColumnTypes import StringType, IntegerType, TimestampType, AFF4URN, CounterType, BigIntegerType, ShortIntegerType, IPType, StateType
 import pyflag.CacheManager as CacheManager
 
 description = "Network Forensics"
@@ -98,7 +98,7 @@ class ConnectionTable(FlagFramework.CaseTable):
     """ Connection table - contains infomation about all packets involved in a connection """
     name = 'connection'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ IntegerType, dict(name='Original ID', column ='original_id')],
         [ IntegerType, dict(name='Packet ID', column='packet_id'),
           "unsigned "],
@@ -113,7 +113,7 @@ class ConnectionDetailsTable(FlagFramework.CaseTable):
     """ Connection Details - Contains details about each connection """
     name ='connection_details'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ IntegerType, dict(name='Reverse', column='reverse')],
         [ IPType, dict(name='Source IP', column='src_ip')],
         [ ShortIntegerType, dict(name='Source Port', column='src_port')],

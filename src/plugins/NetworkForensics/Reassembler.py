@@ -34,7 +34,7 @@ from NetworkScanner import *
 import struct,re,os
 import reassembler
 from pyflag.ColumnTypes import StringType, IntegerType, TimestampType
-from pyflag.ColumnTypes import InodeIDType, IPType, PCAPTime
+from pyflag.ColumnTypes import IPType, PCAPTime
 import pyflag.Reports as Reports
 import pyflag.CacheManager as CacheManager
 

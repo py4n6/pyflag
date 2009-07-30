@@ -466,8 +466,11 @@ class StateType(ColumnType):
         '=': 'equal'
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, states=None, *args, **kwargs):
         ColumnType.__init__(self, *args, **kwargs)
+        if states:
+            self.states = states
+        
         self.docs = {'is': """ Matches when the column is of the specified state. Supported states are %s""" % self.states.keys()}
         self.tests = [ [ "is" ,"foobar", True ],
                        [ "is" , self.states.keys()[0], False],
@@ -934,20 +937,20 @@ class IPType(ColumnType, LogParserMixin):
 
     display_hooks = IntegerType.display_hooks[:]
 
-class InodeType(StringType):
-    """ A unified view of inodes """
-    hidden = True
+## FIXME - merge all three classes:
+class AFF4URN(IntegerType):
     LogCompatible = False
-    
-    def __init__(self, name='Inode', column='inode', link=None, case=None, callback=None):
-        #raise RuntimeError("InodeType is depracated - you must use InodeIDType now")
-        self.case = case
-        StringType.__init__(self,name,column,link,callback=callback)
+    def __init__(self, name='URN', column='inode_id', **kwargs):
+        IntegerType.__init__(self, name=name, column=column, **kwargs)
+        self.table = 'vfs'
 
-    def get_inode(self, inode):
-        return inode
+    def where(self):
+        return "!isnull(inode_id)"
 
-class InodeIDType(IntegerType):
+class InodeType(AFF4URN):
+    pass
+
+class OldInodeIDType(IntegerType):
     LogCompatible = False
     
     tests = [ [ "contains", "|G", False ],
@@ -1118,7 +1121,7 @@ class InodeIDType(IntegerType):
 
         return self.name
 
-clear_display_hook(InodeIDType)
+clear_display_hook(AFF4URN)
 
 class FilenameType(StringType):
     hidden = True
@@ -1145,12 +1148,14 @@ class FilenameType(StringType):
                      StringType.link_display_hook]
 
     def order_by(self):
-        return "concat(file.path, file.name)"
+        return "concat(`%s`.path, `%s`.name)" %(self.table, self.table)
 
     def select(self):
         if self.basename:
-            return "file.link, file.name"
-        else: return "file.link, concat(file.path,file.name)"
+            return "`%s`.link, `%s`.name" %(self.table, self.table)
+        else: return "`%s`.link, concat(`%s`.path,`%s`.name)" % (self.table,
+                                                                 self.table,
+                                                                 self.table)
 
     ## FIXME: implement filename globbing operators - this should be
     ## much faster than regex or match operators because in marches,
@@ -1167,8 +1172,10 @@ class FilenameType(StringType):
 
     def operator_literal(self, column, operator, pattern):
         column = self.escape_column_name(self.column)
-        return DB.expand("%s in (select inode_id from file where concat(file.path, file.name) %s %r)",
-                         (column, operator, pattern))
+        return DB.expand("%s in (select inode_id from `%s` where "
+                         "concat(`%s`.path, `%s`.name) %s %r)",
+                         (self.table, self.table, self.table,
+                          column, operator, pattern))
 
     def create(self):
         return "path TEXT, name TEXT, link TEXT NULL"
@@ -1276,7 +1283,7 @@ class ColumnTypeTests(pyflag.tests.ScannerTest):
                           DeletedType( table='dummy'),
                           TimestampType('TimestampType','timestamp'),
                           IPType('IPType','source_ip'),
-                          InodeIDType(),
+                          AFF4URN(),
                           FilenameType(),
                           ]
         self.tablename = 'dummy'
@@ -1321,10 +1328,10 @@ class ColumnTypeTests(pyflag.tests.ScannerTest):
         self.assertEqual(self.generate_sql("'IPType' netmask 10.10.10.1/24"),
                          "(1) and ( ( `source_ip` >= 168430081 and `source_ip` <= 168430335 ) )")
         
-        self.assertEqual(self.generate_sql("'InodeIDType' annotated FooBar"),
+        self.assertEqual(self.generate_sql("'AFF4URN' annotated FooBar"),
                          '(1) and (`inode_id`=(select annotate.inode_id from annotate where note like "%FooBar%"))')
 
         ## Joined filters:
-        self.assertEqual(self.generate_sql("InodeIDType contains 'Z|' and TimestampType after 2005-10-10"),
+        self.assertEqual(self.generate_sql("AFF4URN contains 'Z|' and TimestampType after 2005-10-10"),
                          "(1) and ((`inode`.`inode_id` in (select inode_id from inode where inode like '%Z|%')) and `timestamp` > '2005-10-10 00:00:00')")
 

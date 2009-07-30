@@ -5,7 +5,7 @@ import pyflag.FlagFramework as FlagFramework
 ## A linux filesystem loader
 import pyflag.FileSystem as FileSystem
 
-from pyflag.ColumnTypes import StateType, InodeIDType, IntegerType, BigIntegerType, StringType
+from pyflag.ColumnTypes import StateType, AFF4URN, IntegerType, BigIntegerType, StringType
 import os
 import pyflag.IO as IO
 import pyflag.DB as DB
@@ -123,7 +123,7 @@ class MemoryOffsetType(BigIntegerType):
 class ProcessTable(FlagFramework.CaseTable):
     """ Process Table - Stores information about running tasks """
     name = 'mem_process'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ IntegerType, dict(name = "Process ID", column = 'pid') ],
                 [ StringType, dict(name = "Task Name", column='task_name')],
                 [ ProcessTypeSet, dict(name = "Process Type", column = 'type') ],
@@ -153,9 +153,9 @@ class FileTypeSet(StateType):
 class OpenFileTable(FlagFramework.CaseTable):
     """ Process Open files - Files currently opened by the process """
     name = "mem_open_files"
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ IntegerType, dict(name = 'Fd', column='fd')],
-                [ InodeIDType, dict(name = "Resolved File", column = 'opened_inode_id') ],
+                [ AFF4URN, dict(name = "Resolved File", column = 'opened_inode_id') ],
                 [ MemoryOffsetType, dict(name='File Struct', column='offset_to_file')],
                 [ MemoryOffsetType, dict(name='Dentry', column='offset_to_dentry')],
                 [ MemoryOffsetType, dict(name='Inode Struct', column='offset_to_inode')],
@@ -170,7 +170,7 @@ class SocketTypeSet(StateType):
 class OpenSockets(FlagFramework.CaseTable):
     """ Open Sockets - Sockets Currently opened by the process """
     name = "mem_sockets"
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ IntegerType, dict(name = "File Desc", column = 'fd') ],
                 [ SocketTypeSet, dict(name = "Type", column = 'type')],
                 [ BigIntegerType, dict(name = "Offset", column ='offset')],

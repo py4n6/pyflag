@@ -50,7 +50,7 @@ import pyflag.pyflaglog as pyflaglog
 import base64, posixpath
 import plugins.NetworkForensics.PCAPFS as PCAPFS
 import urllib,os,time,datetime
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, ColumnType, PCAPTime, PacketType, BigIntegerType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, ColumnType, PCAPTime, PacketType, BigIntegerType
 
 config.add_option("MSN_PORTS", default='[1863,]',
                   help="A list of ports to be considered for MSN connections")
@@ -1802,7 +1802,7 @@ class ContextParser(HTMLParser):
 class MSNSessionTable(FlagFramework.CaseTable):
     """ Store information about decoded MSN messages """
     name = 'msn_session'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ PacketType, dict(name = 'Packet', column = 'packet_id') ],
                 [ BigIntegerType, dict(name = 'Session ID', column='session_id') ],
                 [ StringType, dict(name = 'Sender', column='sender')],
@@ -2181,7 +2181,7 @@ class BrowseMSNData(Reports.report):
             result.table(
             elements = [ #PCAPTime('Prox','packet_id', callback = draw_prox_cb),
                          PCAPTime('Timestamp','packet_id'),
-                         InodeIDType(case = query['case'],
+                         AFF4URN(case = query['case'],
                                      link = query_type(family="Disk Forensics",
                                                        case=query['case'],
                                                        report='View File Contents',
@@ -2219,7 +2219,7 @@ class BrowseMSNData(Reports.report):
                          #                          case=query['case'],
                          #                          report='View File Contents',
                          #                          __target__='inode')),
-                         #InodeIDType("P2P File","p2p_file", case=query['case']),
+                         #AFF4URN("P2P File","p2p_file", case=query['case']),
                          ],
             
             #TODO find a nice way to separate date and time (for exporting csv separate), but not have it as the default...
@@ -2238,7 +2238,7 @@ class BrowseMSNData(Reports.report):
             """ This report shows the data known about MSN participants (users).
             """
             result.table(
-                elements = [ InodeIDType(case = query['case'],
+                elements = [ AFF4URN(case = query['case'],
                               link = query_type(family="Disk Forensics",
                                                 case=query['case'],
                                                 report='View File Contents',
@@ -2274,7 +2274,7 @@ class BrowseMSNData(Reports.report):
 
         def file_transfers(query, result):
             result.table(
-                    elements =[InodeIDType(case = query['case'],
+                    elements =[AFF4URN(case = query['case'],
                                       link = query_type(family="Disk Forensics",
                                       case=query['case'],
                                       report='View File Contents',

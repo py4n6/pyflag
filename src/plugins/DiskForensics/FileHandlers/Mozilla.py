@@ -24,7 +24,7 @@ stored in the Mork format.
 
     Also contains a parser for handing Mozilla/Firefox Cache directories.
 """
-from pyflag.ColumnTypes import StringType, TimestampType, FilenameType, InodeIDType
+from pyflag.ColumnTypes import StringType, TimestampType, FilenameType, AFF4URN
 import pyflag.Reports as Reports
 import pyflag.FlagFramework as FlagFramework
 import pyflag.DB as DB
@@ -65,7 +65,7 @@ class BrowserHistoryReport(Reports.report):
     def display(self, query,result):
         def hist_cb(query,result):            
             result.table(
-                elements = [ InodeIDType(case=query['case']),
+                elements = [ AFF4URN(case=query['case']),
                              TimestampType('LastVisitDate','LastVisitDate'),
                              StringType('Name', 'name'),
                              StringType('URL', 'url'),
@@ -79,7 +79,7 @@ class BrowserHistoryReport(Reports.report):
 
         def form_cb(query, result):
             result.table(
-                elements = [ InodeIDType(case=query['case']),
+                elements = [ AFF4URN(case=query['case']),
                              StringType('Name','name'),
                              StringType('Value', 'value'),
                              ],
@@ -93,7 +93,7 @@ class BrowserHistoryReport(Reports.report):
             dbh.check_index("ie_history" ,"url",10)
             OffsetType = Registry.COLUMN_TYPES.dispatch("OffsetType")
             result.table(
-                elements = [ InodeIDType(case=query['case']),
+                elements = [ AFF4URN(case=query['case']),
                              OffsetType(case=query['case'], table='ie_history'),
                              StringType('Type','type'),
                              StringType('URL','url'),

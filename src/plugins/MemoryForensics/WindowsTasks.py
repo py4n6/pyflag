@@ -2,7 +2,7 @@
 
 import pyflag.Registry as Registry
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import InodeIDType, IntegerType, StringType, TimestampType, BigIntegerType
+from pyflag.ColumnTypes import AFF4URN, IntegerType, StringType, TimestampType, BigIntegerType
 import StringIO, sys, string
 import pyflag.DB as DB
 import pyflag.Time as Time
@@ -13,7 +13,7 @@ active = True
 class WindowsTaskTable(FlagFramework.CaseTable):
     """ Windows Tasks table - lists all windows tasks """
     name = 'windows_tasks'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ IntegerType, dict(name = "Process ID", column = 'pid') ],
                 [ StringType, dict(name = "Task Name", column='name')],
                 [ StringType, dict(name = 'Command Line', column='cmdline')],
@@ -27,10 +27,10 @@ class WindowsTaskTable(FlagFramework.CaseTable):
 class WindowsModulesTable(FlagFramework.CaseTable):
     """ Lists all the modules loaded within a process """
     name = 'windows_modules'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ StringType, dict(name = 'Module Path', column='path') ],
                 [ BigIntegerType, dict(name = "Base Offset", column = "base") ],
-                [ InodeIDType, dict(name = 'Size', column='size')],
+                [ AFF4URN, dict(name = 'Size', column='size')],
                 ]
 
 class FindTasks(Registry.FileSystemLoader):

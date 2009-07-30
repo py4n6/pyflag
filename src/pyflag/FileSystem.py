@@ -61,664 +61,35 @@ import bisect
 import zipfile
 import StringIO
 import pyflag.Scanner as Scanner
-import pyflag.Graph as Graph
 import pyflag.Store as Store
 import pyflag.CacheManager as CacheManager
-
-FSCache = Store.Store()
-
-class FileSystem:
-    """ This is the base class for accessing file systems in PyFlag. This class is abstract and is here purely for documentation purposes.
-
-    @cvar name: The name of the filesystem to show in the loadfs dialog
-    """
-    ## This is the cookie which will be used to identify scanning jobs
-    ## from this FS:
-    cookie = 0
-    
-    def __init__(self, case, query=None):
-        """ Constructor for creating an new filesystem object
-
-        @arg case: Case to use
-        @arg iosource: An already open data source, may be iosource, or another 'File'
-        """
-        pass
-    
-    name = None
-    
-    def load(self, mount_point, iosource_name, scanners=None):
-        """ This method loads the filesystem into the database.
-
-        Currently the database schema is standardised by the DBFS
-        class, and all other filesystems just extend the load method
-        to implement different drivers for loading the filesystem into
-        the database. For reading and manipulating the filesystem, the
-        DBFS methods are used.
-
-        scanners contains a list of scanner names which will be scheduled to run on every newly created VFS node.
-        
-        """
-        pass
-
-    def delete(self):
-        """ This method should remove the database which contains the filesystem """
-        pass
-    
-    def longls(self,path='/'):
-        """ list directory content longly """
-        pass
-
-    def VFSCreate(self,root_inode,inode, _fast=False, link=None, inode_id=None):
-        """ This method creates inodes within the virtual filesystem.
-
-        This facility allows callers to extend the VFS to include more virtual files.
-        """
-
-    def ls(self, path="/", dirs=None):
-        """list directory contents"""
-        pass
-
-    def dent_walk(self, path='/'):
-        """A generator which returns directory entries under the given path, one at a time """
-        pass
-
-    def lookup(self, path=None,inode=None):
-        """return the inode number for the given path, or else the path for the given inode number. """
-        pass
-
-    def open(self, path=None, inode=None, inode_id=None):
-        """ Opens the specified path or Inode providing a file like object.
-
-        This object can then be used to read data from the specified file.
-        @note: Only files may be opened, not directories."""
-        if path:
-            path, inode, inode_id = self.lookup(path=path)
-        elif inode_id:
-            path, inode, inode_id = self.lookup(inode_id=inode_id)
-
-        if not inode:
-            raise IOError('Inode not found for file (inode_id %s, path %s)' % (inode_id,path))
-
-        parts = inode.split('|')
-        sofar = [] # the inode part up to the file we want
-        ## We start with the FileSystem iosource as the file like object for use, and then as each file is opened, we update retfd.
-        retfd = None
-        for part in parts:
-            sofar.append(part)
-            try:
-## This is some caching which should be faster, but doesnt seem to
-## make much different in practice??? (It does make a difference with
-## memory images, for example - so we leave it on)
-                try:
-                    inode_so_far = '|'.join(sofar)
-                    
-                    retfd = FSCache.get(inode_so_far, remove=True)
-                    retfd.seek(0)
-##                    print "Got %s from cache (%s)" % (inode_so_far, FSCache.size())
-                except KeyError:
-                    retfd = Registry.VFS_FILES.vfslist[part[0]](self.case, retfd, '|'.join(sofar))
-
-            except IndexError:
-                raise IOError, "Unable to open inode: %s, no VFS" % part
-
-        retfd.inode_id = inode_id
-
-        return retfd
-
-    def istat(self, path=None, inode=None):
-        """ return a dict with information (istat) for the given inode or path. """
-        pass
-
-    def isdir(self,directory):
-        """ Returns 1 if directory is a directory, 0 otherwise """
-        pass
-
-    def exists(self,path):
-        """ Returns 1 if path exists, 0 otherwise """
-        pass
-
-    def resetscanfs(self,callbacks):
-        """ This is called to reset all the scanners. """
-        
-    def scanfs(self, callbacks):
-        """ Read every file in fs, and call given scanner callbacks for each file.
-        
-        callbacks is a list of scanner classes derived from Scanner.GenScan. These classes
-        have a process and finish methods.
-        For each file, scanfs will create a new object of each of the given classes,
-        then begin reading the file in buffers of (say) 1MB, each time calling the 
-        process method of each of the new objects with the buffer just read.
-        When all data has been read from the file, scanfs will call the finished method of each object.
-        It will then start over with the next file.
-        
-        The purpose of this method is to do all analysis which must read file data in one place
-        for performance, currently this includes file typing, file hashing and virus scanning"""
-        pass
-
-    def guess(self, fd, result, metadata):
-        """ Uses fd to guess how suitable this filesystem driver is for this image """
-        if not "magic" in metadata:
-            fd.seek(0)
-            data = fd.read(10240)
-            if data:
-                import pyflag.Magic as Magic
-                magic = Magic.MagicResolver()
-                result.ruler()
-                sig, ct = magic.get_type(data)
-                result.row("Magic identifies this file as: %s" % sig,**{'colspan':50,'class':'hilight'})
-                fd.close()
-                metadata['magic'] = sig
-            else:
-                metadata['magic'] = ''
-        
-        return 10
-
-    def lstat(self,path):
-        """ standards compliant 'stat' returns a stat_result """
-        pass
-
-    def readlink(self,path):
-        """ return value of a symbolic link """
-        pass
-
-    def listdir(self,path):
-        """ standards compliant listdir, generates directory entries. """
-        return self.ls(path)
-
-    ## These are the list of parameters which we need to fulfil for
-    ## this filesystem
-    parameters = []
-    def form(self, query, result):
-        """ We are able to ask for more optional variables here """
-    
-class DBFS(FileSystem):
-    """ Class for accessing filesystems using data in the database """
-    def __init__(self, case, query=None):
-        """ Initialise the DBFS object """
-        self.case = case
-        ## This allows us to get optional args
-        self.query = query
-
-    def load(self, mount_point, iosource_name, loading_scanners = None):
-        """ Sets up the schema for loading the filesystem.
-
-        Note that derived classes need to actually do the loading
-        after they call the base class.
-
-        loading_scanners are the scanners which need to be run on
-        every new Inode.
-        """
-        self.mount_point = mount_point
-        dbh=DB.DBO(self.case)
-        
-        ## Commented out to fix Bug0035. This should be (and is) done
-        ## by VFSCreate, since we want to avoid duplicate mount
-        ## points.  mic: This is here because skfs.load does not use
-        ## VFSCreate for speed reasons and therefore does not
-        ## necessarily create the mount points when needed.  Ensure
-        ## the VFS contains the mount point:
-        self.VFSCreate(None, "I%s" % iosource_name, mount_point, 
-                       directory=True)
-
-        dbh.insert("filesystems",
-                   iosource = iosource_name,
-                   property = 'mount point',
-                   value = mount_point)
-        
-        ## Ensure that we have the IOSource available
-        self.iosource = IO.open(self.case, iosource_name)
-
-    def VFSRename(self, inode_id, filename):
-        """ Renames the inode to a new filename (moves it in the VFS) """
-        dirname, basename = os.path.split(filename)
-        dbh = DB.DBO(self.case)
-        dbh.update('file', where='inode_id = %s' % inode_id,
-                   path = dirname+'/', name = basename)
-
-    def VFSCreate(self,root_inode,inode,new_filename,directory=False ,gid=0, uid=0, mode=100777,
-                  _fast=False, inode_id=None, update_only=False,
-                  **properties):
-        ## Basically this is how this function works - if root_inode
-        ## is provided we make the new inode inherit the root inodes
-        ## path and inode string.
-        pyflaglog.log(pyflaglog.VERBOSE_DEBUG, DB.expand("Creating new VFS node %s at %s", (inode, new_filename)))
-        if root_inode:
-            try:
-                path, root_inode, tmp_inode_id = self.lookup(inode = root_inode)
-                new_filename = path + "/" + new_filename
-            except:
-                new_filename = "/"+new_filename
-            inode = "%s|%s" % (root_inode,inode)
-
-        if directory:
-            directory_string = "d/d"
-        else:
-            directory_string = "r/r"
-
-        ## Normalise the path:
-        dbh = DB.DBO(self.case)
-        dbh.check_index('file','path', 200)
-        dbh.check_index('file','name', 200)
-
-        if new_filename:
-            new_filename=posixpath.normpath(new_filename)
-
-            ## Make sure that all intermediate dirs exist:
-            dirs = posixpath.dirname(new_filename).split("/")
-            for d in range(len(dirs)-1,0,-1):
-                path = "/".join(dirs[:d])+"/"
-                path = FlagFramework.normpath(path)
-                dbh.execute("select * from file where path=%r and name=%r and mode='d/d' limit 1",(path, dirs[d]))
-                if not dbh.fetch():
-                    dbh.execute("insert into file set inode='',path=%r,name=%r,status='alloc',mode='d/d'",(path,dirs[d]))
-                else: break
-
-        ## Fixes bug0035: directories get interpolated above and need
-        ## not be specifically inserted.
-        #if directory: return
-
-        inode_properties = dict(status="alloc", mode=40755, links=4, _fast=_fast,
-                                size=0)
-        try:
-            inode_properties['mtime'] = self.mtime
-        except: pass
-        
-        if inode:
-            inode_properties['inode'] = inode
-
-        if inode_id:
-            inode_properties['inode_id'] = inode_id
-        
-        try:
-            inode_properties['size'] = int(properties['size'])
-        except KeyError:
-            pass
-
-        for t in ['ctime','atime','mtime']:
-            if properties.get("_"+t):
-                inode_properties["_"+t] = "from_unixtime(%r)" % int(properties["_"+t])
-                try:
-                    del inode_properties[t]
-                except KeyError: pass
-            elif properties.get(t):
-                    inode_properties[t] = properties[t]
-
-        if inode_id and update_only:
-            dbh.update('inode', where="inode_id=%s" % inode_id,
-                       **inode_properties)
-        else:
-            dbh.insert('inode', **inode_properties)
-            inode_id = dbh.autoincrement()
-
-        if not new_filename:
-            return inode_id
-
-        ## Now add to the file and inode tables:
-        file_props = dict(path = FlagFramework.normpath(posixpath.dirname(new_filename)+"/"),
-                          name = posixpath.basename(new_filename),
-                          status = 'alloc',
-                          mode = directory_string,
-                          inode_id = inode_id,
-                          _fast = _fast)
-
-        if inode: file_props['inode'] = inode
-
-        try:
-            file_props['link'] = properties['link']
-        except KeyError:
-            pass
-
-        dbh.insert('file',**file_props)
-
-        return inode_id
-
-    def longls(self,path='/', dirs = None):
-        dbh=DB.DBO(self.case)
-        if self.isdir(path):
-            ## If we are listing a directory, we list the files inside the directory            
-            if not path.endswith('/'):
-                path=path+'/'
-
-            where = DB.expand(" path=%r " ,path)
-        else:
-            ## We are listing the exact file specified:
-            where = DB.expand(" path=%r and name=%r", (
-                FlagFramework.normpath(posixpath.dirname(path)+'/'),
-                posixpath.basename(path)))
-                   
-        mode =''
-        if(dirs == 1):
-            mode=" and file.mode like 'd%'"
-        elif(dirs == 0):
-            mode=" and file.mode like 'r%'"
-
-        dbh.execute("select * from file where %s %s", (where, mode))
-        result = [dent for dent in dbh]
-
-        for dent in result:
-            if dent['inode']:
-                dbh.execute("select * from inode where inode = %r", dent['inode'])
-                data = dbh.fetch()
-                if data:
-                    dent.update(data)
-
-        return result
-        ## This is done rather than return the generator to ensure that self.dbh does not get interfered with...
-        ## result=[dent for dent in self.dbh]
-        ## return result
-    
-    def ls(self, path="/", dirs=None):
-        return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
-
-    def dent_walk(self, path='/'):
-        dbh=DB.DBO(self.case)
-        dbh.check_index('file','path', 200)
-        dbh.execute("select name, mode, status from file where path=%r order by name" , ( path))
-        return [ row for row in dbh ]
-        #for i in self.dbh:
-        #    yield(i)
-
-    def lookup(self, path=None,inode=None, inode_id=None):
-        dbh=DB.DBO(self.case)
-        if path:
-            dir,name = posixpath.split(path)
-            if not name:
-                dir,name = posixpath.split(path[:-1])
-            if dir == '/':
-                dir = ''
-
-            dbh.check_index('file','path', 200)
-            dbh.check_index('file','name', 200)
-            dbh.execute("select inode,inode_id from file where path=%r and (name=%r or name=concat(%r,'/')) limit 1", (dir+'/',name,name))
-            res = dbh.fetch()
-            if not res:
-                raise RuntimeError("VFS path not found %s/%s" % (dir,name))
-            return path, res["inode"], res['inode_id']
-        
-        elif inode_id:
-            dbh.check_index('inode','inode_id')
-            dbh.execute("select mtime, inode.inode, concat(path,name) as path from inode left join file on inode.inode_id=file.inode_id where inode.inode_id=%r order by file.status limit 1", inode_id)
-            res = dbh.fetch()
-            if not res: raise IOError("Inode ID %s not found" % inode_id)
-            self.mtime = res['mtime']
-            return res['path'],res['inode'], inode_id
-
-        else:
-            dbh.check_index('file','inode')
-            dbh.execute("select inode.inode_id,concat(path,name) as path from file join inode on inode.inode_id = file.inode_id where inode.inode=%r order by file.status limit 1", inode)
-            res = dbh.fetch()
-            if not res:
-                raise RuntimeError("VFS Inode %s not known" % inode)
-            return res["path"], inode, res['inode_id']
-        
-    def istat(self, path=None, inode=None, inode_id=None):
-        dbh=DB.DBO(self.case)
-        if path:
-            path, inode, inode_id = self.lookup(path)
-        elif inode:
-            path, inode, inode_id = self.lookup(inode=inode)
-            
-        if not inode_id:
-            return None
-
-        dbh.check_index('inode','inode')
-        dbh.execute("select inode_id, inode, status, uid, gid, mtime, atime, ctime, dtime, mode, links, link, size from inode where inode_id=%r limit 1",(inode_id))
-        row = dbh.fetch()
-        if not row:
-            return None
-
-        dbh.execute("select * from file where inode=%r order by mode limit 1", inode);
-        result = dbh.fetch()
-        if result:
-            row.update(result)
-        return row
-
-    def isdir(self,directory):
-        directory=posixpath.normpath(directory)
-        if directory=='/': return 1
-        
-        dbh=DB.DBO(self.case)
-        dirname=FlagFramework.normpath(posixpath.dirname(directory)+'/')
-        dbh.check_index('file','path', 200)
-        dbh.check_index('file','name', 200)
-        dbh.execute("select mode from file where path=%r and name=%r and mode like 'd%%' limit 1",(dirname,posixpath.basename(directory)))
-        row=dbh.fetch()
-        if row:
-            return 1
-        else:
-            return 0
-        
-    def exists(self,path):
-        dir,file=posixpath.split(path)
-        dbh=DB.DBO(self.case)
-        dbh.execute("select mode from file where path=%r and name=%r limit 1",(dir,file))
-        row=dbh.fetch()
-        if row:
-            return 1
-        else:
-            return 0
-
-    def resetscanfs(self,scanners):
-        for i in scanners:
-            try:
-                i.reset()
-            except DB.DBError,e:
-                pyflaglog.log(pyflaglog.ERRORS,"Could not reset Scanner %s: %s" % (i,e))
-        
-    def scanfs(self, scanners, action=None):
-        ## Prepare the scanner factory for scanning:
-        for s in scanners:
-            s.prepare()
-        
-        dbh2 = DB.DBO(self.case)
-        dbh3=DB.DBO(self.case)
-
-        dbh3.execute('select inode, concat(path,name) as filename from file where mode="r/r" and status="alloc"')
-        count=0
-        for row in dbh3:
-            # open file
-            count+=1
-            if not count % 100:
-                pyflaglog.log(pyflaglog.INFO,"File (%s) is inode %s (%s)" % (count,row['inode'],row['filename']))
-                
-            try:
-                fd = self.open(inode=row['inode'])
-                Scanner.scanfile(self,fd,scanners)
-                fd.close()
-            except Exception,e:
-                pyflaglog.log(pyflaglog.ERRORS,"%r: %s" % (e,e))
-                continue
-        
-        for c in scanners:
-            c.destroy()
-
-    def lstat(self,path):
-        """ standards compliant 'stat' returns a stat_result """
-        dbh=DB.DBO(self.case)
-        path, inode, inode_id = self.lookup(path)
-
-        if not inode_id:
-            return None
-
-        dbh.check_index('inode','inode')
-        dbh.execute("select inode_id, inode, uid, gid, unix_timestamp(mtime) as mtime, unix_timestamp(atime) as atime, unix_timestamp(ctime) as ctime, mode, links, size from inode where inode_id=%r limit 1",(inode_id))
-        result = dbh.fetch()
-        if not result:
-            return None
-
-        if self.isdir(path): 
-            result['mode'] = 16877
-        else:
-            result['mode'] = 33188
-
-        result = os.stat_result((result['mode'],1,0,result['links'] or 0,result['uid'] or 0,result['gid'] or 0,result['size'] or 0,result['atime'] or 0,result['mtime'] or 0,result['ctime'] or 0))
-
-        return result
-
-    def readlink(self,path):
-        """ return value of a symbolic link """
-        dbh=DB.DBO(self.case)
-        path, inode, inode_id = self.lookup(path)
-
-        if not inode_id:
-            return None
-
-        dbh.check_index('inode','inode')
-        dbh.execute("select link from inode where inode_id=%r limit 1",(inode_id))
-        row = dbh.fetch()
-        if not row:
-            return None
-        return row['link']
-
-    def listdir(self,path):
-        """ standards compliant listdir, generates directory entries. """
-        return self.ls(path)
- 
-## These are some of the default views that will be seen in View File
-def goto_page_cb(query,result,variable):
-    try:
-        limit = query[variable]
-    except KeyError:
-        limit='0'
-
-    try:
-        if query['__submit__']:
-            ## Accept hex representation for limits
-            if limit.startswith('0x'):
-                del query[variable]
-                query[variable]=int(limit,16)
-
-            result.refresh(0,query,pane='parent')
-            return
-    except KeyError:
-        pass
-    
-    result.heading("Skip directly to an offset")
-    result.para("You may specify the offset in hex by preceeding it with 0x")
-    result.start_form(query)
-    result.start_table()
-    if limit.startswith('0x'):
-        limit=int(limit,16)
-    else:
-        limit=int(limit)
-
-    result.textfield('Offset in bytes (%s)' % hex(limit),variable)
-    result.end_table()
-    result.end_form()
-
+from pyflag.aff4.aff4_attributes import *
+import pyflag.aff4.aff4 as aff4
 
 class File:
-    """ This abstract base class documents the file like object used to read specific files in PyFlag.
-
-    @cvar stat_cbs: A list of callbacks that should be used to render specific statistics displays about this file. These are basically callbacks for the notebook interface cb(query,result).
-    @cvar stat_names: A list of names for the above callbacks.
+    """ This is a proxy object to the underlying AFF4 stream object.
     """
     specifier = None
     ignore = False
-
-    ## These can be overridden by the caller if they want to add stats to the ViewFile report
-    #stat_cbs = None
-    #stat_names = None
-
     overread = False
     
-    def __init__(self, case, fd, inode):
-        """ The constructor for this object.
-        @arg case: Case to use
-        @arg fd: An already open data source, may be iosource, or another 'File'
-        @arg inode: The inode of the file to open, the while inode ending with the part relevant to this vfs
-        @note: This is not meant to be called directly, the File object must be created by a valid FileSystem object's open method.
-        """
-        # Install default views
-        # each file should remember its own part of the inode
+    def __init__(self, case, inode_id):
         self.case = case
-        self.fd = fd
+        dbh = DB.DBO()
+        dbh.execute("select urn from AFF4_urn where urn_id = %r", inode_id)
+        row = dbh.fetch() 
+        self.urn = row['urn']
+        self.inode_id = inode_id
+        self.size = int(aff4.oracle.resolve(self.urn, AFF4_SIZE))
         self.readptr = 0
-        self.inode = inode
-
+        
         # should reads return slack space or overread into the next block? 
         # NOTE: not all drivers implement this (only really Sleuthkit)
         self.slack = False
         self.overread = False
 
-        self.look_for_cached()
-
-    def look_for_cached(self):
-        ## Now we check to see if there is a cached copy of the file for us:
-
-        try:
-            ## open the previously cached copy
-            self.cached_fd = CacheManager.MANAGER.open(self.case, self.inode)
-            ## Find our size (This may not be important but we leave it for now):
-            self.cached_fd.seek(0,2)
-            self.size=self.cached_fd.tell()
-            self.cached_fd.seek(0)
-            
-        except IOError,e:
-            self.cached_fd = None
-            self.size=0
-            self.readptr=0
-
-        ## We propagate our predecessors blocksize if possible:
-        try:
-            self.block_size = self.fd.block_size
-        except:
-            pass
-
-    def cache(self):
-        """ Creates a cache file if it does not exist """
-        if not self.cached_fd:
-            self.force_cache()
-
-    def force_cache(self):
-        """ Recreates the cache file. """
-        readptr = self.readptr
-
-        ## This forces the File class to regenerate the data instead
-        ## of getting it from the cache
-        self.cached_fd = None
-        self.seek(0)
-        
-        ## Create a new cache object
-        self.size = CacheManager.MANAGER.create_cache_from_fd(self.case, self.inode, self)
-        
-        ## Now set the cached fd so a subsequent read will get it from the cache:
-        self.cached_fd =  CacheManager.MANAGER.open(self.case, self.inode)
-        #self.size = size
-        self.readptr = readptr
-
-        ## Close our parent fd:
-        #self.fd.close()
-
-        return self.size
-
-    def lookup_id(self):
-        ## A shortcut cached item
-        try:
-            if self.inode_id: return self.inode_id
-        except AttributeError: pass
-        
-        dbh=DB.DBO(self.case)
-        dbh.check_index('inode','inode')
-        dbh.execute("select inode_id from inode where inode=%r", self.inode)
-        res = dbh.fetch()
-        try:
-            self.inode_id = res["inode_id"]
-            return res["inode_id"]
-        except:
-            return None
-
     def close(self):
-        """ Fake close method. """
-        if self.cached_fd:
-            try:
-                self.cached_fd.close()
-                self.cached_fd = None
-            except AttributeError:
-                pass
-
-        if self.fd:
-            self.fd.close()
+        pass
     
     def seek(self, offset, rel=None):
         """ Seeks to a specified position inside the file """
@@ -732,70 +103,43 @@ class File:
         else:
             self.readptr = offset
 
-        ## This only happens when overread is not selected. Overread
-        ## tells us that we should read past the end of file (say into
-        ## the slack space). It follows that we should also be able to
-        ## seek past the end of file.
-        if(not self.overread and self.size>0 and
-           self.readptr > self.size):
-            self.readptr = self.size
-
+        ## FIXME - implement overread.
+            
         if self.readptr<0:
             raise IOError("Invalid Arguement")
-
-        try:
-            self.cached_fd.seek(self.readptr)
-        except AttributeError,e:
-            pass
 
         return self.readptr
          
     def tell(self):
         """ returns the current read pointer"""
-        try:
-            return self.cached_fd.tell()
-        except AttributeError:
-            return self.readptr
+        return self.readptr
 
     def read(self, length=None):
-        """ Reads length bytes from file, or less if there are less bytes in file. If length is None, returns the whole file """
+        """ Reads length bytes from file, or less if there are less
+        bytes in file. If length is None, returns the whole file"""
+        if length is None:
+            length = self.size - self.readptr
+
+        fd = aff4.oracle.open(self.urn, 'r')
         try:
-            if length!=None:
-                data = self.cached_fd.read(length)
-                self.readptr += len(data)
-                return data
-            else:
-                data = self.cached_fd.read()
-                self.readptr += len(data)
-                return data
+            fd.seek(self.readptr)
+            result = fd.read(length)
+        finally:
+            aff4.oracle.cache_return(fd)
 
-        except AttributeError,e:
-            raise IOError("(%s) No cached file: (%s)" % (self.inode, e ))
-
+        self.readptr+=len(result)
+        return result
+            
     def stat(self):
         """ Returns a dict of statistics about the content of the file. """
-        dbh=DB.DBO(self.case)
-        dbh.execute("select inode, status, uid, gid, mtime, atime, ctime, dtime, mode, links, link, size from inode where inode=%r limit 1",(self.inode))
-        stats = dbh.fetch()
-
-        dbh.execute("select * from file where inode=%r limit 1", self.inode)
-        try:
-            stats.update(dbh.fetch())
-        except:
-            stats=dbh.fetch()
+        urn_obj = aff4.oracle[self.urn]
             
-        return stats
+        return urn_obj.properties.copy()
 
     def gettz(self):
         """ return the original evidence timezone of this file """
-        iosource = self.inode.split('|')[0][1:]
-        dbh=DB.DBO(self.case)
-        dbh.execute("select timezone from iosources where name=%r limit 1", iosource)
-        row = dbh.fetch()
-        if row['timezone'] == "SYSTEM":
-        	return None
-        return row['timezone']
-
+        pass
+    
     def __iter__(self):
         self.seek(0)
         return self
@@ -848,10 +192,6 @@ class File:
     def explain(self, query, result):
         """ This method is called to explain how we arrive at this
         data"""
-        try:
-            self.fd.explain(query, result)
-        except AttributeError: pass
-            
         result.row(self.__class__.__name__, self.__doc__, **{'class': 'explainrow'})
 
     def summary(self, query,result):
@@ -863,7 +203,7 @@ class File:
         new_query = FlagFramework.query_type(family ="Network Forensics",
                                              report ="ViewFile",
                                              case   =query['case'],
-                                             inode_id  =self.inode_id)
+                                             inode_id    = self.inode_id)
         
         result.result = "<iframe id='summaryFrame' name='summaryFrame' height='100%%' width='100%%' src='f?%s'></iframe><script>AdjustHeightToPageSize('summaryFrame');</script>" % new_query
         
@@ -1000,48 +340,781 @@ class File:
     def stats(self, query,result, merge = None):
         """ Show statistics about the file """
         fsfd = DBFS(query['case'])
-        istat = fsfd.istat(inode=query['inode'])
+        istat = fsfd.istat(inode_id=query['inode_id'])
         left = result.__class__(result)
         link = result.__class__(result)
 
-        path, inode, inode_id = fsfd.lookup(inode=query['inode'])
-        if not path: return
-        base_path, name = posixpath.split(path)
-        link.link(path,
+        link.link(self.urn,
                   FlagFramework.query_type((),family="Disk Forensics",
                       report='BrowseFS',
-                      open_tree=base_path, case=query['case'])
+                      open_tree=self.urn, case=query['case'])
                   )
         left.row("Filename:",'',link)
         if merge:
             istat.update(merge)
             
         try:
-            for k,v in istat.iteritems():
-                left.row('%s:' % k,'',v, align='left')
+            for k,values in istat.iteritems():
+                for v in values:
+                    left.row('%s:' % k,'',v, align='left')
         except AttributeError:
             pass
 
-        #What did libextractor have to say about this file?
-        dbh=DB.DBO(self.case)
-        dbh.execute("select property,value from xattr where inode_id=%r",
-                    istat['inode_id'])
-        
-        for row in dbh:
-            left.row(row['property'],': ',row['value'])
-
         left.end_table()
 
-        image = Graph.Thumbnailer(self,300)
-        if image:
-            right=result.__class__(result)
-            right.image(image,width=200)
-            result.start_table(width="100%")
-            result.row(left,right,valign='top',align="left")
-            image.headers=[("Content-Disposition","attachment; filename=%s" % name),]
+        result.start_table(width="100%")
+        result.row(left,valign='top',align="left")
+
+class FileSystem:
+    """ This is the base class for accessing file systems in PyFlag. This class is abstract and is here purely for documentation purposes.
+
+    @cvar name: The name of the filesystem to show in the loadfs dialog
+    """
+    ## This is the cookie which will be used to identify scanning jobs
+    ## from this FS:
+    cookie = 0
+    
+    def __init__(self, case, query=None):
+        """ Constructor for creating an new filesystem object
+
+        @arg case: Case to use
+        @arg iosource: An already open data source, may be iosource, or another 'File'
+        """
+        pass
+    
+    name = None
+    
+    def load(self, mount_point, iosource_name, scanners=None):
+        """ This method loads the filesystem into the database.
+
+        Currently the database schema is standardised by the DBFS
+        class, and all other filesystems just extend the load method
+        to implement different drivers for loading the filesystem into
+        the database. For reading and manipulating the filesystem, the
+        DBFS methods are used.
+
+        scanners contains a list of scanner names which will be scheduled to run on every newly created VFS node.
+        
+        """
+        pass
+
+    def delete(self):
+        """ This method should remove the database which contains the filesystem """
+        pass
+    
+    def longls(self,path='/'):
+        """ list directory content longly """
+        pass
+
+    def VFSCreate(self,root_inode,inode, _fast=False, link=None, inode_id=None):
+        """ This method creates inodes within the virtual filesystem.
+
+        This facility allows callers to extend the VFS to include more virtual files.
+        """
+
+    def ls(self, path="/", dirs=None):
+        """list directory contents"""
+        pass
+
+    def dent_walk(self, path='/'):
+        """A generator which returns directory entries under the given path, one at a time """
+        pass
+
+    def lookup(self, path=None,inode=None):
+        """return the inode number for the given path, or else the path for the given inode number. """
+        pass
+
+    def open(self, inode_id):
+        """ Opens the specified path or Inode providing a file like object.
+
+        This object can then be used to read data from the specified file.
+        @note: Only files may be opened, not directories."""
+        return File(self.case, inode_id)
+
+    def istat(self, inode_id):
+        """ return a dict with information (istat) for the given inode or path. """
+        pass
+
+    def isdir(self,directory):
+        """ Returns 1 if directory is a directory, 0 otherwise """
+        pass
+
+    def exists(self,path):
+        """ Returns 1 if path exists, 0 otherwise """
+        pass
+
+    def resetscanfs(self,callbacks):
+        """ This is called to reset all the scanners. """
+        
+    def scanfs(self, callbacks):
+        """ Read every file in fs, and call given scanner callbacks for each file.
+        
+        callbacks is a list of scanner classes derived from Scanner.GenScan. These classes
+        have a process and finish methods.
+        For each file, scanfs will create a new object of each of the given classes,
+        then begin reading the file in buffers of (say) 1MB, each time calling the 
+        process method of each of the new objects with the buffer just read.
+        When all data has been read from the file, scanfs will call the finished method of each object.
+        It will then start over with the next file.
+        
+        The purpose of this method is to do all analysis which must read file data in one place
+        for performance, currently this includes file typing, file hashing and virus scanning"""
+        pass
+
+    def guess(self, fd, result, metadata):
+        """ Uses fd to guess how suitable this filesystem driver is for this image """
+        if not "magic" in metadata:
+            fd.seek(0)
+            data = fd.read(10240)
+            if data:
+                import pyflag.Magic as Magic
+                magic = Magic.MagicResolver()
+                result.ruler()
+                sig, ct = magic.get_type(data)
+                result.row("Magic identifies this file as: %s" % sig,**{'colspan':50,'class':'hilight'})
+                fd.close()
+                metadata['magic'] = sig
+            else:
+                metadata['magic'] = ''
+        
+        return 10
+
+    def lstat(self,path):
+        """ standards compliant 'stat' returns a stat_result """
+        pass
+
+    def readlink(self,path):
+        """ return value of a symbolic link """
+        pass
+
+    def listdir(self,path):
+        """ standards compliant listdir, generates directory entries. """
+        return self.ls(path)
+
+    ## These are the list of parameters which we need to fulfil for
+    ## this filesystem
+    parameters = []
+    def form(self, query, result):
+        """ We are able to ask for more optional variables here """
+    
+# class DBFS_old(FileSystem):
+#     """ Class for accessing filesystems using data in the database """
+#     def __init__(self, case, query=None):
+#         """ Initialise the DBFS object """
+#         self.case = case
+#         ## This allows us to get optional args
+#         self.query = query
+
+#     def load(self, mount_point, iosource_name, loading_scanners = None):
+#         """ Sets up the schema for loading the filesystem.
+
+#         Note that derived classes need to actually do the loading
+#         after they call the base class.
+
+#         loading_scanners are the scanners which need to be run on
+#         every new Inode.
+#         """
+#         self.mount_point = mount_point
+#         dbh=DB.DBO(self.case)
+        
+#         ## Commented out to fix Bug0035. This should be (and is) done
+#         ## by VFSCreate, since we want to avoid duplicate mount
+#         ## points.  mic: This is here because skfs.load does not use
+#         ## VFSCreate for speed reasons and therefore does not
+#         ## necessarily create the mount points when needed.  Ensure
+#         ## the VFS contains the mount point:
+#         self.VFSCreate(None, "I%s" % iosource_name, mount_point, 
+#                        directory=True)
+
+#         dbh.insert("filesystems",
+#                    iosource = iosource_name,
+#                    property = 'mount point',
+#                    value = mount_point)
+        
+#         ## Ensure that we have the IOSource available
+#         self.iosource = IO.open(self.case, iosource_name)
+
+#     def VFSRename(self, inode_id, filename):
+#         """ Renames the inode to a new filename (moves it in the VFS) """
+#         dirname, basename = os.path.split(filename)
+#         dbh = DB.DBO(self.case)
+#         dbh.update('file', where='inode_id = %s' % inode_id,
+#                    path = dirname+'/', name = basename)
+
+#     def VFSCreate(self,root_inode,inode,new_filename,directory=False ,gid=0, uid=0, mode=100777,
+#                   _fast=False, inode_id=None, update_only=False,
+#                   **properties):
+#         ## Basically this is how this function works - if root_inode
+#         ## is provided we make the new inode inherit the root inodes
+#         ## path and inode string.
+#         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, DB.expand("Creating new VFS node %s at %s", (inode, new_filename)))
+#         if root_inode:
+#             try:
+#                 path, root_inode, tmp_inode_id = self.lookup(inode = root_inode)
+#                 new_filename = path + "/" + new_filename
+#             except:
+#                 new_filename = "/"+new_filename
+#             inode = "%s|%s" % (root_inode,inode)
+
+#         if directory:
+#             directory_string = "d/d"
+#         else:
+#             directory_string = "r/r"
+
+#         ## Normalise the path:
+#         dbh = DB.DBO(self.case)
+#         dbh.check_index('file','path', 200)
+#         dbh.check_index('file','name', 200)
+
+#         if new_filename:
+#             new_filename=posixpath.normpath(new_filename)
+
+#             ## Make sure that all intermediate dirs exist:
+#             dirs = posixpath.dirname(new_filename).split("/")
+#             for d in range(len(dirs)-1,0,-1):
+#                 path = "/".join(dirs[:d])+"/"
+#                 path = FlagFramework.normpath(path)
+#                 dbh.execute("select * from file where path=%r and name=%r and mode='d/d' limit 1",(path, dirs[d]))
+#                 if not dbh.fetch():
+#                     dbh.execute("insert into file set inode='',path=%r,name=%r,status='alloc',mode='d/d'",(path,dirs[d]))
+#                 else: break
+
+#         ## Fixes bug0035: directories get interpolated above and need
+#         ## not be specifically inserted.
+#         #if directory: return
+
+#         inode_properties = dict(status="alloc", mode=40755, links=4, _fast=_fast,
+#                                 size=0)
+#         try:
+#             inode_properties['mtime'] = self.mtime
+#         except: pass
+        
+#         if inode:
+#             inode_properties['inode'] = inode
+
+#         if inode_id:
+#             inode_properties['inode_id'] = inode_id
+        
+#         try:
+#             inode_properties['size'] = int(properties['size'])
+#         except KeyError:
+#             pass
+
+#         for t in ['ctime','atime','mtime']:
+#             if properties.get("_"+t):
+#                 inode_properties["_"+t] = "from_unixtime(%r)" % int(properties["_"+t])
+#                 try:
+#                     del inode_properties[t]
+#                 except KeyError: pass
+#             elif properties.get(t):
+#                     inode_properties[t] = properties[t]
+
+#         if inode_id and update_only:
+#             dbh.update('inode', where="inode_id=%s" % inode_id,
+#                        **inode_properties)
+#         else:
+#             dbh.insert('inode', **inode_properties)
+#             inode_id = dbh.autoincrement()
+
+#         if not new_filename:
+#             return inode_id
+
+#         ## Now add to the file and inode tables:
+#         file_props = dict(path = FlagFramework.normpath(posixpath.dirname(new_filename)+"/"),
+#                           name = posixpath.basename(new_filename),
+#                           status = 'alloc',
+#                           mode = directory_string,
+#                           inode_id = inode_id,
+#                           _fast = _fast)
+
+#         if inode: file_props['inode'] = inode
+
+#         try:
+#             file_props['link'] = properties['link']
+#         except KeyError:
+#             pass
+
+#         dbh.insert('file',**file_props)
+
+#         return inode_id
+
+#     def longls(self,path='/', dirs = None):
+#         dbh=DB.DBO(self.case)
+#         if self.isdir(path):
+#             ## If we are listing a directory, we list the files inside the directory            
+#             if not path.endswith('/'):
+#                 path=path+'/'
+
+#             where = DB.expand(" path=%r " ,path)
+#         else:
+#             ## We are listing the exact file specified:
+#             where = DB.expand(" path=%r and name=%r", (
+#                 FlagFramework.normpath(posixpath.dirname(path)+'/'),
+#                 posixpath.basename(path)))
+                   
+#         mode =''
+#         if(dirs == 1):
+#             mode=" and file.mode like 'd%'"
+#         elif(dirs == 0):
+#             mode=" and file.mode like 'r%'"
+
+#         dbh.execute("select * from file where %s %s", (where, mode))
+#         result = [dent for dent in dbh]
+
+#         for dent in result:
+#             if dent['inode']:
+#                 dbh.execute("select * from inode where inode = %r", dent['inode'])
+#                 data = dbh.fetch()
+#                 if data:
+#                     dent.update(data)
+
+#         return result
+#         ## This is done rather than return the generator to ensure that self.dbh does not get interfered with...
+#         ## result=[dent for dent in self.dbh]
+#         ## return result
+    
+#     def ls(self, path="/", dirs=None):
+#         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
+
+#     def dent_walk(self, path='/'):
+#         dbh=DB.DBO(self.case)
+#         dbh.check_index('file','path', 200)
+#         dbh.execute("select name, mode, status from file where path=%r order by name" , ( path))
+#         return [ row for row in dbh ]
+#         #for i in self.dbh:
+#         #    yield(i)
+
+#     def lookup(self, path=None,inode=None, inode_id=None):
+#         dbh=DB.DBO(self.case)
+#         if path:
+#             dir,name = posixpath.split(path)
+#             if not name:
+#                 dir,name = posixpath.split(path[:-1])
+#             if dir == '/':
+#                 dir = ''
+
+#             dbh.check_index('file','path', 200)
+#             dbh.check_index('file','name', 200)
+#             dbh.execute("select inode,inode_id from file where path=%r and (name=%r or name=concat(%r,'/')) limit 1", (dir+'/',name,name))
+#             res = dbh.fetch()
+#             if not res:
+#                 raise RuntimeError("VFS path not found %s/%s" % (dir,name))
+#             return path, res["inode"], res['inode_id']
+        
+#         elif inode_id:
+#             dbh.check_index('inode','inode_id')
+#             dbh.execute("select mtime, inode.inode, concat(path,name) as path from inode left join file on inode.inode_id=file.inode_id where inode.inode_id=%r order by file.status limit 1", inode_id)
+#             res = dbh.fetch()
+#             if not res: raise IOError("Inode ID %s not found" % inode_id)
+#             self.mtime = res['mtime']
+#             return res['path'],res['inode'], inode_id
+
+#         else:
+#             dbh.check_index('file','inode')
+#             dbh.execute("select inode.inode_id,concat(path,name) as path from file join inode on inode.inode_id = file.inode_id where inode.inode=%r order by file.status limit 1", inode)
+#             res = dbh.fetch()
+#             if not res:
+#                 raise RuntimeError("VFS Inode %s not known" % inode)
+#             return res["path"], inode, res['inode_id']
+        
+#     def istat(self, path=None, inode=None, inode_id=None):
+#         dbh=DB.DBO(self.case)
+#         if path:
+#             path, inode, inode_id = self.lookup(path)
+#         elif inode:
+#             path, inode, inode_id = self.lookup(inode=inode)
+            
+#         if not inode_id:
+#             return None
+
+#         dbh.check_index('inode','inode')
+#         dbh.execute("select inode_id, inode, status, uid, gid, mtime, atime, ctime, dtime, mode, links, link, size from inode where inode_id=%r limit 1",(inode_id))
+#         row = dbh.fetch()
+#         if not row:
+#             return None
+
+#         dbh.execute("select * from file where inode=%r order by mode limit 1", inode);
+#         result = dbh.fetch()
+#         if result:
+#             row.update(result)
+#         return row
+        
+#     def isdir(self,directory):
+#         directory=posixpath.normpath(directory)
+#         if directory=='/': return 1
+        
+#         dbh=DB.DBO(self.case)
+#         dirname=FlagFramework.normpath(posixpath.dirname(directory)+'/')
+#         dbh.check_index('file','path', 200)
+#         dbh.check_index('file','name', 200)
+#         dbh.execute("select mode from file where path=%r and name=%r and mode like 'd%%' limit 1",(dirname,posixpath.basename(directory)))
+#         row=dbh.fetch()
+#         if row:
+#             return 1
+#         else:
+#             return 0
+        
+#     def exists(self,path):
+#         dir,file=posixpath.split(path)
+#         dbh=DB.DBO(self.case)
+#         dbh.execute("select mode from file where path=%r and name=%r limit 1",(dir,file))
+#         row=dbh.fetch()
+#         if row:
+#             return 1
+#         else:
+#             return 0
+
+#     def resetscanfs(self,scanners):
+#         for i in scanners:
+#             try:
+#                 i.reset()
+#             except DB.DBError,e:
+#                 pyflaglog.log(pyflaglog.ERRORS,"Could not reset Scanner %s: %s" % (i,e))
+        
+#     def scanfs(self, scanners, action=None):
+#         ## Prepare the scanner factory for scanning:
+#         for s in scanners:
+#             s.prepare()
+        
+#         dbh2 = DB.DBO(self.case)
+#         dbh3=DB.DBO(self.case)
+
+#         dbh3.execute('select inode, concat(path,name) as filename from file where mode="r/r" and status="alloc"')
+#         count=0
+#         for row in dbh3:
+#             # open file
+#             count+=1
+#             if not count % 100:
+#                 pyflaglog.log(pyflaglog.INFO,"File (%s) is inode %s (%s)" % (count,row['inode'],row['filename']))
+                
+#             try:
+#                 fd = self.open(inode=row['inode'])
+#                 Scanner.scanfile(self,fd,scanners)
+#                 fd.close()
+#             except Exception,e:
+#                 pyflaglog.log(pyflaglog.ERRORS,"%r: %s" % (e,e))
+#                 continue
+        
+#         for c in scanners:
+#             c.destroy()
+
+#     def lstat(self,path):
+#         """ standards compliant 'stat' returns a stat_result """
+#         dbh=DB.DBO(self.case)
+#         path, inode, inode_id = self.lookup(path)
+
+#         if not inode_id:
+#             return None
+
+#         dbh.check_index('inode','inode')
+#         dbh.execute("select inode_id, inode, uid, gid, unix_timestamp(mtime) as mtime, unix_timestamp(atime) as atime, unix_timestamp(ctime) as ctime, mode, links, size from inode where inode_id=%r limit 1",(inode_id))
+#         result = dbh.fetch()
+#         if not result:
+#             return None
+
+#         if self.isdir(path): 
+#             result['mode'] = 16877
+#         else:
+#             result['mode'] = 33188
+
+#         result = os.stat_result((result['mode'],1,0,result['links'] or 0,result['uid'] or 0,result['gid'] or 0,result['size'] or 0,result['atime'] or 0,result['mtime'] or 0,result['ctime'] or 0))
+
+#         return result
+
+#     def readlink(self,path):
+#         """ return value of a symbolic link """
+#         dbh=DB.DBO(self.case)
+#         path, inode, inode_id = self.lookup(path)
+
+#         if not inode_id:
+#             return None
+
+#         dbh.check_index('inode','inode')
+#         dbh.execute("select link from inode where inode_id=%r limit 1",(inode_id))
+#         row = dbh.fetch()
+#         if not row:
+#             return None
+#         return row['link']
+
+#     def listdir(self,path):
+#         """ standards compliant listdir, generates directory entries. """
+#         return self.ls(path)
+
+class DBFS(FileSystem):
+    """ A FileSystem using AFF4 as the arena for the VFS """
+    def __init__(self, case, query=None):
+        """ Initialise the DBFS object """
+        self.case = case
+        ## This allows us to get optional args
+        self.query = query
+
+    def load(self, mount_point, iosource_name, loading_scanners = None):
+        """ Sets up the schema for loading the filesystem.
+
+        Note that derived classes need to actually do the loading
+        after they call the base class.
+
+        loading_scanners are the scanners which need to be run on
+        every new Inode.
+        """
+        self.mount_point = mount_point
+        dbh=DB.DBO(self.case)
+        
+        ## Commented out to fix Bug0035. This should be (and is) done
+        ## by VFSCreate, since we want to avoid duplicate mount
+        ## points.  mic: This is here because skfs.load does not use
+        ## VFSCreate for speed reasons and therefore does not
+        ## necessarily create the mount points when needed.  Ensure
+        ## the VFS contains the mount point:
+        self.VFSCreate(None, "I%s" % iosource_name, mount_point, 
+                       directory=True)
+
+        dbh.insert("filesystems",
+                   iosource = iosource_name,
+                   property = 'mount point',
+                   value = mount_point)
+        
+    def VFSCreate(self,urn ,directory=False ,gid=0, uid=0, mode=100777,
+                  _fast=False, inode_id=None, update_only=False,
+                  **properties):
+        """ Creates a new Inode in the VFS from AFF4 urn provided.
+
+        The URN must already exist.
+        """
+        ## Basically this is how this function works - if root_inode
+        ## is provided we make the new inode inherit the root inodes
+        ## path and inode string.
+        pyflaglog.log(pyflaglog.DEBUG,
+                      DB.expand("Creating new VFS node %s", (urn)))
+
+        ## Normalise the path:
+        dbh = DB.DBO(self.case)
+        new_filename=posixpath.normpath(urn)
+
+        ## Make sure that all intermediate dirs exist:
+        dirs = posixpath.dirname(new_filename).split("/")
+        for d in range(len(dirs),0,-1):
+            path = "/".join(dirs[:d])
+            path = FlagFramework.normpath(path)
+            dirname = posixpath.dirname(path)
+            basename = posixpath.basename(path)
+            dbh.execute("select * from vfs where path=%r and "
+                        "name=%r limit 1",(dirname,basename))
+            if not dbh.fetch():
+                dbh.insert("vfs",
+                           status='alloc',
+                           type='directory',
+                           path = dirname,
+                           name = basename)
+            else: break
+
+        if directory: return
+
+        inode_properties = dict(status="alloc",
+                                mode=40755,
+                                inode_id = aff4.oracle[urn].urn_id,
+                                mtime = aff4.oracle.resolve(urn, AFF4_MTIME),
+                                atime = aff4.oracle.resolve(urn, AFF4_ATIME),
+                                ctime = aff4.oracle.resolve(urn, AFF4_CTIME),
+                                size = aff4.oracle.resolve(urn, AFF4_SIZE) or 0,
+                                _fast=_fast,
+                                path = FlagFramework.normpath(posixpath.dirname(urn)),
+                                name = posixpath.basename(urn))
+
+        for t in ['ctime','atime','mtime']:
+            time = inode_properties.pop(t)
+            if time:
+                inode_properties["_"+t] = "from_unixtime(%r)" % time
+
+        dbh.insert('vfs',**inode_properties)
+
+        return dbh.autoincrement()
+
+    def longls(self,path='/', dirs = None):
+        dbh=DB.DBO(self.case)
+        if self.isdir(path):
+            ## If we are listing a directory, we list the files inside the directory            
+            where = DB.expand(" path=%r " ,path)
         else:
-            result.start_table(width="100%")
-            result.row(left,valign='top',align="left")
+            ## We are listing the exact file specified:
+            where = DB.expand(" path=%r and name=%r", (
+                FlagFramework.normpath(posixpath.dirname(path)),
+                posixpath.basename(path)))
+                   
+        dbh.execute("select * from vfs where %s", (where))
+        result = [dent for dent in dbh]
+
+        return result
+    
+    def ls(self, path="/", dirs=None):
+        return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
+
+    def lookup(self, path=None,inode=None, inode_id=None):
+        dbh=DB.DBO(self.case)
+        if path:
+            dir,name = posixpath.split(path)
+            if not name:
+                dir,name = posixpath.split(path[:-1])
+            if dir == '/':
+                dir = ''
+
+            dbh.check_index('file','path', 200)
+            dbh.check_index('file','name', 200)
+            dbh.execute("select inode,inode_id from file where path=%r and (name=%r or name=concat(%r,'/')) limit 1", (dir+'/',name,name))
+            res = dbh.fetch()
+            if not res:
+                raise RuntimeError("VFS path not found %s/%s" % (dir,name))
+            return path, res["inode"], res['inode_id']
+        
+        elif inode_id:
+            dbh.check_index('inode','inode_id')
+            dbh.execute("select mtime, inode.inode, concat(path,name) as path from inode left join file on inode.inode_id=file.inode_id where inode.inode_id=%r order by file.status limit 1", inode_id)
+            res = dbh.fetch()
+            if not res: raise IOError("Inode ID %s not found" % inode_id)
+            self.mtime = res['mtime']
+            return res['path'],res['inode'], inode_id
+
+        else:
+            dbh.check_index('file','inode')
+            dbh.execute("select inode.inode_id,concat(path,name) as path from file join inode on inode.inode_id = file.inode_id where inode.inode=%r order by file.status limit 1", inode)
+            res = dbh.fetch()
+            if not res:
+                raise RuntimeError("VFS Inode %s not known" % inode)
+            return res["path"], inode, res['inode_id']
+        
+    def istat(self, inode_id):
+        urn_obj = aff4.oracle[aff4.oracle.resolve_urn(inode_id)]
+            
+        return urn_obj.properties.copy()
+
+    def isdir(self,directory):
+        directory=posixpath.normpath(directory)
+        if directory=='/': return 1
+        
+        dbh=DB.DBO(self.case)
+        dirname=FlagFramework.normpath(posixpath.dirname(directory))
+        dbh.execute("select type from vfs where path=%r and name=%r and "
+                    "type='directory' limit 1",(dirname,
+                                                posixpath.basename(directory)))
+        return dbh.fetch()
+        
+    def exists(self,path):
+        dir,file=posixpath.split(path)
+        dbh=DB.DBO(self.case)
+        dbh.execute("select mode from file where path=%r and name=%r limit 1",(dir,file))
+        row=dbh.fetch()
+        if row:
+            return 1
+        else:
+            return 0
+
+    def resetscanfs(self,scanners):
+        for i in scanners:
+            try:
+                i.reset()
+            except DB.DBError,e:
+                pyflaglog.log(pyflaglog.ERRORS,"Could not reset Scanner %s: %s" % (i,e))
+        
+    def scanfs(self, scanners, action=None):
+        ## Prepare the scanner factory for scanning:
+        for s in scanners:
+            s.prepare()
+        
+        dbh2 = DB.DBO(self.case)
+        dbh3=DB.DBO(self.case)
+
+        dbh3.execute('select inode, concat(path,name) as filename from file where mode="r/r" and status="alloc"')
+        count=0
+        for row in dbh3:
+            # open file
+            count+=1
+            if not count % 100:
+                pyflaglog.log(pyflaglog.INFO,"File (%s) is inode %s (%s)" % (count,row['inode'],row['filename']))
+                
+            try:
+                fd = self.open(inode=row['inode'])
+                Scanner.scanfile(self,fd,scanners)
+                fd.close()
+            except Exception,e:
+                pyflaglog.log(pyflaglog.ERRORS,"%r: %s" % (e,e))
+                continue
+        
+        for c in scanners:
+            c.destroy()
+
+    def lstat(self,path):
+        """ standards compliant 'stat' returns a stat_result """
+        dbh=DB.DBO(self.case)
+        path, inode, inode_id = self.lookup(path)
+
+        if not inode_id:
+            return None
+
+        dbh.check_index('inode','inode')
+        dbh.execute("select inode_id, inode, uid, gid, unix_timestamp(mtime) as mtime, unix_timestamp(atime) as atime, unix_timestamp(ctime) as ctime, mode, links, size from inode where inode_id=%r limit 1",(inode_id))
+        result = dbh.fetch()
+        if not result:
+            return None
+
+        if self.isdir(path): 
+            result['mode'] = 16877
+        else:
+            result['mode'] = 33188
+
+        result = os.stat_result((result['mode'],1,0,result['links'] or 0,result['uid'] or 0,result['gid'] or 0,result['size'] or 0,result['atime'] or 0,result['mtime'] or 0,result['ctime'] or 0))
+
+        return result
+
+    def readlink(self,path):
+        """ return value of a symbolic link """
+        dbh=DB.DBO(self.case)
+        path, inode, inode_id = self.lookup(path)
+
+        if not inode_id:
+            return None
+
+        dbh.check_index('inode','inode')
+        dbh.execute("select link from inode where inode_id=%r limit 1",(inode_id))
+        row = dbh.fetch()
+        if not row:
+            return None
+        return row['link']
+
+    def listdir(self,path):
+        """ standards compliant listdir, generates directory entries. """
+        return self.ls(path)
+ 
+## These are some of the default views that will be seen in View File
+def goto_page_cb(query,result,variable):
+    try:
+        limit = query[variable]
+    except KeyError:
+        limit='0'
+
+    try:
+        if query['__submit__']:
+            ## Accept hex representation for limits
+            if limit.startswith('0x'):
+                del query[variable]
+                query[variable]=int(limit,16)
+
+            result.refresh(0,query,pane='parent')
+            return
+    except KeyError:
+        pass
+    
+    result.heading("Skip directly to an offset")
+    result.para("You may specify the offset in hex by preceeding it with 0x")
+    result.start_form(query)
+    result.start_table()
+    if limit.startswith('0x'):
+        limit=int(limit,16)
+    else:
+        limit=int(limit)
+
+    result.textfield('Offset in bytes (%s)' % hex(limit),variable)
+    result.end_table()
+    result.end_form()
 
 class StringIOFile(File):
     """ This is a File object which is implemented as a StringIO.

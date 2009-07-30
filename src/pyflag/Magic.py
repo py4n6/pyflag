@@ -102,14 +102,14 @@ class MagicResolver:
         ## Return the highest score:
         return max_score, scores
 
-    def find_inode_magic(self, case, inode_id=None, inode=None, data=None):
+    def find_inode_magic(self, case, inode_id=None, urn=None, data=None):
         """ A convenience function to resolve an inode's magic.
 
         We check the db cache first.
         """
         dbh = DB.DBO(case)
         
-        if inode:
+        if urn:
             dbh.execute("select inode_id from inode where inode = %r", inode)
             row = dbh.fetch()
             inode_id = row['inode_id']

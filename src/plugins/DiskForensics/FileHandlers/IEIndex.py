@@ -30,7 +30,7 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import FileFormats.IECache as IECache
 import pyflag.DB as DB
-from pyflag.ColumnTypes import StringType, TimestampType, FilenameType, InodeIDType, LongStringType, IntegerType
+from pyflag.ColumnTypes import StringType, TimestampType, FilenameType, AFF4URN, LongStringType, IntegerType
 import pyflag.FlagFramework as FlagFramework
 from FileFormats.HTML import url_unquote
 
@@ -41,7 +41,7 @@ class IECaseTable(FlagFramework.CaseTable):
     """ IE History Table - Stores all Internet Explorer History """
     name = 'ie_history'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ IntegerType, dict(name='Offset', column='offset')],
         [ IntegerType, dict(name="Length", column='length')],
         [ StringType, dict(name='Type', column='type', width=20) ],

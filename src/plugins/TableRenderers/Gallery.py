@@ -3,7 +3,7 @@ inode in the table
 """
 
 import HTMLBundle
-from pyflag.ColumnTypes import InodeIDType
+from pyflag.ColumnTypes import AFF4URN
 import pyflag.DB as DB
 import pyflag.FileSystem as FileSystem
 import pyflag.Graph as Graph
@@ -47,7 +47,7 @@ class GalleryRenderer(HTMLBundle.HTMLDirectoryRenderer):
         inode = None
         
         for e in elements:
-            if isinstance(e, InodeIDType):
+            if isinstance(e, AFF4URN):
                 inode = e
                 break
 

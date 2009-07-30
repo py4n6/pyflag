@@ -34,7 +34,7 @@ import pyflag.Reports as Reports
 import pyflag.Graph as Graph
 import pyflag.IO as IO
 import pyflag.Registry as Registry
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, FilenameType, IntegerType, InodeType
+from pyflag.ColumnTypes import StringType, TimestampType,AFF4URN, FilenameType, IntegerType
 import fnmatch
 import pyflag.Magic as Magic
 
@@ -74,10 +74,10 @@ class TypeScan(Scanner.GenScanFactory):
                 metadata['mime'] = self.type_mime
                 metadata['type'] = self.type_str
                 
-class ThumbnailType(InodeIDType):
+class ThumbnailType(AFF4URN):
     """ A Column showing thumbnails of inodes """
     def __init__(self, name='Thumbnail', **args ):
-        InodeIDType.__init__(self, **args)
+        AFF4URN.__init__(self, name, **args)
         self.fsfd = FileSystem.DBFS(self.case)
         self.name = name
         
@@ -100,7 +100,7 @@ class ThumbnailType(InodeIDType):
             print e
             return "<a href=%r ><img src='images/broken.png' /></a>" % inode_filename
 
-        InodeIDType.render_html(self, inode_id, table_renderer)
+        AFF4URN.render_html(self, inode_id, table_renderer)
         table_renderer.add_file_to_archive(inode_id)
         return DB.expand("<a href=%r type=%r ><img src=%r /></a>",
                          (inode_filename, ct, filename))
@@ -156,7 +156,7 @@ class ThumbnailType(InodeIDType):
         result.result += "<img width=%s height=%s src='f?callback_stored=%s' />" % (new_width, new_height,
                                                                 result.store_callback(show_image))
 
-    display_hooks = InodeIDType.display_hooks[:] + [render_thumbnail_hook,]
+    display_hooks = AFF4URN.display_hooks[:] + [render_thumbnail_hook,]
 
 ## A report to examine the Types of different files:
 class ViewFileTypes(Reports.report):
@@ -222,7 +222,7 @@ class MimeTypeStats(Stats.Handler):
         else:
             t = branch[1].replace("__",'/')
             result.table(
-                elements = [ InodeIDType(case = self.case),
+                elements = [ AFF4URN(case = self.case),
                              FilenameType(case = self.case, link_pane='main'),
                              IntegerType('Size','size', table='inode'),
                              TimestampType('Timestamp','mtime', table='inode'),
@@ -264,7 +264,7 @@ class TypeStats(Stats.Handler):
         else:
             t = branch[1].replace("__",'/')
             result.table(
-                elements = [ InodeIDType(case = self.case),
+                elements = [ AFF4URN(case = self.case),
                              FilenameType(case = self.case, link_pane='main'),
                              IntegerType('Size','size', table='inode'),
                              TimestampType('Timestamp','mtime', table='inode'),
@@ -298,13 +298,12 @@ class TypeTest(pyflag.tests.ScannerTest):
         count = dbh.fetch()['count']
         self.failIf(count==0, "Unable to locate an Outlook PST file - maybe we are not using our custom magic file?")
 
-## Add some operators to the InodeType:
 def operator_has_magic(self, column, operator, magic):
     """ Matches those inodes which match certain magic strings. Note that the TypeScanner must have been run on these inodes first """
     return "( %s in (select inode_id from type where type like '%%%s%%'))" % \
            (self.escape_column_name(self.column), magic)
 
-InodeIDType.operator_has_magic = operator_has_magic
+AFF4URN.operator_has_magic = operator_has_magic
 
 class TypeCaseTable(FlagFramework.CaseTable):
     """ Type Table """

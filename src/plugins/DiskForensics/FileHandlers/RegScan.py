@@ -32,7 +32,7 @@ import pyflag.FlagFramework as FlagFramework
 import pyflag.Reports as Reports
 from FileFormats.RegFile import ls_r, RegF
 from format import Buffer
-from pyflag.ColumnTypes import StringType, TimestampType, InodeType
+from pyflag.ColumnTypes import StringType, TimestampType
 
 active = False
 

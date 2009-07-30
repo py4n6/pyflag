@@ -260,12 +260,13 @@ class CaseTableReports(report):
     ## default_table.
     default_table = ''
     columns = []
-    
-    def display(self, query, result, **opts):
+
+    def make_table_widget(self, columns, query, result,
+                          where='1', **opts):
         elements = []
         
         ## Search case tables for the elements:
-        for t in self.columns:
+        for t in columns:
             try:
                 class_name , column_name = t.split(".")
             except:
@@ -284,9 +285,12 @@ class CaseTableReports(report):
         result.table(
             elements = elements,
             case = query['case'],
+            where = where,
             **opts
-            )
-
+            )        
+    
+    def display(self, query, result, **opts):
+        self.make_table_widget(self, self.columns, query, result, **opts)
         dbh = DB.DBO(query['case'])
         case_mode = dbh.get_meta("case_mode") or 'Full'
 

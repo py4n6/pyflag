@@ -514,9 +514,9 @@ class HTMLDirectoryRenderer(UI.TableRenderer):
 
         return filename
         
-## Here we provide the InodeIDType the ability to render html
+## Here we provide the AFF4URN the ability to render html
 ## correctly:
-from pyflag.ColumnTypes import InodeIDType
+from pyflag.ColumnTypes import AFF4URN
 import pyflag.FileSystem as FileSystem
 import pyflag.Magic as Magic
 import FileFormats.HTML as HTML
@@ -632,7 +632,7 @@ def render_html(self, inode_id, table_renderer):
     return result
 
 ## Inodes get special handling:
-InodeIDType.render_html = render_html
+AFF4URN.render_html = render_html
 
 import pyflag.FlagFramework as FlagFramework
 

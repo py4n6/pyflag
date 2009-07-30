@@ -75,7 +75,7 @@ from pyflag.ColumnTypes import StringType, PacketType, IPType
 import pyflag.Store as Store
 import pyflag.pyflaglog as pyflaglog
 import NetworkScanner
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, PacketType, guess_date
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType, guess_date
 #disable =True
 
 ## This keeps track of outstanding invitations.
@@ -194,7 +194,7 @@ class VOIPTable(FlagFramework.CaseTable):
     """ VOIP Table - Keep all VOIP transactions """
     name = 'voip'
     columns = [
-        [ InodeIDType, {} ],
+        [ AFF4URN, {} ],
         [ TimestampType, dict(name='Start Time', column='start') ],
         [ TimestampType, dict(name='End Time', column='end') ],
         [ IPType, dict(name='Source Addr', column='source') ],

@@ -36,7 +36,7 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import pyflag.DB as DB
 import pyflag.UI as UI
-from pyflag.ColumnTypes import StringType, TimestampType, InodeIDType, IntegerType, ColumnType
+from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, ColumnType
 import pyflag.parser as parser
 import pyflag.Indexing as Indexing
 
@@ -465,7 +465,7 @@ class ViewInodeHits(Reports.report):
 
         case = query['case']
         result.table(
-            elements = [ InodeIDType(case=case),
+            elements = [ AFF4URN(case=case),
                          OffsetType(case=case),
                          DataPreview(name='Preview', case=case),
                          ],
@@ -511,7 +511,7 @@ class TableRenderer(UI.TableRenderer):
         ## This only makes sense when one of the columns is an inodeID table:
         found = False
         for e in self.elements:
-            if isinstance(e, InodeIDType):
+            if isinstance(e, AFF4URN):
                 found = True
                 break
 

@@ -8,7 +8,7 @@ import re
 from VolatilityCommon import MemoryOffset
 import pyflag.Registry as Registry
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import InodeIDType, IntegerType, StringType, TimestampType, BigIntegerType
+from pyflag.ColumnTypes import AFF4URN, IntegerType, StringType, TimestampType, BigIntegerType
 import StringIO, sys, string
 import pyflag.DB as DB
 import pyflag.Time as Time
@@ -20,7 +20,7 @@ MemoryRegistry.Init()
 class WindowsSSDTTable(FlagFramework.CaseTable):
     """ The windows SSDT Table """
     name = 'windows_ssdt'
-    columns = [ [ InodeIDType, {} ],
+    columns = [ [ AFF4URN, {} ],
                 [ MemoryOffset, dict(name = 'Base Address', column='base') ],
                 [ IntegerType, dict(name = 'Index', column='index') ],
                 [ StringType, dict(name = 'Function', column='function')],

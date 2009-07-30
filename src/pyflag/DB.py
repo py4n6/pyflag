@@ -877,7 +877,7 @@ class PooledDBO:
         It is encouraged to use this function over cursor.fetchone to ensure that if columns get reordered in the future code does not break. The result of this function is a dictionary with keys being the column names and values being the values """
         return self.cursor.fetchone()
     
-    def check_index(self, table, key, length=None):
+    def check_index(self, table, key, idx_type='', length=None):
         """ This checks the database to ensure that the said table has an index on said key.
 
         If an index is missing, we create it here, so we always ensure an index exists once we return. """
@@ -903,7 +903,7 @@ class PooledDBO:
 
             pyflaglog.log(pyflaglog.VERBOSE_DEBUG,"Oops... No index found in table %s on field %s - Generating index, this may take a while" %(table,key))
             ## Index not found, we make it here:
-            self.execute("Alter table `%s` add index%s",(table,sql))
+            self.execute("Alter table `%s` add index %s %s",(table,idx_type,sql))
 
             ## Add to cache:
             fields.append(key)
