@@ -132,8 +132,6 @@ elif options.dump:
         output_fd = FileBackedObject(output, 'w')
     else:
         output_fd = sys.stdout
-
-    print stream
         
     try:
         while 1:

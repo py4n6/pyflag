@@ -192,7 +192,11 @@ class File:
     def explain(self, query, result):
         """ This method is called to explain how we arrive at this
         data"""
-        result.row(self.__class__.__name__, self.__doc__, **{'class': 'explainrow'})
+        fd = aff4.oracle.open(self.urn, 'r')
+        try:
+            result.text(fd.explain(), font='typewriter')
+        finally:
+            aff4.oracle.cache_return(fd)
 
     def summary(self, query,result):
         """ This method draws a summary of the file.
@@ -860,21 +864,12 @@ class DBFS(FileSystem):
         self.mount_point = mount_point
         dbh=DB.DBO(self.case)
         
-        ## Commented out to fix Bug0035. This should be (and is) done
-        ## by VFSCreate, since we want to avoid duplicate mount
-        ## points.  mic: This is here because skfs.load does not use
-        ## VFSCreate for speed reasons and therefore does not
-        ## necessarily create the mount points when needed.  Ensure
-        ## the VFS contains the mount point:
-        self.VFSCreate(None, "I%s" % iosource_name, mount_point, 
-                       directory=True)
-
         dbh.insert("filesystems",
                    iosource = iosource_name,
                    property = 'mount point',
                    value = mount_point)
         
-    def VFSCreate(self,urn ,directory=False ,gid=0, uid=0, mode=100777,
+    def VFSCreate(self,urn, path, directory=False ,gid=0, uid=0, mode=100777,
                   _fast=False, inode_id=None, update_only=False,
                   **properties):
         """ Creates a new Inode in the VFS from AFF4 urn provided.
@@ -949,39 +944,6 @@ class DBFS(FileSystem):
     def ls(self, path="/", dirs=None):
         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
 
-    def lookup(self, path=None,inode=None, inode_id=None):
-        dbh=DB.DBO(self.case)
-        if path:
-            dir,name = posixpath.split(path)
-            if not name:
-                dir,name = posixpath.split(path[:-1])
-            if dir == '/':
-                dir = ''
-
-            dbh.check_index('file','path', 200)
-            dbh.check_index('file','name', 200)
-            dbh.execute("select inode,inode_id from file where path=%r and (name=%r or name=concat(%r,'/')) limit 1", (dir+'/',name,name))
-            res = dbh.fetch()
-            if not res:
-                raise RuntimeError("VFS path not found %s/%s" % (dir,name))
-            return path, res["inode"], res['inode_id']
-        
-        elif inode_id:
-            dbh.check_index('inode','inode_id')
-            dbh.execute("select mtime, inode.inode, concat(path,name) as path from inode left join file on inode.inode_id=file.inode_id where inode.inode_id=%r order by file.status limit 1", inode_id)
-            res = dbh.fetch()
-            if not res: raise IOError("Inode ID %s not found" % inode_id)
-            self.mtime = res['mtime']
-            return res['path'],res['inode'], inode_id
-
-        else:
-            dbh.check_index('file','inode')
-            dbh.execute("select inode.inode_id,concat(path,name) as path from file join inode on inode.inode_id = file.inode_id where inode.inode=%r order by file.status limit 1", inode)
-            res = dbh.fetch()
-            if not res:
-                raise RuntimeError("VFS Inode %s not known" % inode)
-            return res["path"], inode, res['inode_id']
-        
     def istat(self, inode_id):
         urn_obj = aff4.oracle[aff4.oracle.resolve_urn(inode_id)]
             
@@ -998,16 +960,6 @@ class DBFS(FileSystem):
                                                 posixpath.basename(directory)))
         return dbh.fetch()
         
-    def exists(self,path):
-        dir,file=posixpath.split(path)
-        dbh=DB.DBO(self.case)
-        dbh.execute("select mode from file where path=%r and name=%r limit 1",(dir,file))
-        row=dbh.fetch()
-        if row:
-            return 1
-        else:
-            return 0
-
     def resetscanfs(self,scanners):
         for i in scanners:
             try:
@@ -1065,21 +1017,6 @@ class DBFS(FileSystem):
 
         return result
 
-    def readlink(self,path):
-        """ return value of a symbolic link """
-        dbh=DB.DBO(self.case)
-        path, inode, inode_id = self.lookup(path)
-
-        if not inode_id:
-            return None
-
-        dbh.check_index('inode','inode')
-        dbh.execute("select link from inode where inode_id=%r limit 1",(inode_id))
-        row = dbh.fetch()
-        if not row:
-            return None
-        return row['link']
-
     def listdir(self,path):
         """ standards compliant listdir, generates directory entries. """
         return self.ls(path)
@@ -1116,6 +1053,7 @@ def goto_page_cb(query,result,variable):
     result.end_table()
     result.end_form()
 
+## Deprecated
 class StringIOFile(File):
     """ This is a File object which is implemented as a StringIO.
 

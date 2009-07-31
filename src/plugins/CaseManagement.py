@@ -30,6 +30,7 @@
 import pyflag.Reports as Reports
 import pyflag.FlagFramework as FlagFramework
 import pyflag.FileSystem as FileSystem
+import pyflag.pyflaglog as pyflaglog
 import pyflag.DB as DB
 import os
 import pyflag.IO as IO
@@ -100,9 +101,11 @@ class DelCase(Reports.report):
         return result
 
     def display(self,query,result):
+        import pdb; pdb.set_trace()
         try:
             FlagFramework.delete_case(query['remove_case'])
-        except DB.DBError:
+        except DB.DBError,e:
+            pyflaglog.log(pyflaglog.WARNING, e)
             pass
         result.heading("Deleted case")
         result.para("Case %s has been deleted" % query['remove_case'])

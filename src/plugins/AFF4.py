@@ -20,10 +20,10 @@ from pyflag.FileSystem import DBFS, File
 import pyflag.FlagFramework as FlagFramework
 from pyflag.ColumnTypes import StringType
 import pyflag.DB as DB
-import pdb
+import pdb, os, os.path
 import pyflag.CacheManager as CacheManager
 
-#aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
+aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
 
 ## This is a persistent resolver in the database
 NEW_OBJECTS = []
@@ -60,6 +60,7 @@ class DBURNObject(aff4.URNObject):
         aff4.URNObject.__init__(self, urn)
         self.properties = {}
         self.urn = urn
+        global NEW_OBJECTS
         NEW_OBJECTS.append(self)
 
         PDBO = DB.DBO()
@@ -143,10 +144,12 @@ class LoadAFF4Volume(Reports.report):
         ## new objects that are created, and populate the VFS with
         ## them.
         fsfd = DBFS(query['case'])
+        base_dir = os.path.basename(filenames[0])
         def VFS_Update(urn, attribute, value):
             if attribute==aff4.AFF4_TYPE and value in \
-                   [aff4.AFF4_IMAGE, aff4.AFF4_MAP]:
-                fsfd.VFSCreate(None, urn, "/urn:aff4/"+urn, _fast=True, mode=-1)
+                   [aff4.AFF4_IMAGE, aff4.AFF4_MAP, aff4.AFF4_AFF1_STREAM,
+                    aff4.AFF4_EWF_STREAM]:
+                fsfd.VFSCreate(urn, base_dir+urn, _fast=True, mode=-1)
                 if "/" in urn:
                     path = urn[urn.index("/"):]
                     fsfd.VFSCreate(None, urn, path, _fast=True, mode=-1)
@@ -239,7 +242,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
             urn_id = row['urn_id']
             pdbh2.delete("AFF4", where='urn_id="%s"' % urn_id, _fast=True)
 
-        pdbh.delete("AFF4_urn", where='`case`=%r' % case, _fast=True)
+        pdbh.delete("AFF4_urn", where='`case`="%s"' % case, _fast=True)
 
     def create(self, dbh, case):
         """ Create a new case AFF4 Result file """

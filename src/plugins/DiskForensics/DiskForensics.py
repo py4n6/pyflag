@@ -139,7 +139,7 @@ class ViewFile(Reports.report):
         if not fd: return
 
         tmp = result.__class__(result)
-        tmp.text("Viewing ", fd.urn)
+        tmp.text(fd.urn)
         result.heading(tmp)
         
 #         try:

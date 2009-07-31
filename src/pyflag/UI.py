@@ -276,7 +276,7 @@ class GenericUI:
     def fileselector(self, description, name, vfs=True):
         """ Draws a file selector for files in the upload directory """
         from pyflag.ColumnTypes import IntegerType, TimestampType, \
-             StringType, InodeIDType, FilenameType
+             StringType, AFF4URN, FilenameType
 
         if self.defaults.has_key('select_all'):
             del self.defaults['select_all']
@@ -317,7 +317,7 @@ class GenericUI:
                         new_query = make_new_query(query, path + '/')
 
                         tmp.table(
-                            elements = [ InodeIDType(case=query['case']),
+                            elements = [ AFF4URN(case=query['case']),
                                          FilenameType(basename=True, case=query['case'],
                                                       link = new_query,
                                                       link_pane = 'parent'),
@@ -337,7 +337,7 @@ class GenericUI:
                     new_query = make_new_query(query,'')
                     
                     result.table(
-                        elements = [ InodeIDType(),
+                        elements = [ AFF4URN(),
                                  FilenameType(case = case,
                                               link = new_query,
                                               link_pane = 'parent'),

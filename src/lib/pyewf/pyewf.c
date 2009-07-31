@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define EWFDIGEST_HASH_SIZE_MD5 16
+
 /******************************************************************
  * pyewf - libewf python binding
  * ***************************************************************/
@@ -314,6 +316,13 @@ static PyObject *ewffile_get_headers(ewffile *self) {
             Py_DECREF(tmp);
         }
     }
+
+    // Get the hash back
+    if(libewf_get_md5_hash( self->handle, buf, EWFDIGEST_HASH_SIZE_MD5) == 1) {
+      tmp = PyString_FromStringAndSize(buf, EWFDIGEST_HASH_SIZE_MD5);
+      PyDict_SetItemString(headers, "MD5", tmp);
+      Py_DECREF(tmp);
+    };
 
     return headers;
 }
