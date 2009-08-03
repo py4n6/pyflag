@@ -1,6 +1,8 @@
 #!/usr/bin/python
 from aff4 import *
-import optparse
+from aff4_attributes import *
+
+import optparse, pdb
 import sys
 
 parser = optparse.OptionParser()
@@ -43,7 +45,10 @@ def vararg_callback(option, opt_str, value, parser):
         value.append(arg)
             
     del parser.rargs[:len(value)]
-    setattr(parser.values, option.dest, value)
+    try:
+        getattr(parser.values, option.dest).append(value)
+    except:
+        setattr(parser.values, option.dest, value)
 
 parser.add_option("-l","--load", default=[], dest="load",
                   action = "callback", callback=vararg_callback,
@@ -77,7 +82,7 @@ parser.add_option("-p", "--password", default='',
                   help='Use this password instead of prompting')
 
 (options, args) = parser.parse_args()
-
+    
 ## Load defaults into configuration space
 oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
 oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
@@ -89,8 +94,30 @@ if options.password:
 IDENTITY = load_identity(options.key, options.cert)
 
 VOLUMES = []
-for v in options.load:
-    VOLUMES.extend(load_volume(v))
+for volume_set in options.load:
+    loaded_volume_set = []
+    for v in volume_set:
+        loaded_volume_set.extend(load_volume(v))
+
+    if len(loaded_volume_set)>1:
+        ## Make a combined stream
+        m = Map(None, 'w')
+        m.urn  = loaded_volume_set[0] + "/combined"
+        oracle.set(m.urn, AFF4_STORED, AFF4_SPECIAL_URN_NULL)
+        oracle.set(m.urn, AFF4_HIGHLIGHT, 7)
+        m.finish()
+        m.mode = 'r'
+
+        ## Add the image to the map
+        for t in loaded_volume_set:
+            m.write_from(t, 0, oracle.resolve(t, AFF4_SIZE))
+
+        oracle.set(m.urn, AFF4_SIZE, m.size)
+
+        ## The map is ready for use
+        oracle.cache_return(m)
+        
+    VOLUMES.extend(loaded_volume_set)
 
 ## Use the high level interface to get what we want:
 if options.image:

@@ -60,19 +60,23 @@ def DEBUG(verb, fmt, *args):
     pass
 
 import urllib
-def escape_filename(filename):
-    urllib.quote(filename)
-    
-def unescape_filename(filename):
-    urllib.unquote(filename)
 
 def fully_qualified_name(filename, context_name):
+    """ Converts filename into a fully_qualified_name relative to the
+    context_name. If filename is already a fully_qualified_name, do
+    nothing.
+    """
+    if "://" in filename: return filename
+    
     if not filename.startswith(FQN):
         filename = "%s/%s" % (context_name, filename)
 
     return posixpath.normpath(filename)
 
 def relative_name(filename, context_name):
+    """ Returns a relative name to the supplied context. (ie. if the
+    name begins with context, strip the context off it.
+    """
     if filename.startswith(context_name):
         return filename[len(context_name)+1:]
 
@@ -115,7 +119,7 @@ def parse_int(string):
 
 def read_with_default(uri, attribute, default):
     result = oracle.resolve(uri, attribute)
-    if result is NoneObject:
+    if isinstance(result,NoneObject):
         result = default
         oracle.set(uri, attribute, default)
 
@@ -337,7 +341,7 @@ def escape_filename(filename):
     filenames, so we need to escape them whenever we store segments in
     files.
     """
-    return urllib.quote(filename)
+    return urllib.quote(filename, safe="/\\")
 
 def unescape_filename(filename):
     return urllib.unquote(filename)
@@ -349,13 +353,20 @@ class FileBackedObject(FileLikeObject):
     The file:// URL scheme is used.
     """
     def __init__(self, uri, mode):
+        filename = uri
         if not uri.startswith("file://"):
-            Raise("You must have a fully qualified urn here, not %s" % urn)
+            filename = oracle.resolve(uri, AFF4_STORED)
 
-        filename = uri[len("file://"):]
+        if not filename.startswith("file://"):
+            Raise("You must have a fully qualified urn here, not %s" % filename)
+
+        filename = filename[len("file://"):]
         escaped = escape_filename(filename)
         if mode == 'r':
             self.fd = open(escaped, 'rb')
+            self.fd.seek(0,2)
+            self.size = self.fd.tell()
+            self.fd.seek(0)
         else:
             try:
                 os.makedirs(os.path.dirname(escaped))
@@ -1008,12 +1019,7 @@ class Image(FileLikeObject):
 
             self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
             self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
-            self.compression = parse_int(oracle.resolve(self.urn, AFF4_COMPRESSION))
-            if self.compression is NoneObject:
-                self.compression = 8
-            else:
-                self.compression = parse_int(self.compression)
-
+            self.compression = read_with_default(self.urn, AFF4_COMPRESSION, 8)
             self.chunk_cache = Store()
             self.bevy_number = 0
             self.running = []
@@ -1146,9 +1152,15 @@ class Image(FileLikeObject):
 
         return result
 
-class ZipVolume(AFFVolume):
-    """ AFF4 Zip Volumes store segments within zip files """
-    type = AFF4_ZIP_VOLUME
+class RAWVolume(AFFVolume):
+    """ A Raw image.
+
+    Raw volumes are basically dd images. We get all the AFF4_STORED
+    properties, and do a filesystem glob to discover all parts of the
+    image. These are then joined together in a map in sorted order.
+    """
+    type = AFF4_RAW_VOLUME
+    
     def __init__(self, urn, mode):
         if urn:
             self.urn = urn
@@ -1169,9 +1181,27 @@ class ZipVolume(AFFVolume):
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         else:
             AFFObject.__init__(self, urn, mode)
-            
+                        
     def finish(self):
         self.__init__(self.urn, self.mode)
+
+    def load_from(self, urn):
+        fd = oracle.open(urn, 'r')
+        try:
+            self.urn = fd.urn
+            basename = os.path.basename(self.urn)
+            new_urn = FQN + basename
+            oracle.set(new_urn, AFF4_STORED, self.urn)
+            oracle.set(new_urn, AFF4_TYPE, AFF4_RAW_STREAM)
+            oracle.set(self.urn, AFF4_CONTAINS, new_urn)
+            oracle.set(new_urn, AFF4_HIGHLIGHT, _DETAILED)
+            oracle.set(new_urn, AFF4_SIZE, fd.size)
+        finally:
+            oracle.cache_return(fd)
+
+class ZipVolume(RAWVolume):
+    """ AFF4 Zip Volumes store segments within zip files """
+    type = AFF4_ZIP_VOLUME
 
     def writestr(self, subject, data, compress_type = ZIP_STORED):
         """ Write the filename on the archive.
@@ -1362,7 +1392,6 @@ class ZipVolume(AFFVolume):
             
     def load_from(self, filename):
         """ Tries to open the filename as a ZipVolume """
-
         fileobj = oracle.open(filename, 'r')
         ## We parse out the CD of each file and build an index
         try:
@@ -1385,11 +1414,7 @@ class ZipVolume(AFFVolume):
                 assert(self.urn.startswith(FQN))
             except:
                 DEBUG(_WARNING, "Volume does not have a valid URN - using temporary URN %s" % self.urn)
-                
-        oracle.add(self.urn, AFF4_STORED, filename)
-        oracle.add(filename, AFF4_CONTAINS, self.urn)
-        oracle.set(self.urn, AFF4_DIRECTORY_OFFSET, zf.start_dir)
-        
+
         infolist = zf.infolist()
         for zinfo in infolist:
             subject = fully_qualified_name(unescape_filename(zinfo.filename), self.urn)
@@ -1401,6 +1426,10 @@ class ZipVolume(AFFVolume):
                                         context=os.path.dirname(subject))
                 
             self.import_zinfo(subject, zinfo)
+
+        oracle.set(self.urn, AFF4_STORED, filename)
+        oracle.set(filename, AFF4_CONTAINS, self.urn)
+        oracle.set(self.urn, AFF4_DIRECTORY_OFFSET, zf.start_dir)
             
     def import_zinfo(self, subject, zinfo):
         """ Import all the info from a zinfo into the resolver """
@@ -1480,8 +1509,11 @@ try:
     VOLUME_DISPATCH.append(EWFVolume)
 
 except ImportError:
-    ## Not implemented
-    pass
+    class EWFVolume(ZipVolume):
+        def __init__(self, urn=None, mode='r'):
+            raise RuntimeError("EWF streams are not implemented. You need to install libewf first")
+    class EWFStream(EWFVolume):
+        pass
 
 class EWFStream(FileLikeObject):
     def read(self, length):
@@ -1543,15 +1575,16 @@ try:
     class AFF1Stream(EWFStream):
         pass
     
-    VOLUME_DISPATCH.append(AFF1Volume)
-
+    VOLUME_DISPATCH.append(AFF1Volume)    
 except ImportError:
-    ## Not implemented
-    pass
+    class AFF1Stream(ZipVolume):
+        def __init__(self, urn=None, mode='r'):
+            raise RuntimeError("AFF1 legacy volumes are not implemented. You need to install afflib first")
 
+    class AFF1Volume(AFF1Stream):
+        pass
 
-
-VOLUME_DISPATCH.append(ZipVolume)
+VOLUME_DISPATCH.extend([ZipVolume, RAWVolume])
 
 class DirectoryVolume(AFFVolume):
     """ A directory volume is simply a way of storing all segments
@@ -1622,9 +1655,10 @@ class Map(FileLikeObject):
                           Raise("Map objects must be stored somewhere")
 
             oracle.add(stored, AFF4_CONTAINS, uri)
+            
             ## This is not essential
-            self.target = oracle.resolve(uri, AFF4_TARGET) or \
-                          Raise("Map objects must have a %s attribute" % AFF4_TARGET)
+            self.target = oracle.resolve(uri, AFF4_TARGET)# or \
+            #Raise("Map objects must have a %s attribute" % AFF4_TARGET)
 
             self.blocksize = parse_int(oracle.resolve(uri, AFF4_BLOCKSIZE)) or 1
             self.size = parse_int(oracle.resolve(uri, AFF4_SIZE)) or 1
@@ -2271,6 +2305,7 @@ DISPATCH = [
     [ 0, AFF4_EWF_STREAM, EWFStream],
     [ 0, AFF4_EWF_VOLUME, EWFVolume],
     [ 0, AFF4_AFF1_STREAM, AFF1Stream],
+    [ 0, AFF4_RAW_STREAM, FileBackedObject],
     ]
 
 
@@ -2652,7 +2687,6 @@ oracle.set(AFF4_SPECIAL_URN_NULL, AFF4_TYPE, AFF4_ERROR_STREAM)
 oracle.set(AFF4_SPECIAL_URN_NULL, CONFIG_PAD, 1)
 oracle.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
 oracle.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
-
 
 def DEBUG(verb, fmt, *args):
     if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):

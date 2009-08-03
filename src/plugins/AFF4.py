@@ -12,6 +12,7 @@ We have an AFF4 VFSFile object which is able to access these files.
 ## We just include the pure python implementation of AFF4 in the
 ## PyFlag source tree.
 import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
 import pyflag.conf as conf
@@ -23,7 +24,7 @@ import pyflag.DB as DB
 import pdb, os, os.path
 import pyflag.CacheManager as CacheManager
 
-aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
+#aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
 
 ## This is a persistent resolver in the database
 NEW_OBJECTS = []
@@ -34,6 +35,10 @@ ATTRIBUTES = {}
 ## Some private AFF4 namespace objects
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
+
+## These are the supported streams
+SUPPORTED_STREAMS = [AFF4_IMAGE, AFF4_MAP, AFF4_AFF1_STREAM,
+                     AFF4_EWF_STREAM, AFF4_RAW_STREAM]
 
 def resolve_id(urn):
     PDBO = DB.DBO()
@@ -118,13 +123,18 @@ class LoadAFF4Volume(Reports.report):
     exchange. This report merges the AFF4 volume directly into the
     current VFS.
     """
-    parameters = {"filename": "string"}
+    parameters = {"filename": "string", 'path': 'string', "__submit__": "any"}
     name = "Load AFF4 Volume"
     family = "Load Data"
     description = "Load an AFF4 Volume"
     
     def form(self, query, result):
         result.fileselector("Select AFF4 volume:", name='filename', vfs=True)
+        try:
+            if not query.has_key("path"):
+                query['path'] = query['filename']
+            result.textfield("Mount point", "path")
+        except KeyError: pass
 
     def display(self, query, result):
         filenames = query.getarray('filename')
@@ -139,23 +149,6 @@ class LoadAFF4Volume(Reports.report):
         ## and we do not need to maintain it.
         result.heading("Loading AFF4 Volumes")
 
-        ## We maintain oracle streams in the VFS automatically - by
-        ## installing an oracle add hook, we can be notified of any
-        ## new objects that are created, and populate the VFS with
-        ## them.
-        fsfd = DBFS(query['case'])
-        base_dir = os.path.basename(filenames[0])
-        def VFS_Update(urn, attribute, value):
-            if attribute==aff4.AFF4_TYPE and value in \
-                   [aff4.AFF4_IMAGE, aff4.AFF4_MAP, aff4.AFF4_AFF1_STREAM,
-                    aff4.AFF4_EWF_STREAM]:
-                fsfd.VFSCreate(urn, base_dir+urn, _fast=True, mode=-1)
-                if "/" in urn:
-                    path = urn[urn.index("/"):]
-                    fsfd.VFSCreate(None, urn, path, _fast=True, mode=-1)
-                        
-        aff4.oracle.register_set_hook(VFS_Update)
-        aff4.oracle.register_add_hook(VFS_Update)
         global NEW_OBJECTS, ATTRIBUTES
         
         NEW_OBJECTS = []
@@ -164,11 +157,24 @@ class LoadAFF4Volume(Reports.report):
             ## Filenames are always specified relative to the upload
             ## directory
             filename = "file://%s/%s" % (config.UPLOADDIR, f)
-            aff4.load_volume(filename)
-            result.row(f)
+            volumes = aff4.load_volume(filename)
+            result.row("%s" % volumes)
 
         aff4.oracle.clear_hooks()
+        fsfd = DBFS(query['case'])
+        base_dir = os.path.basename(filenames[0])
         for obj in NEW_OBJECTS:
+            type = obj[AFF4_TYPE][0]
+            if type in SUPPORTED_STREAMS:
+                urn = obj.urn
+                if "/" in urn:
+                    path = "%s/%s" % (base_dir, urn[urn.index("/"):])
+                else:
+                    path = base_dir
+
+                fsfd.VFSCreate(urn, path, _fast=True,
+                               mode=-1)
+                        
             obj.flush(query['case'])
 
 class AFF4File(File):
@@ -312,7 +318,7 @@ class AFF4LoaderTest(unittest.TestCase):
                              argv=[self.test_case])
         pyflagsh.shell_execv(command="create_case",
                              argv=[self.test_case])
-        if 0:
+        if 1:
             pyflagsh.shell_execv(command='execute',
                                  argv=['Load Data.Load AFF4 Volume',
                                        'case=%s' % self.test_case, 

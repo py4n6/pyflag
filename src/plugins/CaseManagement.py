@@ -101,7 +101,6 @@ class DelCase(Reports.report):
         return result
 
     def display(self,query,result):
-        import pdb; pdb.set_trace()
         try:
             FlagFramework.delete_case(query['remove_case'])
         except DB.DBError,e:

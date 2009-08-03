@@ -410,7 +410,7 @@ class AFF4Manager(DirectoryCacheManager):
         ## Insert the new fd into the VFS
         if include_in_VFS:
             fsfd = FileSystem.DBFS(case)
-            fsfd.VFSCreate(fd.urn)
+            fsfd.VFSCreate(fd.urn, path)
 
         return fd
 

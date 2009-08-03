@@ -45,7 +45,7 @@ This inode therefore refers to the 14th file in the zip archive contained in ino
 Note that typically VFS modules go hand in hand with scanners, since scanner discover new files, calling VFSCreate on the filesystem to add them, and VFS drivers are used to read those from the Inode specifications.
 """
 import os,os.path, fnmatch, posixpath
-import sys
+import sys, pdb
 import pyflag.conf
 config=pyflag.conf.ConfObject()
 
@@ -884,15 +884,14 @@ class DBFS(FileSystem):
 
         ## Normalise the path:
         dbh = DB.DBO(self.case)
-        new_filename=posixpath.normpath(urn)
+        new_filename=posixpath.normpath(path)
 
         ## Make sure that all intermediate dirs exist:
         dirs = posixpath.dirname(new_filename).split("/")
         for d in range(len(dirs),0,-1):
-            path = "/".join(dirs[:d])
-            path = FlagFramework.normpath(path)
-            dirname = posixpath.dirname(path)
-            basename = posixpath.basename(path)
+            new_path = FlagFramework.normpath("/".join(dirs[:d]))
+            dirname = posixpath.dirname(new_path)
+            basename = posixpath.basename(new_path)
             dbh.execute("select * from vfs where path=%r and "
                         "name=%r limit 1",(dirname,basename))
             if not dbh.fetch():
@@ -908,18 +907,19 @@ class DBFS(FileSystem):
         inode_properties = dict(status="alloc",
                                 mode=40755,
                                 inode_id = aff4.oracle[urn].urn_id,
-                                mtime = aff4.oracle.resolve(urn, AFF4_MTIME),
+                                mtime = aff4.oracle.resolve(urn, AFF4_MTIME) or \
+                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP),
                                 atime = aff4.oracle.resolve(urn, AFF4_ATIME),
                                 ctime = aff4.oracle.resolve(urn, AFF4_CTIME),
                                 size = aff4.oracle.resolve(urn, AFF4_SIZE) or 0,
                                 _fast=_fast,
-                                path = FlagFramework.normpath(posixpath.dirname(urn)),
-                                name = posixpath.basename(urn))
+                                path = FlagFramework.normpath(posixpath.dirname(path)),
+                                name = posixpath.basename(path))
 
         for t in ['ctime','atime','mtime']:
             time = inode_properties.pop(t)
             if time:
-                inode_properties["_"+t] = "from_unixtime(%r)" % time
+                inode_properties["_"+t] = DB.expand("from_unixtime(%r)", time)
 
         dbh.insert('vfs',**inode_properties)
 
