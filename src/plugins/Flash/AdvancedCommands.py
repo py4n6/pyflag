@@ -72,7 +72,7 @@ class scan_path(pyflagsh.command):
             
         ## FIXME For massive images this should be broken up, as in the old GUI method
         dbh=DB.DBO(self.environment._CASE)
-        dbh.execute("select inode.inode from inode join file on file.inode = inode.inode where file.path rlike %r", fnmatch.translate(path))
+        dbh.execute("select inode_id from vfs where path rlike %r", fnmatch.translate(path))
 
         pdbh = DB.DBO()
         pdbh.mass_insert_start('jobs')
@@ -82,15 +82,15 @@ class scan_path(pyflagsh.command):
         cookie = int(time.time())
             
         for row in dbh:
-            inode = row['inode']
+            inode = row['inode_id']
 
             pdbh.mass_insert(
                 command = 'Scan',
                 arg1 = self.environment._CASE,
-                arg2 = row['inode'],
+                arg2 = row['inode_id'],
                 arg3 = ','.join(scanners),
                 cookie=cookie,
-                )#
+                )
     
         pdbh.mass_insert_commit()
     
@@ -221,7 +221,8 @@ class scan_file(scan,BasicCommands.ls):
         if len(self.args)<2:
             yield self.help()
             return
-
+        import pdb; pdb.set_trace()
+        
         pdbh = DB.DBO()
         pdbh.mass_insert_start('jobs')
         cookie = int(time.time())
@@ -230,14 +231,17 @@ class scan_file(scan,BasicCommands.ls):
             scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
 
         for path in self.glob_files(self.args[:1]):
-            path, inode, inode_id = self.environment._FS.lookup(path = path)
+            try:
+                path, inode, inode_id = self.environment._FS.lookup(path = path)
+            except Exception,e:
+                continue
             ## This is a cookie used to identify our requests so that we
             ## can check they have been done later.
 
             pdbh.mass_insert(
                 command = 'Scan',
                 arg1 = self.environment._CASE,
-                arg2 = inode,
+                arg2 = inode_id,
                 arg3 = ','.join(scanners),
                 cookie=cookie,
                 )

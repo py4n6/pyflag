@@ -103,7 +103,7 @@ def parse_int(string):
     if not suffix:
         return base
 
-    if suffix=='s':
+    if suffix == 's':
         return base * 512
 
     if suffix == 'k':
@@ -206,7 +206,7 @@ class AFFObject:
     already exist in the resolver) it does not have a known URN. In
     this case the following protocol is followed:
 
-       a) Create a new instancd of the object - by passing None to the
+       a) Create a new instance of the object - by passing None to the
        URN it is expected to generate a new valid URN:
 
           obj = AFFObjects() 
@@ -224,10 +224,8 @@ class AFFObject:
 
           obj.finish()
 
-
        Once the finish() method is called the object is complete and
        is the same as that obtained from method 1 above.
-
 
     Thread protocol
     ===============

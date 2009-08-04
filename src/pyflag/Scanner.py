@@ -54,13 +54,12 @@ class BaseScanner:
     outer is a reference to the generator object that is used to instantiate these classes.
     
     Note that this is a nested class since it may only be instantiated by first instantiating a Factory object. """
-    def __init__(self, inode,ddfs,outer,factories=None,fd=None):
+    def __init__(self, inode_id,ddfs,outer,factories=None,fd=None):
         """
         @arg fd: The file descriptor which is being scanned. Note that scanners must not interfere with fd (i.e. never change the current file pointer).
         """
-        self.inode = inode
+        self.inode_id = inode_id
         self.fd=fd
-        self.inode_id = self.fd.lookup_id()
         self.size = 0
         self.ddfs = ddfs
         self.case=outer.case
@@ -161,7 +160,7 @@ class GenScanFactory:
         """
         pass
 
-    def reset(self, inode):
+    def reset(self, inode_id):
         """ This method drops the relevant tables in the database, restoring the db to the correct state for rescanning to take place. """
         pyflaglog.log(pyflaglog.WARNING, "The reset function is now deprecated. All calls should be to multiple_inode_reset which allows more efficient resets and also allows you to specify a single inode anyway")
 
@@ -181,7 +180,7 @@ class GenScanFactory:
         path = path_glob
         if not path.endswith("*"): path = path + "*"  
         db = DB.DBO(self.case)
-        db.execute("update inode join file on file.inode = inode.inode set scanner_cache = REPLACE(scanner_cache, %r, '') where file.path rlike %r",(self.__class__.__name__, fnmatch.translate(path)))
+        db.execute("update vfs set scanner_cache = REPLACE(scanner_cache, %r, '') where path rlike %r",(self.__class__.__name__, fnmatch.translate(path)))
         
     ## Relative order of scanners - Higher numbers come later in the order
     order=10
@@ -197,8 +196,8 @@ class MemoryScan(BaseScanner):
     This scanner implements a sliding window, i.e. each buffer scanned begins with OVERLAP/BUFFERSIZE from the previous buffer. This allows regex, and virus definitions to locate matches that are broken across a block boundary.
     """
     windowsize=200
-    def __init__(self, inode,ddfs,outer,factories=None,fd=None):
-        BaseScanner.__init__(self, inode,ddfs,outer,factories,fd=fd)
+    def __init__(self, inode_id,ddfs,outer,factories=None,fd=None):
+        BaseScanner.__init__(self, inode_id,ddfs,outer,factories,fd=fd)
         self.window = ''
         self.offset=0
 
@@ -224,8 +223,8 @@ class StoreAndScan(BaseScanner):
     Scanner factories to provide real implementations to the 'boring'
     and 'external_process' methods.
     """
-    def __init__(self, inode,ddfs,outer,factories=None,fd=None):
-        BaseScanner.__init__(self, inode,ddfs,outer,factories, fd=fd)
+    def __init__(self, inode_id,ddfs,outer,factories=None,fd=None):
+        BaseScanner.__init__(self, inode_id,ddfs,outer,factories, fd=fd)
         self.file = None
         self.boring_status = True
 
@@ -247,7 +246,7 @@ class StoreAndScan(BaseScanner):
                 
             ## We store all the files we create in a central place, so
             ## multiple instances of StoreAndScan can all share the
-            ## same physical file (as long at they all want to give it
+            ## same physical file (as long as they all want to give it
             ## the same name). This allows more efficient streamlining
             ## as all StoreAndScan derivatives can use the same file,
             ## but only one is actually responsible for creating it.
@@ -259,10 +258,10 @@ class StoreAndScan(BaseScanner):
             ## scanner is responsible for writing the file into the
             ## cache file.
             if not self.file and not self.boring_status and \
-                   self.inode not in StoreAndScanFiles:
+                   self.inode_id not in StoreAndScanFiles:
                 self.file = CacheManager.MANAGER.create_cache_fd(self.case,
-                                                                 self.inode)
-                StoreAndScanFiles.add(self.inode)
+                                                                 self.inode_id)
+                StoreAndScanFiles.add(self.inode_id)
         except KeyError:
             pass
 
@@ -288,7 +287,7 @@ class StoreAndScan(BaseScanner):
         if self.file:
             self.file.close()
             ## We now remove the file from the central storage place:
-            StoreAndScanFiles.remove(self.inode)
+            StoreAndScanFiles.remove(self.inode_id)
 
     def external_process(self,fd):
         """ This function is invoked by the scanner to process a temporary file.
@@ -343,8 +342,9 @@ class StringIOType(StoreAndScanType):
             if self.boring_status:
                 self.boring_status = self.boring(metadata, data=data)
 
-            if not self.file and not self.boring_status and self.inode not in StoreAndScanFiles:
-                StoreAndScanFiles.add(self.inode)
+            if not self.file and not self.boring_status and\
+                   self.inode_id not in StoreAndScanFiles:
+                StoreAndScanFiles.add(self.inode_id)
                 self.file = StringIO.StringIO()
         except KeyError:
             pass
@@ -354,7 +354,7 @@ class StringIOType(StoreAndScanType):
 
     def finish(self):
         if self.file:
-            StoreAndScanFiles.remove(self.inode)
+            StoreAndScanFiles.remove(self.inode_id)
 
         if not self.boring_status:
             self.file.seek(0)
@@ -365,8 +365,8 @@ class ScanIfType(StoreAndScanType):
 
     Just like StoreAndScanType but without creating the file.
     """
-    def __init__(self, inode,ddfs,outer,factories=None,fd=None):
-        BaseScanner.__init__(self, inode,ddfs,outer,factories,fd=fd)
+    def __init__(self, inode_id,ddfs,outer,factories=None,fd=None):
+        BaseScanner.__init__(self, inode_id,ddfs,outer,factories,fd=fd)
         self.boring_status = True
 
     def process(self, data,metadata=None):
@@ -376,15 +376,15 @@ class ScanIfType(StoreAndScanType):
             self.boring_status = self.boring(metadata)
 
     def finish(self):
-        print "Scanned type %s" % self.fd.inode
+        print "Scanned type %s" % self.fd.inode_id
         pass
 
-def resetfile(ddfs, inode,factories):
+def resetfile(ddfs, inode_id,factories):
     for f in factories:
         dbh=DB.DBO(ddfs.case)
-        f.reset(inode)
-        dbh.execute("update inode set scanner_cache = REPLACE(scanner_cache,%r,'') where inode=%r",
-                                (f.__class__.__name__, inode))
+        f.reset(inode_id)
+        dbh.execute("update vfs set scanner_cache = REPLACE(scanner_cache,%r,'') where inode_id=%r",
+                                (f.__class__.__name__, inode_id))
 
 MESSAGE_COUNT = 0
     
@@ -407,7 +407,8 @@ def scanfile(ddfs,fd,factories):
     #list of factories to the Scan class so that it may invoke all of
     #the scanners on new files it discovers.
     dbh = DB.DBO(ddfs.case)    
-    dbh.execute("select inode_id, scanner_cache from inode where inode=%r limit 1", fd.inode);
+    dbh.execute("select inode_id, scanner_cache from vfs where inode_id=%r limit 1",
+                fd.inode_id)
     row=dbh.fetch()
     try:
         scanners_run =row['scanner_cache'].split(',')
@@ -420,7 +421,7 @@ def scanfile(ddfs,fd,factories):
     objs = []
     for c in factories:
         if c.__class__.__name__ not in scanners_run:
-            objs.append(c.Scan(fd.inode,ddfs,c,factories=factories,fd=fd))
+            objs.append(c.Scan(fd.inode_id,ddfs,c,factories=factories,fd=fd))
     
     if len(objs)==0: return
 
@@ -428,9 +429,9 @@ def scanfile(ddfs,fd,factories):
     ## by some scanners in order to indicate some fact to other
     ## scanners.
     metadata = {}
-
+    import pdb; pdb.set_trace()
     messages = DB.expand("Scanning file %s%s (inode %s)",
-                         (stat['path'],stat['name'],stat['inode']))
+                         (stat['path'],stat['name'],stat['inode_id']))
     global MESSAGE_COUNT
     MESSAGE_COUNT += 1
     if not MESSAGE_COUNT % 50:
@@ -450,7 +451,7 @@ def scanfile(ddfs,fd,factories):
 
             ## If there are not enough blocks to do a reasonable chunk of the file, we skip them as well...
             if c>0 and c*fd.block_size<fd.size:
-                pyflaglog.log(pyflaglog.WARNING, "Skipping inode %s because there are not enough blocks %s < %s", fd.inode,c*fd.block_size,fd.size)
+                pyflaglog.log(pyflaglog.WARNING, "Skipping inode %s because there are not enough blocks %s < %s", fd.inode_id,c*fd.block_size,fd.size)
                 return
 
         except AttributeError:
@@ -472,7 +473,7 @@ def scanfile(ddfs,fd,factories):
         ## If none of the scanners are interested with this file, we
         ## stop right here
         if not interest:
-            pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "No interest for %s", fd.inode)
+            pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "No interest for %s", fd.inode_id)
             break
         
         for o in objs:
@@ -488,7 +489,7 @@ def scanfile(ddfs,fd,factories):
                 #raise
 
         if not interest:
-            pyflaglog.log(pyflaglog.DEBUG, "No interest for %s", fd.inode)
+            pyflaglog.log(pyflaglog.DEBUG, "No interest for %s", fd.inode_id)
             break
 
     # call slack method of each object. fd.slack must be reset after the call
@@ -511,12 +512,12 @@ def scanfile(ddfs,fd,factories):
         try:
             o.finish()
         except Exception,e:
-            pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) on Inode %s Error: %s" %(o,fd.inode,e))
+            pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) on Inode %s Error: %s" %(o,fd.inode_id,e))
 
     # Store the fact that we finished in the inode table:
     scanner_names = ','.join([ c.outer.__class__.__name__ for c in objs ])
     try:
-        dbh.execute("update inode set scanner_cache = concat_ws(',',scanner_cache, %r) where inode=%r", (scanner_names, fd.inode))
+        dbh.execute("update vfs set scanner_cache = concat_ws(',',scanner_cache, %r) where inode_id=%r", (scanner_names, fd.inode_id))
     except DB.DBError:
         pass
 
@@ -696,14 +697,14 @@ class Carver:
         """
         ## Calculate the length of the new file
         length = self.get_length(fd,offset)
-        new_inode = "%s|o%s:%s" % (fd.inode, offset, length)
+        new_inode = "%s|o%s:%s" % (fd.inode_id, offset, length)
 
         self._add_inode(new_inode, length, "%s.%s" % (offset, self.extension),
                         fd, factories)
         return length
 
     def _add_inode(self, new_inode, length, name, fd, factories):
-        pathname = self.fsfd.lookup(inode = fd.inode)
+        pathname = self.fsfd.lookup(inode_id = fd.inode_id)
         ## By default we just add a VFS Inode for it.
         self.fsfd.VFSCreate(None,
                             new_inode,

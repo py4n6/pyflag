@@ -290,7 +290,8 @@ class CaseTableReports(report):
             )        
     
     def display(self, query, result, **opts):
-        self.make_table_widget(self, self.columns, query, result, **opts)
+        import pdb;pdb.set_trace()
+        self.make_table_widget(self.columns, query, result, **opts)
         dbh = DB.DBO(query['case'])
         case_mode = dbh.get_meta("case_mode") or 'Full'
 

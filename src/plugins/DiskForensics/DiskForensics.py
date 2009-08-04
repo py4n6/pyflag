@@ -92,7 +92,8 @@ class BrowseFS(Reports.CaseTableReports):
 
             def pane_cb(path,result):
                 query['order']='Filename'
-
+                if path=='': path='/'
+                
                 ## If we are asked to show a file, we will show the
                 ## contents of the directory the file is in:
                 fsfd = FileSystem.DBFS( query["case"])

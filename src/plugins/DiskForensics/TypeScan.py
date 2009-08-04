@@ -44,21 +44,21 @@ class TypeScan(Scanner.GenScanFactory):
     default=True
     group = "FileScanners"
 
-    def multiple_inode_reset(self,inode):
-        Scanner.GenScanFactory.multiple_inode_reset(self, inode)
+    def multiple_inode_reset(self,inode_id):
+        Scanner.GenScanFactory.multiple_inode_reset(self, inode_id)
         dbh=DB.DBO(self.case)
-        dbh.execute("delete from `type` where inode_id in (select inode_id from inode where inode.inode = %r )", inode)
+        dbh.execute("delete from `type` where inode_id = %r )", inode_id)
 
-    def reset(self,inode):
-        Scanner.GenScanFactory.reset(self, inode)
+    def reset(self,inode_id):
+        Scanner.GenScanFactory.reset(self, inode_id)
         dbh=DB.DBO(self.case)
-        dbh.execute("delete from `type` where inode_id = (select inode_id from inode where inode.inode = %r limit 1)" , inode)
+        dbh.execute("delete from `type` where inode_id = %r limit 1)" , inode)
 
     def reset_entire_path(self, path_glob):
         path = path_glob
         if not path.endswith("*"): path = path + "*"  
         db = DB.DBO(self.case)
-        db.execute("delete from type where inode_id in (select inode_id from file where file.path rlike %r)", fnmatch.translate(path))
+        db.execute("delete from type where inode_id in (select inode_id from vfs where path rlike %r)", fnmatch.translate(path))
         Scanner.GenScanFactory.reset_entire_path(self, path_glob)
         
     def destroy(self):
@@ -74,92 +74,8 @@ class TypeScan(Scanner.GenScanFactory):
                 metadata['mime'] = self.type_mime
                 metadata['type'] = self.type_str
                 
-class ThumbnailType(AFF4URN):
-    """ A Column showing thumbnails of inodes """
-    def __init__(self, name='Thumbnail', **args ):
-        AFF4URN.__init__(self, name, **args)
-        self.fsfd = FileSystem.DBFS(self.case)
-        self.name = name
-        
-    def select(self):
-        return "%s.inode_id" % self.table
-
-    ## When exporting to html we need to export the thumbnail too:
-    def render_html(self, inode_id, table_renderer):
-        ct=''
-        try:
-            fd = self.fsfd.open(inode_id = inode_id)
-            image = Graph.Thumbnailer(fd, 200)
-            inode_filename, ct, fd = table_renderer.make_archive_filename(inode_id)
-
-            filename, ct, fd = table_renderer.make_archive_filename(inode_id, directory = "thumbnails/")
-        
-            table_renderer.add_file_from_string(filename,
-                                                image.display())
-        except IOError,e:
-            print e
-            return "<a href=%r ><img src='images/broken.png' /></a>" % inode_filename
-
-        AFF4URN.render_html(self, inode_id, table_renderer)
-        table_renderer.add_file_to_archive(inode_id)
-        return DB.expand("<a href=%r type=%r ><img src=%r /></a>",
-                         (inode_filename, ct, filename))
-
-    def render_thumbnail_hook(self, inode_id, row, result):
-        try:
-            fd = self.fsfd.open(inode_id=inode_id)
-            image = PIL.Image.open(fd)
-        except IOError,e:
-            result.icon("broken.png")
-            return
-
-        width, height = image.size
-
-        ## Calculate the new width and height:
-        new_width = 200
-        new_height = int(float(new_width) / width * height)
-
-        if new_width > width and new_height > height:
-            new_height = height
-            new_width = width
-
-        def show_image(query, result):
-            ## Try to fetch the cached copy:
-            filename = "thumb_%s" % inode_id
-
-            try:
-                fd = CacheManager.MANAGER.open(self.case, filename)
-                thumbnail = fd.read()
-            except IOError:
-                fd = self.fsfd.open(inode_id=inode_id)
-                fd = cStringIO.StringIO(fd.read(2000000) + "\xff\xd9")
-                image = PIL.Image.open(fd)
-                image = image.convert('RGB')
-                thumbnail = cStringIO.StringIO()
-
-                try:
-                    image.thumbnail((new_width, new_height), PIL.Image.NEAREST)
-                    image.save(thumbnail, 'jpeg')
-                    thumbnail = thumbnail.getvalue()
-                except IOError,e:
-                    print "PIL Error: %s" % e
-                    thumbnail = open("%s/no.png" % (config.IMAGEDIR,),'rb').read()
-
-                CacheManager.MANAGER.create_cache_from_data(self.case, filename, thumbnail)
-                fd = CacheManager.MANAGER.open(self.case, filename)
-                
-            result.result = thumbnail
-            result.content_type = 'image/jpeg'
-            result.decoration = 'raw'
-
-        
-        result.result += "<img width=%s height=%s src='f?callback_stored=%s' />" % (new_width, new_height,
-                                                                result.store_callback(show_image))
-
-    display_hooks = AFF4URN.display_hooks[:] + [render_thumbnail_hook,]
-
 ## A report to examine the Types of different files:
-class ViewFileTypes(Reports.report):
+class ViewFileTypes(Reports.CaseTableReports):
     """ Browse the file types discovered.
 
     This shows all the files in the filesystem with their file types as detected by magic. By searching and grouping for certain file types it is possible narrow down only files of interest.
@@ -168,26 +84,10 @@ class ViewFileTypes(Reports.report):
     """
     name = "Browse Types"
     family = "Disk Forensics"
-    
-    def form(self,query,result):
-        result.case_selector()
-        
-    def display(self,query,result):
-        try:
-            result.table(
-                elements = [ ThumbnailType(name='Thumbnail',case=query['case']),
-                             FilenameType(case=query['case']),
-                             StringType('Type','type'),
-                             IntegerType('Size','size', table='inode'),
-                             TimestampType(name='Timestamp',column='mtime', table='inode')
-                             ],
-                table = 'type',
-                case = query['case']
-                )
-        except DB.DBError,e:
-            result.para("Error reading the type table. Did you remember to run the TypeScan scanner?")
-            result.para("Error reported was:")
-            result.text(e,style="red")
+    default_table = 'AFF4VFS'
+    description = "Display the type table"
+    columns = [ "Thumb", "Name", "TypeCaseTable.Type",
+                "Size", "Modified"]
 
 ## Show some stats:
 import pyflag.Stats as Stats
@@ -224,8 +124,8 @@ class MimeTypeStats(Stats.Handler):
             result.table(
                 elements = [ AFF4URN(case = self.case),
                              FilenameType(case = self.case, link_pane='main'),
-                             IntegerType('Size','size', table='inode'),
-                             TimestampType('Timestamp','mtime', table='inode'),
+                             IntegerType('Size','size', table='vfs'),
+                             TimestampType('Timestamp','mtime', table='vfs'),
                              StringType('Type', 'type', table='type'),
                              ],
                 table = 'type',
@@ -266,8 +166,8 @@ class TypeStats(Stats.Handler):
             result.table(
                 elements = [ AFF4URN(case = self.case),
                              FilenameType(case = self.case, link_pane='main'),
-                             IntegerType('Size','size', table='inode'),
-                             TimestampType('Timestamp','mtime', table='inode'),
+                             IntegerType('Size','size', table='vfs'),
+                             TimestampType('Timestamp','mtime', table='vfs'),
                              StringType('Mime', 'mime', table='type')],
                 table = 'type',
                 where = DB.expand('type.type=%r ', t),
@@ -308,10 +208,8 @@ AFF4URN.operator_has_magic = operator_has_magic
 class TypeCaseTable(FlagFramework.CaseTable):
     """ Type Table """
     name = 'type'
-    columns = [ [ ThumbnailType, dict(name='Thumbnail') ],
+    columns = [ [ AFF4URN, {}],
                 [ StringType, dict(name = 'Mime', column = 'mime')],
                 [ StringType, dict(name = 'Type', column = 'type')],
                 ]
     index = [ 'type', ]
-    primary = 'inode_id'
-    extras = [ [ ThumbnailType, dict() ]]

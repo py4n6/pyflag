@@ -59,7 +59,8 @@ class LibMagic(Magic.Magic):
 
     samples = [(20,'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00\xe6\x00\xe6\x00\x00')]
 
-class FSStates(Magic.Magic):
+#class FSStates(Magic.Magic):
+class FSStates:
     """ A Magic handler to identify filesystem objects (like links and directories) """
     def score(self, data, case, inode_id):
         if case:

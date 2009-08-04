@@ -41,7 +41,7 @@ import pyflag.DB as DB
 import pyflag.Farm as Farm
 import pyflag.Scanner as Scanner
 import pyflag.pyflaglog as pyflaglog
-import os
+import os, pdb
 import pyflag.FlagFramework as FlagFramework
 import pyflag.Registry as Registry
 from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, IntegerType, DeletedType, SetType, BigIntegerType
@@ -293,12 +293,14 @@ class Exit(Farm.Task):
         
 class Scan(Farm.Task):
     """ A task to distribute scanning among all workers """
-    def run(self,case, inode, scanners, *args):
+    def run(self,case, inode_id, scanners, *args):
+        pdb.set_trace()               
         factories = Scanner.get_factories(case, scanners.split(","))
 
         if factories:
             ddfs = DBFS(case)
-            fd = ddfs.open(inode = inode)
+            print inode_id
+            fd = ddfs.open(inode_id = inode_id)
             Scanner.scanfile(ddfs, fd, factories)
             fd.close()
 
@@ -323,8 +325,8 @@ class CaseDBInit(FlagFramework.EventHandler):
             t().create(case_dbh)
 
         ## add a (dummy) inode to link orphaned directory entries to
-        case_dbh.execute("insert into inode set inode=0, status='deleted', size=0")
-        case_dbh.execute("insert into file set inode_id=1, inode='00', status='deleted', path='', name=''")
+        #case_dbh.execute("insert into inode set inode=0, status='deleted', size=0")
+        #case_dbh.execute("insert into file set inode_id=1, inode='00', status='deleted', path='', name=''")
 
         case_dbh.execute("""Create table if not exists meta(
         `time` timestamp NOT NULL,
@@ -507,7 +509,8 @@ class CaseDBInit(FlagFramework.EventHandler):
         Scanner.factories.expire(key_re)
 
 
-class FileTable(FlagFramework.CaseTable):
+#class FileTable(FlagFramework.CaseTable):
+class FileTable:
     """ File table - Complements the VFS inodes with filenames """
     name = 'file'
     columns = [ [ AFF4URN, {} ],
@@ -518,7 +521,8 @@ class FileTable(FlagFramework.CaseTable):
                 ]
     index = [ 'inode_id', 'inode']
 
-class InodeTable(FlagFramework.CaseTable):
+#class InodeTable(FlagFramework.CaseTable):
+class InodeTable:
     """ Inode Table - stores information related to VFS Inodes """
     name = 'inode'
     primary = 'inode_id'

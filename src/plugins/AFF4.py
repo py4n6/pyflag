@@ -23,6 +23,8 @@ from pyflag.ColumnTypes import StringType
 import pyflag.DB as DB
 import pdb, os, os.path
 import pyflag.CacheManager as CacheManager
+import PIL, cStringIO, PIL.ImageFile
+import pyflag.Registry as Registry
 
 #aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
 
@@ -78,12 +80,15 @@ class DBURNObject(aff4.URNObject):
             for row in PDBO:
                 aff4.URNObject.add(self, row['attribute'], row['value'])
         else:
-            PDBO.insert("AFF4_urn",
+            PDBO.insert("AFF4_urn", _fast=True,
                         urn=urn)
             self.urn_id = PDBO.autoincrement()
             
     def flush(self, case=None):
         """ Write ourselves to the DB """
+        if not self.properties: return
+        
+        if not case: pdb.set_trace()
         PDBO = DB.DBO()
         case = case or self.properties.get(PYFLAG_CASE,[''])[0]
         PDBO.update("AFF4_urn", _fast=True,
@@ -106,7 +111,7 @@ class DBURNObject(aff4.URNObject):
                     ATTRIBUTES[attribute] = attribute_id
 
             for value in values:
-                PDBO.insert("AFF4",
+                PDBO.insert("AFF4", _fast=True,
                             urn_id = self.urn_id,
                             attribute_id=attribute_id,
                             value=value)
@@ -248,7 +253,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
             urn_id = row['urn_id']
             pdbh2.delete("AFF4", where='urn_id="%s"' % urn_id, _fast=True)
 
-        pdbh.delete("AFF4_urn", where='`case`="%s"' % case, _fast=True)
+        #pdbh.delete("AFF4_urn", where='`case`="%s"' % case, _fast=True)
 
     def create(self, dbh, case):
         """ Create a new case AFF4 Result file """
@@ -277,6 +282,91 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
 ## FIXME - move to Core.py
 from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, IntegerType, DeletedType, SetType, BigIntegerType, StateType
 
+class ThumbnailType(AFF4URN):
+    """ A Column showing thumbnails of inodes """
+    def __init__(self, name='Thumbnail', **args ):
+        AFF4URN.__init__(self, name, **args)
+        self.fsfd = FileSystem.DBFS(self.case)
+        self.name = name
+        
+    def select(self):
+        return "%s.inode_id" % self.table
+
+    ## When exporting to html we need to export the thumbnail too:
+    def render_html(self, inode_id, table_renderer):
+        ct=''
+        try:
+            fd = self.fsfd.open(inode_id = inode_id)
+            image = Graph.Thumbnailer(fd, 200)
+            inode_filename, ct, fd = table_renderer.make_archive_filename(inode_id)
+
+            filename, ct, fd = table_renderer.make_archive_filename(inode_id, directory = "thumbnails/")
+        
+            table_renderer.add_file_from_string(filename,
+                                                image.display())
+        except IOError,e:
+            print e
+            return "<a href=%r ><img src='images/broken.png' /></a>" % inode_filename
+
+        AFF4URN.render_html(self, inode_id, table_renderer)
+        table_renderer.add_file_to_archive(inode_id)
+        return DB.expand("<a href=%r type=%r ><img src=%r /></a>",
+                         (inode_filename, ct, filename))
+
+    def render_thumbnail_hook(self, inode_id, row, result):
+        try:
+            fd = self.fsfd.open(inode_id=inode_id)
+            image = PIL.Image.open(fd)
+        except IOError,e:
+            tmp = result.__class__(result)
+            tmp.icon("broken.png")
+            return result.row(tmp, colspan=5)
+
+        width, height = image.size
+
+        ## Calculate the new width and height:
+        new_width = 200
+        new_height = int(float(new_width) / width * height)
+
+        if new_width > width and new_height > height:
+            new_height = height
+            new_width = width
+
+        def show_image(query, result):
+            ## Try to fetch the cached copy:
+            filename = "thumb_%s" % inode_id
+
+            try:
+                fd = CacheManager.MANAGER.open(self.case, filename)
+                thumbnail = fd.read()
+            except IOError:
+                fd = self.fsfd.open(inode_id=inode_id)
+                fd = cStringIO.StringIO(fd.read(2000000) + "\xff\xd9")
+                image = PIL.Image.open(fd)
+                image = image.convert('RGB')
+                thumbnail = cStringIO.StringIO()
+
+                try:
+                    image.thumbnail((new_width, new_height), PIL.Image.NEAREST)
+                    image.save(thumbnail, 'jpeg')
+                    thumbnail = thumbnail.getvalue()
+                except IOError,e:
+                    print "PIL Error: %s" % e
+                    thumbnail = open("%s/no.png" % (config.IMAGEDIR,),'rb').read()
+
+                CacheManager.MANAGER.create_cache_from_data(self.case, filename, thumbnail)
+                fd = CacheManager.MANAGER.open(self.case, filename)
+                
+            result.result = thumbnail
+            result.content_type = 'image/jpeg'
+            result.decoration = 'raw'
+
+        
+        result.result += "<img width=%s height=%s src='f?callback_stored=%s' />" % (new_width, new_height,
+                                                                result.store_callback(show_image))
+
+    display_hooks = AFF4URN.display_hooks[:] + [render_thumbnail_hook,]
+
 class AFF4VFS(FlagFramework.CaseTable):
     """ A VFS implementation using AFF4 volumes """
     name = 'vfs'
@@ -303,7 +393,18 @@ class AFF4VFS(FlagFramework.CaseTable):
                 [ FilenameType, dict(table='vfs')],
                 ]
 
-    extras = [ [FilenameType, dict(table='vfs', name='Name', basename=True)] ]
+    extras = [ [FilenameType, dict(table='vfs', name='Name', basename=True)],
+               [ThumbnailType, dict(table='vfs', name='Thumb')],
+               ]
+
+    def __init__(self):
+        scanners = set([ "%s" % s.__name__ for s in Registry.SCANNERS.classes ])
+        self.columns = self.columns + [ [ SetType,
+                                          dict(name='Scanner Cache', column='scanner_cache',
+                                               states = scanners)
+                                          ],
+                                        ]
+
     
 import unittest
 import pyflag.pyflagsh as pyflagsh
@@ -329,8 +430,8 @@ class AFF4LoaderTest(unittest.TestCase):
 
 import atexit
 
-def FlushResolver():
-    for obj in aff4.oracle.urn.values():
-        obj.flush()
+#def FlushResolver():
+#    for obj in aff4.oracle.urn.values():
+#        obj.flush()
 
-atexit.register(FlushResolver)
+#atexit.register(FlushResolver)

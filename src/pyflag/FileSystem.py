@@ -134,7 +134,14 @@ class File:
         """ Returns a dict of statistics about the content of the file. """
         urn_obj = aff4.oracle[self.urn]
             
-        return urn_obj.properties.copy()
+        result = urn_obj.properties.copy()
+
+        dbh = DB.DBO(self.case)
+        dbh.execute("select * from vfs where inode_id = %r", self.inode_id)
+        row = dbh.fetch()
+        result.update(row)
+        
+        return result
 
     def gettz(self):
         """ return the original evidence timezone of this file """
@@ -868,6 +875,46 @@ class DBFS(FileSystem):
                    iosource = iosource_name,
                    property = 'mount point',
                    value = mount_point)
+
+    def lookup(self, path=None, inode=None, inode_id=None):
+        dbh=DB.DBO(self.case)
+        if path:
+            dir,name = posixpath.split(path)
+            if not name:
+                dir,name = posixpath.split(path[:-1])
+            if dir == '/':
+                dir = ''
+
+            dbh.execute("select inode_id, urn from vfs join "
+                        "pyflag.AFF4_urn on "
+                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
+                        "where path=%r and (name=%r or "
+                        "name=concat(%r,'/')) limit 1", (dir+'/',name,name))
+            res = dbh.fetch()
+            if not res:
+                raise RuntimeError("VFS path not found %s/%s" % (dir,name))
+            return path, res["urn"], res['inode_id']
+        
+        elif inode_id:
+            dbh.execute("select urn_id, urn, concat(path,name) as path from vfs join "
+                        "pyflag.AFF4_urn on "
+                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
+                        "where vfs.inode_id=%r limit 1", inode_id)
+            res = dbh.fetch()
+            if not res: raise IOError("Inode ID %s not found" % inode_id)
+            self.mtime = res['mtime']
+            return res['path'],res['inode'], inode_id
+
+        else:
+            dbh.execute("select vfs.inode_id, concat(path,name) as path from vfs join"
+                        "pyflag.AFF4_urn on "
+                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
+                        "where urn=%r limit 1", inode)
+            res = dbh.fetch()
+            if not res:
+                raise RuntimeError("VFS Inode %s not known" % inode)
+            return res["path"], inode, res['inode_id']
+
         
     def VFSCreate(self,urn, path, directory=False ,gid=0, uid=0, mode=100777,
                   _fast=False, inode_id=None, update_only=False,
@@ -1134,15 +1181,15 @@ def glob_sql(pattern):
         name_sql = DB.expand("name=%r", name)
     
     if name and path:
-        sql = "select concat(path,name) as path from file where %s and %s group by file.path,file.name" % (path_sql,name_sql)
+        sql = "select concat(path,name) as path from vfs where %s and %s group by vfs.path,name" % (path_sql,name_sql)
     elif name:
-        sql = "select concat(path,name) as path from file where %s group by file.path,file.name" % name_sql
+        sql = "select concat(path,name) as path from vfs where %s group by vfs.path,name" % name_sql
     elif path:
         #sql = "%s and name=''" % path_sql
-        sql = "select path from file where %s group by file.path" % path_sql
+        sql = "select path from vfs where %s group by path" % path_sql
     else:
         ## Dont return anything for an empty glob
-        sql = "select * from file where 1=0"
+        sql = "select * from vfs where 1=0"
 
     return sql
     

@@ -945,7 +945,7 @@ class AFF4URN(IntegerType):
         self.table = 'vfs'
 
     def where(self):
-        return "!isnull(inode_id)"
+        return "!isnull(`%s`.inode_id)" % self.table
 
 class InodeType(AFF4URN):
     pass
@@ -1127,7 +1127,7 @@ class FilenameType(StringType):
     hidden = True
     LogCompatible = False
     def __init__(self, name='Filename', inode_id='inode_id',
-                 basename=False, table='file',
+                 basename=False, table='vfs',
                  link=None, link_pane=None, case=None, **kwargs):
         if not link and not basename:
             link = query_type(case=case,
@@ -1140,22 +1140,14 @@ class FilenameType(StringType):
         ColumnType.__init__(self,name=name, column=inode_id,
                             link=link, link_pane=link_pane, table=table, **kwargs)
 
-    def render_links_display_hook(self, value,row,result):
-        if row['link']:
-            result.text("%s\n->%s" % (value, row['link']), style="red")
-
-    display_hooks = [render_links_display_hook, StringType.plain_display_hook,
-                     StringType.link_display_hook]
-
     def order_by(self):
         return "concat(`%s`.path, `%s`.name)" %(self.table, self.table)
 
     def select(self):
         if self.basename:
-            return "`%s`.link, `%s`.name" %(self.table, self.table)
-        else: return "`%s`.link, concat(`%s`.path,`%s`.name)" % (self.table,
-                                                                 self.table,
-                                                                 self.table)
+            return " `%s`.name" %(self.table)
+        else: return "concat(`%s`.path,`%s`.name)" % (self.table,
+                                                      self.table)
 
     ## FIXME: implement filename globbing operators - this should be
     ## much faster than regex or match operators because in marches,
@@ -1178,7 +1170,7 @@ class FilenameType(StringType):
                           column, operator, pattern))
 
     def create(self):
-        return "path TEXT, name TEXT, link TEXT NULL"
+        return "path TEXT, name TEXT"
 
 class InodeInfo(StringType):
     """ Displays inode information from inode_id """
