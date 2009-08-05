@@ -156,7 +156,8 @@ class scan(pyflagsh.command):
 
         ## Try to glob the inode list:
         dbh=DB.DBO(self.environment._CASE)
-        dbh.execute("select inode from inode where inode rlike %r",fnmatch.translate(self.args[0]))
+        dbh.execute("select inode_id from vfs where !isnull(inode_id) and path rlike %r",
+                    (fnmatch.translate(self.args[0])))
         pdbh = DB.DBO()
         pdbh.mass_insert_start('jobs')
         ## This is a cookie used to identify our requests so that we
@@ -169,11 +170,11 @@ class scan(pyflagsh.command):
         scanners = ScannerUtils.fill_in_dependancies(scanners)
 
         for row in dbh:
-            inode = row['inode']
+            inode_id = row['inode_id']
             pdbh.mass_insert(
                 command = 'Scan',
                 arg1 = self.environment._CASE,
-                arg2 = row['inode'],
+                arg2 = inode_id,
                 arg3 = ','.join(scanners),
                 cookie=cookie,
                 )

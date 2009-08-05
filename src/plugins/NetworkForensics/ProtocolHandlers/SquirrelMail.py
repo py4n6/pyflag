@@ -34,7 +34,7 @@ class SquirrelMailScan(LiveCom.HotmailScanner):
     class Scan(LiveCom.HotmailScanner.Scan):
         service = "Squirrel"
         
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             dbh = DB.DBO(self.case)
             dbh.execute("select content_type,url,host from http where inode_id=%r limit 1", self.fd.inode_id)
             row = dbh.fetch()

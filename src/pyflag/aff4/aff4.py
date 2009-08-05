@@ -538,6 +538,7 @@ class Store:
 
     def expire(self):
         while len(self.age) > self.limit:
+            pdb.set_trace()
             x = self.age.pop(0)
             del self.hash[x]
 
@@ -617,7 +618,7 @@ class URNObject:
                 
         return result
 
-    def flush(self):
+    def flush(self, **kwargs):
         pass
 
 class Resolver:
@@ -1481,6 +1482,7 @@ try:
             self.handler = ewf.ewf_open(files)
             ## Now add headers
             h = self.handler.get_headers()
+            h['md5'] = h.get('md5','').encode("hex")
 
             ## Try to make a unique volume URN
             try:
@@ -1599,8 +1601,6 @@ class Link(AFFObject):
         stored = oracle.resolve(self.urn, AFF4_STORED) or \
                       Raise("Link objects must be stored on a volume")
         oracle.add(stored, AFF4_CONTAINS, self.urn)
-        oracle.set(self.urn, AFF4_VOLATILE_DIRTY, 1)
-        
         oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
         self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                       Raise("Link objects must have a target attribute")
@@ -1834,6 +1834,40 @@ class Map(FileLikeObject):
 
         ## Ok, we are done now
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
+
+    def explain(self):
+        result = "Stream %s %s:\n   %s" % (
+            self.__class__.__name__,
+            self.urn,
+            "\n   ".join(oracle.export(self.urn).splitlines()))
+
+        result += "\n\n* "
+
+        targets = set()
+        targets.add(oracle.resolve(self.urn, AFF4_STORED))
+        targets.add(oracle.resolve(self.urn, AFF4_TARGET))
+
+        fd = oracle.open("%s/map" % self.urn, 'r')
+        try:
+            for urn in self.target_urns.values():
+                targets.add(urn)
+                
+            result += "Map %s:\n" % self.urn + fd.get_data() + "\n"
+        finally:
+            oracle.cache_return(fd)
+
+        result += "Targets:\n"
+        for target in targets:
+            if not target: continue
+            ## Now explain the stored URN
+            fd = oracle.open(target, 'r')
+            try:
+                result += "\n ".join(fd.explain().splitlines())
+            finally:
+                oracle.cache_return(fd)
+
+        return result
+
 
 try:
     from M2Crypto import Rand, X509, EVP, m2, RSA

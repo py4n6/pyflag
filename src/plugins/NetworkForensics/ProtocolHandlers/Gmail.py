@@ -102,8 +102,9 @@ class GmailScanner(LiveCom.HotmailScanner):
                 metadata['host'] = row['host']
                 metadata['content_type'] = row['content_type']
 
-        def boring(self, metadata, data=''):
-            self.get_url(metadata)
+        def boring(self, data=''):
+            return True
+            #self.get_url(metadata)
             
             if metadata['host']=='mail.google.com' and \
                    metadata['url'].startswith("http://mail.google.com/mail/"):
@@ -118,8 +119,8 @@ class GmailScanner(LiveCom.HotmailScanner):
 
             return True
 
-        def process(self, data, metadata=None):
-            Scanner.StoreAndScanType.process(self, data, metadata)
+        def process(self, data):
+            Scanner.StoreAndScanType.process(self, data)
             ## Feed our parser some more:
             if not self.boring_status:
                 if self.javascript == None:
@@ -266,7 +267,7 @@ class GoogleDocs(LiveCom.HotmailScanner):
     """ A scanner for google docs related pages """
     class Scan(GmailScanner.Scan):
         service = "Google Docs"
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             ## This string identifies this document as worth scanning
             if "var trixApp" in data:
                 self.parser =  HTMLParser(verbose=0)

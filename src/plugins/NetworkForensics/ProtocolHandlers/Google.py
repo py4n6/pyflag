@@ -35,7 +35,9 @@ class GoogleImageScanner(Gmail.GmailScanner):
     """ Detect Google image searches and clean up the html """
     
     class Scan(Gmail.GmailScanner.Scan):
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
+            ## FIXME
+            return True
             self.get_url(metadata)
 
             try:

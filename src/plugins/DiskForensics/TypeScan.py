@@ -67,13 +67,10 @@ class TypeScan(Scanner.GenScanFactory):
     class Scan(Scanner.BaseScanner):
         type_str = None
         
-        def process(self, data, metadata=None):
+        def process(self, data):
             if self.type_str==None:
                 m = Magic.MagicResolver()
                 self.type_str, self.type_mime = m.cache_type(self.case, self.fd.inode_id, data[:1024])
-                metadata['mime'] = self.type_mime
-                metadata['type'] = self.type_str
-                
 ## A report to examine the Types of different files:
 class ViewFileTypes(Reports.CaseTableReports):
     """ Browse the file types discovered.

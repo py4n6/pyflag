@@ -27,6 +27,7 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import cStringIO, os, os.path
 import pyflag.DB as DB
+import pdb
 
 config.add_option("CACHE_FILENAME", default="__cache__.bin",
                   help = 'Name of consolidated cache file')
@@ -381,6 +382,7 @@ class ProxyReader:
     
 MANAGER = DirectoryCacheManager()
 import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 
 ## Some private AFF4 namespace objects
 PYFLAG_NS = "urn:pyflag:"
@@ -389,6 +391,12 @@ PYFLAG_CASE = PYFLAG_NS + "case"
 class AFF4Manager(DirectoryCacheManager):
     """ A Special Cache manager which maintains the main AFF4 Cache
     """
+    def make_volume_urn(self, case):
+        volume_path = "file://%s/%s.aff4" % (config.RESULTDIR, case)
+        volume_urn = aff4.oracle.resolve(volume_path, aff4.AFF4_CONTAINS)
+
+        return volume_urn
+        
     def create_cache_fd(self, case, path, include_in_VFS=True):
         """ Creates a new non-seakable AFF4 Image stream that can be
         written on.
@@ -398,20 +406,58 @@ class AFF4Manager(DirectoryCacheManager):
         that is what its URN will be too relative to the volume).
         """
         fd = aff4.Image(None, 'w')
-        volume_path = "%s/%s.aff4" % (config.RESULTDIR, case)
-        volume_urn = aff4.oracle.resolve(volume_path, aff4.AFF4_CONTAINS)
+        volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
-        aff4.oracle.set(fd.urn, aff4.AFF4_STORED, volume_urn)
+        aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
 
+        if include_in_VFS:
+            self.add_to_VFS(fd, case, path)
+            
+        return fd
+
+    def add_to_VFS(self, fd, case, path, **kwargs):
         import pyflag.FileSystem as FileSystem
 
         ## Insert the new fd into the VFS
-        if include_in_VFS:
-            fsfd = FileSystem.DBFS(case)
-            fsfd.VFSCreate(fd.urn, path)
+        fsfd = FileSystem.DBFS(case)
+        fd.inode_id = fsfd.VFSCreate(fd.urn, path, **kwargs)
 
         return fd
+
+    def create_cache_map(self, case, path, include_in_VFS=True, size=0,
+                         **kwargs):
+        """ Creates a new map in the VFS.
+
+        Callers must call close() on the object to ensure it gets
+        written to the volume. The returned object is a standard AFF4
+        map object and supports all the methods from the AFF4 library.
+        """
+        fd = aff4.Map(None, 'w')
+        fd.size = size
+        volume_urn = self.make_volume_urn(case)
+        fd.urn = aff4.fully_qualified_name(path, volume_urn)
+        aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
+        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
+        fd.finish()
+
+        if include_in_VFS:
+            self.add_to_VFS(fd, case, path, **kwargs)
+        return fd
+
+    def create_link(self, case, source, destination, include_in_VFS=True):
+        """ Creates a link object from source urn to destination urn """
+        fd = aff4.Link(None, 'w')
+        volume_urn = self.make_volume_urn(case)
+        fd.urn = aff4.fully_qualified_name(destination, volume_urn)
+        aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
+        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
+        aff4.oracle.set(fd.urn, AFF4_TARGET, aff4.fully_qualified_name(source, volume_urn))
+        fd.finish()
+        fd.close()
+
+        if include_in_VFS:
+            self.add_to_VFS(fd, case, destination)
 
 AFF4_MANAGER = AFF4Manager()

@@ -133,4 +133,4 @@ AFF4_SPECIAL_URN_ZERO = FQN + "zero" ## This is used to represent long
 AFF4_MTIME = FQN + "mtime"
 AFF4_ATIME = FQN + "atime"
 AFF4_CTIME = FQN + "ctime"
-
+AFF4_MODE  = FQN + "mode"

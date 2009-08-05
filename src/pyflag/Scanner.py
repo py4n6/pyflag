@@ -39,7 +39,7 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import pyflag.pyflaglog as pyflaglog
 import os,imp, StringIO
-import re
+import re,pdb
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.FlagFramework as FlagFramework
@@ -77,7 +77,7 @@ class BaseScanner:
         except:
             self.ignore = False
 
-    def process(self, data, metadata={}):
+    def process(self, data):
         """ process the chunk of data.
 
         This function is given a chunk of data from the file - this
@@ -85,13 +85,11 @@ class BaseScanner:
         appropropriate to accumulate the data until the finish method
         is called (See the StoreAndScan classes for examples).
         
-        @arg data: Some limited amount of data from the file. The size of the data is unspecified but more than 1000 bytes.
-        
-        @arg metadata: A dict specifying meta data that was deduced about this file by other scanners. Scanners may add meta data to this dict in order to indicate certain facts to other scanners about this file. For example the TypeScan scanner will store the magic in this dict to indicate when the PST scanner should scan the file etc. Note that the order of scanner invocation is important, and is controlled by the order parameter in the Scanner's GenScanFactory class.
+        @arg data: Some limited amount of data from the file. The size of the data is unspecified but more than 1000 bytes.        
         """
         pass
 
-    def slack(self, data, metadata={}):
+    def slack(self, data):
         """ process file slack space.
 
         This function is called with file slack data once all regular file
@@ -201,7 +199,7 @@ class MemoryScan(BaseScanner):
         self.window = ''
         self.offset=0
 
-    def process(self, data,metadata=None):
+    def process(self, data):
         buf = self.window + data
         self.process_buffer(buf)
         self.offset += len(buf)
@@ -228,21 +226,20 @@ class StoreAndScan(BaseScanner):
         self.file = None
         self.boring_status = True
 
-    def boring(self,metadata, data=''):
+    def boring(self, data=''):
         """ This function decides if this file is boring (i.e. we should ignore it).
 
         This must be implemented in derivative classes.
-
-        @arg metadata: The metadata dict which is filled with metadata about the file from previous scanners.
+        
         @return: True if the file is boring (i..e should be ignored), False if we are interested in it.
         """
 
-    def process(self, data,metadata=None):
+    def process(self, data):
         try:
             ## If this file is boring, we check to see if there is new
             ## information which makes it not boring:
             if self.boring_status:
-                self.boring_status = self.boring(metadata, data=data)
+                self.boring_status = self.boring(data=data)
                 
             ## We store all the files we create in a central place, so
             ## multiple instances of StoreAndScan can all share the
@@ -305,42 +302,26 @@ class StoreAndScanType(StoreAndScan):
     ## These are the mime types that will be used to decide if we should scan this file
     types = []
     
-    def boring(self,metadata, data=''):
-        try:
-            mime_type = metadata['mime']
-        except KeyError:
-            dbh = DB.DBO(self.case)
-            dbh.execute("select mime,type from type where inode_id=%r limit 1",(self.inode_id))
-            row=dbh.fetch()
-            if row:
-                mime_type = row['mime']
-                metadata['magic'] = row['type']
-                
-            else:
-                metadata['mime'] = None
-                metadata['magic'] = None
-                ## The type of the file may not change once magic has
-                ## been determined, so we ignore the rest of the file:
-                self.ignore = True
-                return True
+    def boring(self, data=''):
+        import pyflag.Magic as Magic
 
-        if mime_type:
-            for t in self.types:
-                if re.search(t,mime_type):
-                    ## Not boring:
-                    self.mime_type = mime_type
-                    return False
-
+        m = Magic.MagicResolver()
+        self.type, self.mime_type = m.find_inode_magic(self.case, inode_id=self.inode_id,
+                                                       data=data)
+        for t in self.types:
+            if re.search(t,self.mime_type) or re.search(t, self.type):
+                return False
+            
         self.ignore = True
         return True
 
 class StringIOType(StoreAndScanType):
     """ Just like StoreAndScanType but the file exists in memory only.
     """
-    def process(self, data, metadata=None):
+    def process(self, data):
         try:
             if self.boring_status:
-                self.boring_status = self.boring(metadata, data=data)
+                self.boring_status = self.boring(data=data)
 
             if not self.file and not self.boring_status and\
                    self.inode_id not in StoreAndScanFiles:
@@ -369,11 +350,11 @@ class ScanIfType(StoreAndScanType):
         BaseScanner.__init__(self, inode_id,ddfs,outer,factories,fd=fd)
         self.boring_status = True
 
-    def process(self, data,metadata=None):
+    def process(self, data):
         ## If this file is boring, we check to see if there is new
         ## information which makes it not boring:
         if self.boring_status:
-            self.boring_status = self.boring(metadata)
+            self.boring_status = self.boring(data=data)
 
     def finish(self):
         print "Scanned type %s" % self.fd.inode_id
@@ -425,11 +406,6 @@ def scanfile(ddfs,fd,factories):
     
     if len(objs)==0: return
 
-    ## This dict stores metadata about the file which may be filled in
-    ## by some scanners in order to indicate some fact to other
-    ## scanners.
-    metadata = {}
-    import pdb; pdb.set_trace()
     messages = DB.expand("Scanning file %s%s (inode %s)",
                          (stat['path'],stat['name'],stat['inode_id']))
     global MESSAGE_COUNT
@@ -440,23 +416,6 @@ def scanfile(ddfs,fd,factories):
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, messages)
 
     while 1:
-        ## If the file is too fragmented, we skip it because it might take too long... NTFS is a shocking filesystem, with some files so fragmented that it takes a really long time to read them. In our experience these files are not important for scanning so we disable them here. Maybe this should be tunable?
-        try:
-            if len(fd.blocks)>1000 or fd.size>100000000:
-                return
-
-            c=0
-            for i in fd.blocks:
-                c+=i[1]
-
-            ## If there are not enough blocks to do a reasonable chunk of the file, we skip them as well...
-            if c>0 and c*fd.block_size<fd.size:
-                pyflaglog.log(pyflaglog.WARNING, "Skipping inode %s because there are not enough blocks %s < %s", fd.inode_id,c*fd.block_size,fd.size)
-                return
-
-        except AttributeError:
-            pass
-
         try:
             data = fd.read(buffsize)
             if not data: break
@@ -481,7 +440,7 @@ def scanfile(ddfs,fd,factories):
                 if not o.ignore:
                     interest+=1
                     pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Processing with %s", o)
-                    o.process(data,metadata=metadata)
+                    o.process(data)
 
             except Exception,e:
                 pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
@@ -503,7 +462,7 @@ def scanfile(ddfs,fd,factories):
     if data:
         for o in objs:
             try:
-                o.slack(data, metadata=metadata)
+                o.slack(data)
             except Exception,e:
                 pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
 

@@ -182,6 +182,9 @@ import pyflag.DB as DB
 import pyflag.Registry as Registry
 import pyflag.Store as Store
 
+## This is the type of process we are in.
+TYPE = "main"
+
 ## This stores the pids of working threads - we kill those when the
 ## main thread exits
 children = []
@@ -311,6 +314,8 @@ def nanny(cb, keepalive=None, *args, **kwargs):
         else:
             os.close(r)
             cb(keepalive=w, *args, **kwargs)
+            global TYPE
+            TYPE = 'worker'
             os._exit(0)
 
 def worker_run(keepalive=None):

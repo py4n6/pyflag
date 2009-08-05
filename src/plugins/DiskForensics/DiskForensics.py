@@ -29,6 +29,7 @@
 
 """ Flag module for performing structured disk forensics """
 import pyflag.Reports as Reports
+import pyflag.Magic as Magic
 from pyflag.FlagFramework import Curry,query_type
 import pyflag.FlagFramework as FlagFramework
 import pyflag.conf
@@ -143,13 +144,16 @@ class ViewFile(Reports.report):
         tmp.text(fd.urn)
         result.heading(tmp)
         
-#         try:
-#             result.text("Classified as %s by magic" % )
-#         except IOError,e:
-#             result.text("Unable to classify file, no blocks: %s" % e)
-#             image = None
-#         except:
-#             pass
+        try:
+            m = Magic.MagicResolver()
+            type, mime = m.find_inode_magic(query['case'],
+                                            fd.inode_id)
+            result.text("Classified as %s by magic" % type)
+        except IOError,e:
+            result.text("Unable to classify file, no blocks: %s" % e)
+        except Exception,e:
+            print e
+            pass
 
         names, callbacks = fd.make_tabs()
         

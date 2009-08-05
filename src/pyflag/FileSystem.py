@@ -139,7 +139,7 @@ class File:
         dbh = DB.DBO(self.case)
         dbh.execute("select * from vfs where inode_id = %r", self.inode_id)
         row = dbh.fetch()
-        result.update(row)
+        if row: result.update(row)
         
         return result
 
@@ -365,7 +365,7 @@ class File:
             istat.update(merge)
             
         try:
-            for k,values in istat.iteritems():
+            for k,values in istat.items():
                 for v in values:
                     left.row('%s:' % k,'',v, align='left')
         except AttributeError:
@@ -916,8 +916,9 @@ class DBFS(FileSystem):
             return res["path"], inode, res['inode_id']
 
         
-    def VFSCreate(self,urn, path, directory=False ,gid=0, uid=0, mode=100777,
-                  _fast=False, inode_id=None, update_only=False,
+    def VFSCreate(self,urn, path, directory=False,
+                  _fast=False, inode_id=None,
+                  status='alloc',
                   **properties):
         """ Creates a new Inode in the VFS from AFF4 urn provided.
 
@@ -940,10 +941,10 @@ class DBFS(FileSystem):
             dirname = posixpath.dirname(new_path)
             basename = posixpath.basename(new_path)
             dbh.execute("select * from vfs where path=%r and "
-                        "name=%r limit 1",(dirname,basename))
+                        "name=%r and type='directory' limit 1",(dirname,basename))
             if not dbh.fetch():
                 dbh.insert("vfs",
-                           status='alloc',
+                           status=status,
                            type='directory',
                            path = dirname,
                            name = basename)
@@ -951,9 +952,14 @@ class DBFS(FileSystem):
 
         if directory: return
 
-        inode_properties = dict(status="alloc",
-                                mode=40755,
-                                inode_id = aff4.oracle[urn].urn_id,
+        if urn:
+            inode_id = aff4.oracle[urn].urn_id
+
+        if not inode_id: raise RuntimeError("No inode_id found for the urn %s" % urn)
+        inode_properties = dict(status=status,
+                                mode= aff4.oracle.resolve(urn, AFF4_MODE) or 40755,
+                                inode_id = inode_id,
+                                type='file',
                                 mtime = aff4.oracle.resolve(urn, AFF4_MTIME) or \
                                         aff4.oracle.resolve(urn, AFF4_TIMESTAMP),
                                 atime = aff4.oracle.resolve(urn, AFF4_ATIME),
@@ -968,9 +974,15 @@ class DBFS(FileSystem):
             if time:
                 inode_properties["_"+t] = DB.expand("from_unixtime(%r)", time)
 
-        dbh.insert('vfs',**inode_properties)
+        ## Is it already present?
+        dbh.execute("select inode_id from vfs where inode_id = %r", inode_id)
+        if dbh.fetch():
+            dbh.update('vfs', where='inode_id = "%s"' % inode_id,
+                       **inode_properties)
+        else:
+            dbh.insert('vfs',**inode_properties)
 
-        return dbh.autoincrement()
+        return inode_id
 
     def longls(self,path='/', dirs = None):
         dbh=DB.DBO(self.case)
@@ -983,7 +995,7 @@ class DBFS(FileSystem):
                 FlagFramework.normpath(posixpath.dirname(path)),
                 posixpath.basename(path)))
                    
-        dbh.execute("select * from vfs where %s", (where))
+        dbh.execute("select * from vfs where %s group by inode_id,path,name", (where))
         result = [dent for dent in dbh]
 
         return result
@@ -992,9 +1004,17 @@ class DBFS(FileSystem):
         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
 
     def istat(self, inode_id):
-        urn_obj = aff4.oracle[aff4.oracle.resolve_urn(inode_id)]
-            
-        return urn_obj.properties.copy()
+        dbh = DB.DBO()
+        result = {}
+        dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where urn_id = %r", inode_id)
+        for row in dbh:
+            attribute = row['attribute']
+            try:
+                result[attribute].append(row['value'])
+            except KeyError:
+                result[attribute] = [row['value'],]
+
+        return result
 
     def isdir(self,directory):
         directory=posixpath.normpath(directory)

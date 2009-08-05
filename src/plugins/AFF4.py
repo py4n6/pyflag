@@ -11,6 +11,8 @@ We have an AFF4 VFSFile object which is able to access these files.
 
 ## We just include the pure python implementation of AFF4 in the
 ## PyFlag source tree.
+import pyflag.pyflaglog as pyflaglog
+import pyflag.Farm as Farm
 import pyflag.aff4.aff4 as aff4
 from pyflag.aff4.aff4_attributes import *
 import pyflag.Reports as Reports
@@ -62,6 +64,29 @@ def resolve_urn(inode_id):
 aff4.oracle.resolve_id = resolve_id
 aff4.oracle.resolve_urn = resolve_urn
 
+ATTRIBUTE_CACHE = {}
+
+def get_attribute_id(attribute):
+    global ATTRIBUTE_CACHE
+    try:
+        return ATTRIBUTE_CACHE[attribute]
+    except KeyError:
+        pass
+
+    dbh = DB.DBO()
+    dbh.execute("select * from AFF4_attribute where attribute = %r", attribute)
+    row = dbh.fetch()
+    if row:
+        attribute_id = row['attribute_id']
+    else:
+        dbh.insert("AFF4_attribute", _fast=True,
+                   attribute = attribute)
+        attribute_id = dbh.autoincrement()
+
+    ATTRIBUTE_CACHE[attribute] = attribute_id
+    return attribute_id
+
+
 class DBURNObject(aff4.URNObject):
     def __init__(self, urn):
         aff4.URNObject.__init__(self, urn)
@@ -69,23 +94,60 @@ class DBURNObject(aff4.URNObject):
         self.urn = urn
         global NEW_OBJECTS
         NEW_OBJECTS.append(self)
-
-        PDBO = DB.DBO()
-        self.urn_id = aff4.oracle.resolve_id(urn)
-        if self.urn_id:
-            PDBO.execute("select attribute, value from AFF4_attribute "
-                         "join AFF4 on AFF4.attribute_id = "
-                         "AFF4_attribute.attribute_id where urn_id = %r", self.urn_id)
         
-            for row in PDBO:
-                aff4.URNObject.add(self, row['attribute'], row['value'])
+        dbh = DB.DBO()
+        dbh.execute("select * from AFF4_urn where urn = %r", urn)
+        row = dbh.fetch()
+        if row:
+            self.urn_id = row['urn_id']
         else:
-            PDBO.insert("AFF4_urn", _fast=True,
-                        urn=urn)
-            self.urn_id = PDBO.autoincrement()
-            
+            dbh.insert("AFF4_urn", _fast=True,
+                       urn = urn)
+            self.urn_id = dbh.autoincrement()
+
+    def add(self, attribute, value):
+        attribute_id = get_attribute_id(attribute)
+        dbh = DB.DBO()
+        dbh.insert("AFF4", _fast=True,
+                   urn_id = self.urn_id,
+                   attribute_id = attribute_id,
+                   value = value)
+
+    def delete(self, attribute):
+        attribute_id = get_attribute_id(attribute)
+        dbh = DB.DBO()
+        dbh.delete("AFF4", _fast=True,
+                   where = "attribute_id = %s and urn_id = %s" % (
+            attribute_id,self.urn_id))
+
+    def set(self, attribute, value):
+        self.delete(attribute)
+        self.add(attribute, value)
+
+    def __getitem__(self, attribute):
+        dbh = DB.DBO()
+        attribute_id = get_attribute_id(attribute)
+        dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
+                    (attribute_id, self.urn_id))
+        result = [ x['value'] for x in dbh ]
+        if result:
+            return result
+        else:
+            return aff4.NoneObject("URN %s has no attribute %s" % (self.urn, attribute))
+
+    def export(self):
+        result = ''
+        dbh = DB.DBO()
+        dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
+        for row in dbh:
+            if not row['attribute'].startswith(VOLATILE_NS):
+                result += "       %s = %s\n" % (row['attribute'], row['value'])
+
+        return result
+
     def flush(self, case=None):
         """ Write ourselves to the DB """
+        return
         if not self.properties: return
         
         if not case: pdb.set_trace()
@@ -244,34 +306,13 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         dbh.check_index("AFF4", "urn_id")
         dbh.check_index("AFF4", "attribute_id")
 
-    def reset(self, dbh, case):
-        ## Remove all the urns that belong to this case
-        pdbh = DB.DBO()
-        pdbh2 = DB.DBO()
-        pdbh.execute("select * from AFF4_urn where `case`=%r", case)
-        for row in pdbh:
-            urn_id = row['urn_id']
-            pdbh2.delete("AFF4", where='urn_id="%s"' % urn_id, _fast=True)
-
-        #pdbh.delete("AFF4_urn", where='`case`="%s"' % case, _fast=True)
-
     def create(self, dbh, case):
         """ Create a new case AFF4 Result file """
         volume = aff4.ZipVolume(None, 'w')
-        aff4.oracle.set(volume.urn, aff4.AFF4_STORED, "%s/%s.aff4" % (config.RESULTDIR, case))
+        filename = "file://%s/%s.aff4" % (config.RESULTDIR, case)
+        aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
         volume.finish()
         aff4.oracle.cache_return(volume)
-        dbh.set_meta("result_aff4_volume", volume.urn)
-
-    def periodic(self, dbh, case):
-        return
-        dbh = DB.DBO()
-        dbh.execute("select value from meta where property='flag_db'")
-        for row in dbh:
-            case = row['value']
-            volume_urn = aff4.oracle.resolve("%s/%s.aff4" % (config.RESULTDIR, case),
-                                             aff4.AFF4_CONTAINS)
-            print "Closing AFF4 file %s" % aff4.oracle.resolve(volume_urn, aff4.AFF4_VOLATILE_DIRTY)
             
     def startup(self):
         dbh = DB.DBO()
@@ -412,26 +453,41 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-    test_file = 'pcap.zip'
+#    test_file = 'pcap.zip'
+    test_file = '/testimages/pyflag_stdimage_0.5.e01'
 
     def test01CaseCreation(self):
-        pyflagsh.shell_execv(command="delete_case",
+        env = pyflagsh.environment(case=self.test_case)
+        pyflagsh.shell_execv(command="delete_case", env=env,
                              argv=[self.test_case])
-        pyflagsh.shell_execv(command="create_case",
+        pyflagsh.shell_execv(command="create_case", env=env,
                              argv=[self.test_case])
         if 1:
-            pyflagsh.shell_execv(command='execute',
+            pyflagsh.shell_execv(command='execute', env=env,
                                  argv=['Load Data.Load AFF4 Volume',
                                        'case=%s' % self.test_case, 
                                        'filename=%s' % self.test_file])
+
+            pyflagsh.shell_execv(command='scan', env=env,
+                                 argv=['*', 'TypeScan', 'PartitionScanner',
+                                       'FilesystemLoader'])
+            
         fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
         fd.write("hello world")
         fd.close()
 
+
 import atexit
 
-#def FlushResolver():
-#    for obj in aff4.oracle.urn.values():
-#        obj.flush()
+def close_off_volume():
+    """ Check for dirty volumes are closes them """
+    dbh = DB.DBO()
+    dbh.execute("select value from meta where property='flag_db'")
+    for row in dbh:
+        volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
+        if aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
+            fd = aff4.oracle.open(volume_urn, 'w')
+            if fd:
+                fd.close()
 
-#atexit.register(FlushResolver)
+atexit.register(close_off_volume)

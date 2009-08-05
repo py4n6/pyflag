@@ -40,10 +40,10 @@ class YahooMailScan(LiveCom.HotmailScanner):
     class Scan(LiveCom.HotmailScanner.Scan):
         service = "Yahoo"
         
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             ## We dont think its boring if our base class does not:
             ## And the data contains '<title>\s+Yahoo! Mail' in the top.
-            if not Scanner.StoreAndScanType.boring(self, metadata, data=''):
+            if not Scanner.StoreAndScanType.boring(self, data=''):
                 m=re.search("<title>[^<]+Yahoo! Mail", data)
                 if m:
                     self.username = None
@@ -260,10 +260,10 @@ class YahooMail20Scan(YahooMailScan):
         class Scan(YahooMailScan.Scan):
             types = ( 'xml', 'text/html' )
         
-            def boring(self, metadata, data=''):
+            def boring(self, data=''):
                 ## Yahoo web 2.0 is very nice to work with- All
                 ## responses are in nice XML
-                if not Scanner.StoreAndScanType.boring(self, metadata, data=''):
+                if not Scanner.StoreAndScanType.boring(self, data=''):
                     m=re.search("<(GetDisplayMessageResponse|ListMessagesResponse|SendMessageResponse)", data)
                     if m:
                         self.context = m.group(1)

@@ -186,10 +186,10 @@ class HotmailScanner(Scanner.GenScanFactory):
         parser = None
         service = "Hotmail"
 
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             ## We dont think its boring if our base class does not:
             ## And the data contains '<title>\s+Windows Live' in the top.
-            if not Scanner.StoreAndScanType.boring(self, metadata, data) and \
+            if not Scanner.StoreAndScanType.boring(self, data) and \
                    re.search("<title>\s+Windows Live", data):
                    ## Make a new parser:
                 if not self.parser:
@@ -198,8 +198,8 @@ class HotmailScanner(Scanner.GenScanFactory):
 
             return True
 
-        def process(self, data, metadata=None):
-            Scanner.StoreAndScanType.process(self, data, metadata)
+        def process(self, data):
+            Scanner.StoreAndScanType.process(self, data)
             ## Feed our parser some more:
             if not self.boring_status:
                 self.parser.feed(data.decode("utf8","ignore"))
@@ -364,16 +364,16 @@ class Live20Scanner(HotmailScanner):
         types = (
             '.',)
 
-        def boring(self, metadata, data=''):
-            if not Scanner.StoreAndScanType.boring(self, metadata, data='') and \
+        def boring(self, data=''):
+            if not Scanner.StoreAndScanType.boring(self, data='') and \
                    re.match("new HM.FppReturnPackage\(", data):
                 self.data = ''
                 return False
 
             return True
 
-        def process(self, data, metadata=None):
-            Scanner.StoreAndScanType.process(self, data, metadata)            
+        def process(self, data):
+            Scanner.StoreAndScanType.process(self, data)            
             if not self.boring_status:
                 self.data += data
 

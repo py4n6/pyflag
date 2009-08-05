@@ -873,6 +873,16 @@ def delete_case(case):
     try: Scanner.factories.expire(key_re)
     except: pass
 
+    ## Remove the AFF4 objects which lived in this case:
+    dbh = DB.DBO()
+    dbh2 = dbh.clone()
+    dbh.execute("select * from AFF4_urn where `case`=%r", case)
+    for row in dbh:
+        urn_id = row['urn_id']
+        dbh2.delete("AFF4", where='urn_id="%s"' % urn_id, _fast=True)
+
+    dbh.delete("AFF4_urn", where='`case`="%s"' % case, _fast=True)
+
 class EventHandler:
     """ This is the base class for SQL which needs to be run on various events.
 

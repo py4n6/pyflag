@@ -38,12 +38,12 @@ class MMSScanner(LiveCom.HotmailScanner):
 
         service = 'MMS'
 
-        def boring(self, metadata, data =''):
-            return Scanner.StoreAndScanType.boring(self,metadata, data) \
+        def boring(self, data =''):
+            return Scanner.StoreAndScanType.boring(self, data) \
                    or not "H" in self.fd.inode
                 
-        def process(self, data, metadata=None):
-            Scanner.StoreAndScanType.process(self, data, metadata)
+        def process(self, data):
+            Scanner.StoreAndScanType.process(self, data)
 
         def external_process(self, fd):
             pyflaglog.log(pyflaglog.DEBUG, "Opening %s for MMS Processing" % self.fd.inode)

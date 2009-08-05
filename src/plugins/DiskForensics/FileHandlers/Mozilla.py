@@ -118,7 +118,7 @@ class MozHistScan(Scanner.GenScanFactory):
     
     class Scan(Scanner.StringIOType):
         mork = None
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             if self.mork == None: 
                 if 'mdb:mork:z v="1.4"' in data:
                     self.mork = False
@@ -233,7 +233,7 @@ class MozCacheScan(Scanner.GenScanFactory):
     group = "FileScanners"
     
     class Scan(Scanner.StoreAndScan):
-        def boring(self, metadata, data=''):
+        def boring(self, data=''):
             s = self.fd.stat()
             if s['name'] == "_CACHE_MAP_":
             	return False

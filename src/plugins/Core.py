@@ -294,7 +294,6 @@ class Exit(Farm.Task):
 class Scan(Farm.Task):
     """ A task to distribute scanning among all workers """
     def run(self,case, inode_id, scanners, *args):
-        pdb.set_trace()               
         factories = Scanner.get_factories(case, scanners.split(","))
 
         if factories:

@@ -134,7 +134,7 @@ class MD5Scan(GenScanFactory):
             self.length = 0
             self.ignore = False
             
-        def process(self, data,metadata=None):
+        def process(self, data):
             self.m.update(data)
             self.length+=len(data)
 
