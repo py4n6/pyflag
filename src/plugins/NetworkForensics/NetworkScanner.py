@@ -145,3 +145,91 @@ class StreamScannerFactory(GenScanFactory):
 
     class Scan(StreamTypeScan):
         pass
+
+## Below is the new implementation for PCAPScanner
+import pyflag.Magic as Magic
+import reassembler, pypcap
+import pdb
+from aff4.aff4_attributes import *
+
+class PCAPScanner(GenScanFactory):
+    """ A scanner for PCAP files. We reasemble streams and load them
+    automatically. Note that this code creates map streams for
+    forward, reverse and combined streams.
+    """
+    def scan(self, fd, factories, type, mime):
+        if "PCAP" not in type: return
+        
+        def Callback(mode, packet, connection):
+            if mode == 'est':
+                if 'map' not in connection:
+                    ip = packet.find_type("IP")
+
+                    ## We can only get tcp or udp packets here
+                    try:
+                        tcp = packet.find_type("TCP")
+                    except AttributeError:
+                        tcp = packet.find_type("UDP")
+
+                    base_urn = "/%s-%s/%s-%s/" % (
+                        ip.source_addr, ip.dest_addr,
+                        tcp.source, tcp.dest)
+
+                    combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "combined", timestamp = packet.ts_sec,
+                        target = fd.urn)
+                    
+                    connection['reverse']['combined'] = combined_stream
+                    connection['combined'] = combined_stream
+                    
+                    map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "forward", timestamp = packet.ts_sec,
+                        target = fd.urn)
+                    connection['map'] = map_stream
+
+                    map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "reverse", timestamp = packet.ts_sec,
+                        target = fd.urn)
+                    connection['reverse']['map'] = map_stream
+                    
+
+            elif mode == 'data':
+                try:
+                    tcp = packet.find_type("TCP")
+                except AttributeError:
+                    tcp = packet.find_type("UDP")
+
+                length = len(tcp.data)
+                connection['map'].write_from("@", packet.offset + tcp.data_offset, length)
+                connection['combined'].write_from("@", packet.offset + tcp.data_offset,
+                                                  length)
+
+            elif mode == 'destroy':
+                if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
+                    map_stream = connection['map']
+                    map_stream.close()
+
+                    r_map_stream = connection['reverse']['map']
+                    r_map_stream.close()
+
+                    combined_stream = connection['combined']
+                    combined_stream.close()
+
+        ## Create a tcp reassembler if we need it
+        processor = reassembler.Reassembler(packet_callback = Callback)
+
+        ## Now process the file
+        try:
+            pcap_file = pypcap.PyPCAP(fd)
+        except IOError:
+            pyflaglog.log(pyflaglog.WARNING,
+                          DB.expand("%s does not appear to be a pcap file", fd.urn))
+            return
+
+        while 1:
+            try:
+                packet = pcap_file.dissect()
+                processor.process(packet)
+            except StopIteration: break
+
+        del processor

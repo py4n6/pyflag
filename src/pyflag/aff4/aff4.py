@@ -287,6 +287,19 @@ class AFFObject:
 
         return result
 
+    def close(self):
+        if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == 'combined': return
+
+        ## Write the properties file
+        container = oracle.resolve(self.urn, AFF4_STORED)
+        volume = oracle.open(container,'w')
+        try:
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn),
+                            compress_type = ZIP_DEFLATED)
+        finally:
+            oracle.cache_return(volume)
+            
 
 class AFFVolume(AFFObject):
     """ A Volume simply stores segments """
@@ -538,7 +551,6 @@ class Store:
 
     def expire(self):
         while len(self.age) > self.limit:
-            pdb.set_trace()
             x = self.age.pop(0)
             del self.hash[x]
 
@@ -710,6 +722,7 @@ class Resolver:
 
         if uri.startswith(FQN) and \
                not self.resolve_list(uri, AFF4_TYPE):
+            pdb.set_trace()
             Raise("Trying to open a non existant or already closed object %s" % uri)
 
         ## If the uri is not complete here we guess its a file://
@@ -822,8 +835,8 @@ class Resolver:
 
             DEBUG(_WARNING,"Unknown line in properties: %s" % line)
 
-    def export(self, subject):
-        return self[subject].export()
+    def export(self, subject, prefix=''):
+        return self[subject].export(prefix=prefix)
 
     def export_all(self):
         result = ''
@@ -1080,15 +1093,7 @@ class Image(FileLikeObject):
 
         oracle.set(self.urn, AFF4_SIZE, self.size)
 
-        ## Write the properties file
-        container = oracle.resolve(self.urn, AFF4_STORED)
-        volume = oracle.open(container,'w')
-        try:
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn),
-                            compress_type = ZIP_DEFLATED)
-        finally:
-            oracle.cache_return(volume)
+        AFFObject.close(self)
 
         ## Ok, we are done now
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
@@ -1261,8 +1266,16 @@ class ZipVolume(RAWVolume):
         """
         ## Is this file dirty?
         if oracle.resolve(self.urn, AFF4_VOLATILE_DIRTY):
+            if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == "combined":
+                result = ''
+                for urn in oracle.resolve_list(self.urn, AFF4_CONTAINS):
+                    ## This makes the export absolute
+                    result += oracle.export(urn, prefix = urn +" ")
+            else:
+                result = oracle.export(self.urn)
+                
             ## Store volume properties
-            self.writestr("properties", oracle.export(self.urn),
+            self.writestr("properties", result,
                           compress_type = ZIP_DEFLATED)
 
             ## Where are we stored?
@@ -1674,12 +1687,18 @@ class Map(FileLikeObject):
         ## Parse the map now:
         if uri and mode=='r':
             target_urn = oracle.resolve(uri, AFF4_TARGET)
-            
-            fd = oracle.open("%s/map" % uri)
-            fd.seek(0)
-            line_re = re.compile("(\d+),(\d+),(.+)")
+            ## map data can be stored as an attribute or in its own segment
+            map_data = oracle.resolve(uri, AFF4_MAP_DATA)
+            if map_data:
+                map_data = map_data.decode("string_escape")
+            else:
+                fd = oracle.open("%s/map" % uri)
+                fd.seek(0)
+                line_re = re.compile("(\d+),(\d+),(.+)")
+                map_data= fd.get_data()
+                
             try:
-                for line in fd.read(fd.size).splitlines():
+                for line in map_data.splitlines():
                     m = line_re.match(line)
                     if not m:
                         DEBUG(_WARNING, "Unable to parse map line '%s'" % line)
@@ -1820,17 +1839,19 @@ class Map(FileLikeObject):
                                      self.target_urns[x]))
             previous = x
 
-        stored = oracle.resolve(self.urn, AFF4_STORED)
-        volume = oracle.open(stored, 'w')
-        try:
-            volume.writestr(fully_qualified_name("map", self.urn),
-                            fd.getvalue(), compress_type = ZIP_DEFLATED)
-            
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn),
-                            compress_type = ZIP_DEFLATED)
-        finally:
-            oracle.cache_return(volume)
+        ## If its very small we can just store it as an attribute
+        if fd.tell() < 1000:
+            oracle.set(self.urn, AFF4_MAP_DATA, fd.getvalue().encode("string_escape"))
+        else:
+            stored = oracle.resolve(self.urn, AFF4_STORED)
+            volume = oracle.open(stored, 'w')
+            try:
+                volume.writestr(fully_qualified_name("map", self.urn),
+                                fd.getvalue(), compress_type = ZIP_DEFLATED)
+            finally:
+                oracle.cache_return(volume)
+
+        FileLikeObject.close(self)
 
         ## Ok, we are done now
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)

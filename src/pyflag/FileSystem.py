@@ -918,7 +918,7 @@ class DBFS(FileSystem):
         
     def VFSCreate(self,urn, path, directory=False,
                   _fast=False, inode_id=None,
-                  status='alloc',
+                  status='alloc', timestamp=0,
                   **properties):
         """ Creates a new Inode in the VFS from AFF4 urn provided.
 
@@ -945,7 +945,7 @@ class DBFS(FileSystem):
             if not dbh.fetch():
                 dbh.insert("vfs",
                            status=status,
-                           type='directory',
+                           type = 'directory',
                            path = dirname,
                            name = basename)
             else: break
@@ -961,9 +961,10 @@ class DBFS(FileSystem):
                                 inode_id = inode_id,
                                 type='file',
                                 mtime = aff4.oracle.resolve(urn, AFF4_MTIME) or \
-                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP),
-                                atime = aff4.oracle.resolve(urn, AFF4_ATIME),
-                                ctime = aff4.oracle.resolve(urn, AFF4_CTIME),
+                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP) or \
+                                        timestamp,
+                                atime = aff4.oracle.resolve(urn, AFF4_ATIME) or timestamp,
+                                ctime = aff4.oracle.resolve(urn, AFF4_CTIME) or timestamp,
                                 size = aff4.oracle.resolve(urn, AFF4_SIZE) or 0,
                                 _fast=_fast,
                                 path = FlagFramework.normpath(posixpath.dirname(path)),

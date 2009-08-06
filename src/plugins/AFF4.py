@@ -8,13 +8,14 @@ stream objects in the volume inside the VFS.
 
 We have an AFF4 VFSFile object which is able to access these files.
 """
+import pyflag.pyflaglog as pyflaglog
+import pyflag.Farm as Farm
 
 ## We just include the pure python implementation of AFF4 in the
 ## PyFlag source tree.
-import pyflag.pyflaglog as pyflaglog
-import pyflag.Farm as Farm
 import pyflag.aff4.aff4 as aff4
 from pyflag.aff4.aff4_attributes import *
+
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
 import pyflag.conf as conf
@@ -29,6 +30,7 @@ import PIL, cStringIO, PIL.ImageFile
 import pyflag.Registry as Registry
 
 #aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
+aff4.oracle.set(aff4.GLOBAL, CONFIG_PROPERTIES_STYLE, 'combined')
 
 ## This is a persistent resolver in the database
 NEW_OBJECTS = []
@@ -88,60 +90,67 @@ def get_attribute_id(attribute):
 
 
 class DBURNObject(aff4.URNObject):
+    dbh = None
     def __init__(self, urn):
         aff4.URNObject.__init__(self, urn)
         self.properties = {}
         self.urn = urn
         global NEW_OBJECTS
         NEW_OBJECTS.append(self)
-        
-        dbh = DB.DBO()
-        dbh.execute("select * from AFF4_urn where urn = %r", urn)
-        row = dbh.fetch()
+
+        if not self.dbh:
+            DBURNObject.dbh = DB.DBO()
+
+        self.dbh.execute("select * from AFF4_urn where urn = %r", urn)
+        row = self.dbh.fetch()
         if row:
             self.urn_id = row['urn_id']
         else:
-            dbh.insert("AFF4_urn", _fast=True,
-                       urn = urn)
-            self.urn_id = dbh.autoincrement()
+            self.dbh.insert("AFF4_urn", _fast=True,
+                            urn = urn)
+            self.urn_id = self.dbh.autoincrement()
 
     def add(self, attribute, value):
         attribute_id = get_attribute_id(attribute)
-        dbh = DB.DBO()
-        dbh.insert("AFF4", _fast=True,
-                   urn_id = self.urn_id,
-                   attribute_id = attribute_id,
-                   value = value)
+        self.dbh.insert("AFF4", _fast=True,
+                        urn_id = self.urn_id,
+                        attribute_id = attribute_id,
+                        value = value)
 
     def delete(self, attribute):
         attribute_id = get_attribute_id(attribute)
-        dbh = DB.DBO()
-        dbh.delete("AFF4", _fast=True,
-                   where = "attribute_id = %s and urn_id = %s" % (
+        self.dbh.delete("AFF4", _fast=True,
+                        where = "attribute_id = %s and urn_id = %s" % (
             attribute_id,self.urn_id))
 
     def set(self, attribute, value):
-        self.delete(attribute)
-        self.add(attribute, value)
+        ## First try to update
+        attribute_id = get_attribute_id(attribute)
+        self.dbh.update("AFF4", _fast=True,
+                        value = value,
+                        where = "attribute_id = %s and urn_id = %s" % (
+                                 attribute_id, self.urn_id))
+
+        ## If that doesnt work, then insert
+        if self.dbh.cursor.rowcount == 0:
+            self.add(attribute, value)
 
     def __getitem__(self, attribute):
-        dbh = DB.DBO()
         attribute_id = get_attribute_id(attribute)
-        dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
-                    (attribute_id, self.urn_id))
-        result = [ x['value'] for x in dbh ]
+        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
+                         (attribute_id, self.urn_id))
+        result = [ x['value'] for x in self.dbh ]
         if result:
             return result
         else:
             return aff4.NoneObject("URN %s has no attribute %s" % (self.urn, attribute))
 
-    def export(self):
+    def export(self, prefix = ''):
         result = ''
-        dbh = DB.DBO()
-        dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
-        for row in dbh:
+        self.dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
+        for row in self.dbh:
             if not row['attribute'].startswith(VOLATILE_NS):
-                result += "       %s = %s\n" % (row['attribute'], row['value'])
+                result += "%s%s=%s\n" % (prefix, row['attribute'], row['value'])
 
         return result
 
@@ -454,7 +463,8 @@ class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
 #    test_file = 'pcap.zip'
-    test_file = '/testimages/pyflag_stdimage_0.5.e01'
+#    test_file = '/testimages/pyflag_stdimage_0.5.e01'
+    test_file = '/testimages/stdcapture_0.4.pcap.e01'
 
     def test01CaseCreation(self):
         env = pyflagsh.environment(case=self.test_case)
@@ -470,7 +480,7 @@ class AFF4LoaderTest(unittest.TestCase):
 
             pyflagsh.shell_execv(command='scan', env=env,
                                  argv=['*', 'TypeScan', 'PartitionScanner',
-                                       'FilesystemLoader'])
+                                       'FilesystemLoader', 'PCAPScanner'])
             
         fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
         fd.write("hello world")
@@ -487,6 +497,7 @@ def close_off_volume():
         volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
         if aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
             fd = aff4.oracle.open(volume_urn, 'w')
+            print "Closing volume %s" % volume_urn
             if fd:
                 fd.close()
 

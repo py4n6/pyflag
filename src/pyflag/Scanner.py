@@ -46,6 +46,7 @@ import pyflag.FlagFramework as FlagFramework
 import fnmatch
 import ScannerUtils
 import pyflag.CacheManager as CacheManager
+import pyflag.Magic as Magic
 
 class BaseScanner:
     """ This is the actual scanner class that will be instanitated once for each file in the filesystem.
@@ -182,7 +183,13 @@ class GenScanFactory:
         
     ## Relative order of scanners - Higher numbers come later in the order
     order=10
-    
+
+    def scan(self, fd, factories, type, mime):
+        """ This is the new scan method - scanners just implement this
+        method and go from there.
+        """
+
+    ## Deprecated
     class Scan(BaseScanner):
         """ The Scan class must be defined as an inner class to the factory. """
 
@@ -368,46 +375,48 @@ def resetfile(ddfs, inode_id,factories):
                                 (f.__class__.__name__, inode_id))
 
 MESSAGE_COUNT = 0
-    
+
 ### This is used to scan a file with all the requested scanner factories
-def scanfile(ddfs,fd,factories):
-    """ Given a file object and a list of factories, this function scans this file using the given factories
-
-    @arg ddfs: A filesystem object. This is sometimes used to add new files into the filesystem by the scanner
-    @arg fd: The file object of the file to scan
-    @arg factories: A list of scanner factories to use when scanning the file.
+def scan_inode(case, inode_id, factories):
+    """ Scans the given inode_id with all the factories provided. Each
+    factory is used to instantiate a Scan() object, then we call
+    Scan.scan() on the inode_id.
     """
-    stat = fd.stat()
-    if not stat: return
+    import pyflag.FileSystem as FileSystem
 
-    buffsize = 1024 * 1024
+    fsfd = FileSystem.DBFS(case)
+    fd = fsfd.open(inode_id=inode_id)
+    stat = fd.stat()
+    
     # instantiate a scanner object from each of the factory. We only
-    #instantiate scanners from factories which have not been run on
-    #this inode previously. We find which factories were already run
-    #by checking the inode table.  Note that we still pass the full
-    #list of factories to the Scan class so that it may invoke all of
-    #the scanners on new files it discovers.
-    dbh = DB.DBO(ddfs.case)    
+    # instantiate scanners from factories which have not been run on
+    # this inode previously. We find which factories were already run
+    # by checking the inode table.  Note that we still pass the full
+    # list of factories to the Scan class so that it may invoke all of
+    # the scanners on new files it discovers.
+    dbh = DB.DBO(case)    
     dbh.execute("select inode_id, scanner_cache from vfs where inode_id=%r limit 1",
                 fd.inode_id)
     row=dbh.fetch()
     try:
         scanners_run =row['scanner_cache'].split(',')
     except:
-        ## This is not a valid inode, we skip it:
         scanners_run = []
 
     fd.inode_id = row['inode_id']
 
-    objs = []
-    for c in factories:
-        if c.__class__.__name__ not in scanners_run:
-            objs.append(c.Scan(fd.inode_id,ddfs,c,factories=factories,fd=fd))
-    
-    if len(objs)==0: return
-
+    ## The new scanning framework is much simpler - we just call the
+    ## scan() method on each factory.
+    m = Magic.MagicResolver()
     messages = DB.expand("Scanning file %s%s (inode %s)",
                          (stat['path'],stat['name'],stat['inode_id']))
+
+    for c in factories:
+        if c.__class__.__name__ not in scanners_run:
+            type, mime = m.find_inode_magic(case, fd.inode_id)
+            fd.seek(0)
+            c.scan(fd, factories=factories, type=type, mime=mime)
+    
     global MESSAGE_COUNT
     MESSAGE_COUNT += 1
     if not MESSAGE_COUNT % 50:
@@ -415,66 +424,66 @@ def scanfile(ddfs,fd,factories):
     else:
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, messages)
 
-    while 1:
-        try:
-            data = fd.read(buffsize)
-            if not data: break
-        except IOError,e:
-            break
+#     while 1:
+#         try:
+#             data = fd.read(buffsize)
+#             if not data: break
+#         except IOError,e:
+#             break
 
-        # call process method of each class
-        interest = 0
+#         # call process method of each class
+#         interest = 0
 
-        for o in objs:
-            if not o.ignore:
-                interest+=1
+#         for o in objs:
+#             if not o.ignore:
+#                 interest+=1
 
-        ## If none of the scanners are interested with this file, we
-        ## stop right here
-        if not interest:
-            pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "No interest for %s", fd.inode_id)
-            break
+#         ## If none of the scanners are interested with this file, we
+#         ## stop right here
+#         if not interest:
+#             pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "No interest for %s", fd.inode_id)
+#             break
         
-        for o in objs:
-            try:
-                if not o.ignore:
-                    interest+=1
-                    pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Processing with %s", o)
-                    o.process(data)
+#         for o in objs:
+#             try:
+#                 if not o.ignore:
+#                     interest+=1
+#                     pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Processing with %s", o)
+#                     o.process(data)
 
-            except Exception,e:
-                pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
-                # Ignore the error and keep going here:
-                #raise
+#             except Exception,e:
+#                 pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
+#                 # Ignore the error and keep going here:
+#                 #raise
 
-        if not interest:
-            pyflaglog.log(pyflaglog.DEBUG, "No interest for %s", fd.inode_id)
-            break
+#         if not interest:
+#             pyflaglog.log(pyflaglog.DEBUG, "No interest for %s", fd.inode_id)
+#             break
 
-    # call slack method of each object. fd.slack must be reset after the call
-    # because the scanners actually have a copy of fd and some of them actually
-    # use it and get confused if it returns slack. Also pass overread.
-    fd.slack=True
-    fd.overread=True
-    data = fd.read()
-    fd.slack=False
-    fd.overread=False
-    if data:
-        for o in objs:
-            try:
-                o.slack(data)
-            except Exception,e:
-                pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
+#     # call slack method of each object. fd.slack must be reset after the call
+#     # because the scanners actually have a copy of fd and some of them actually
+#     # use it and get confused if it returns slack. Also pass overread.
+#     fd.slack=True
+#     fd.overread=True
+#     data = fd.read()
+#     fd.slack=False
+#     fd.overread=False
+#     if data:
+#         for o in objs:
+#             try:
+#                 o.slack(data)
+#             except Exception,e:
+#                 pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) Error: %s" %(o,e))
 
-    # call finish method of each object
-    for o in objs:
-        try:
-            o.finish()
-        except Exception,e:
-            pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) on Inode %s Error: %s" %(o,fd.inode_id,e))
+#     # call finish method of each object
+#     for o in objs:
+#         try:
+#             o.finish()
+#         except Exception,e:
+#             pyflaglog.log(pyflaglog.ERRORS,"Scanner (%s) on Inode %s Error: %s" %(o,fd.inode_id,e))
 
     # Store the fact that we finished in the inode table:
-    scanner_names = ','.join([ c.outer.__class__.__name__ for c in objs ])
+    scanner_names = ','.join([ c.__class__.__name__ for c in factories ])
     try:
         dbh.execute("update vfs set scanner_cache = concat_ws(',',scanner_cache, %r) where inode_id=%r", (scanner_names, fd.inode_id))
     except DB.DBError:

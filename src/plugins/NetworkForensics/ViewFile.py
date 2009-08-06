@@ -178,7 +178,7 @@ class ViewFile(Reports.report):
 
                 yield data
                 
-        ui.video_control("%s" % fd.inode, play_file(fd))
+        ui.video_control("%s" % fd.inode_id, play_file(fd))
 
     dispatcher = { re.compile("text/html"): html_handler,
                    re.compile("image.*"): image_handler,

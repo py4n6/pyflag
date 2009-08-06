@@ -65,35 +65,6 @@ class NetworkingInit(FlagFramework.EventHandler):
         KEY `id` (`id`)
         )""")
 
-        ## The connection_details table stores information about each
-##        ## connection
-##        case_dbh.execute(
-##            """CREATE TABLE if not exists `connection_details` (
-##            `inode_id` int not null,
-##            `inode` varchar(250),
-##            `con_id` int(11) signed NOT NULL auto_increment,
-##            `reverse` int(11) unsigned NOT NULL default '0',
-##            `src_ip` int(11) unsigned NOT NULL default '0',
-##            `src_port` int(11) unsigned NOT NULL default '0',
-##            `dest_ip` int(11) unsigned NOT NULL default '0',
-##            `dest_port` int(11) unsigned NOT NULL default '0',
-##            `isn` int(100) unsigned NOT NULL default 0,
-##            `ts_sec` TIMESTAMP default 0,
-##            KEY `con_id` (`con_id`)
-##            )""")
-
-##        ## the connection table store all the packets belonging to
-##        ## each connection.
-##        case_dbh.execute(
-##            """CREATE TABLE if not exists `connection` (
-##            `con_id` int(11) signed NOT NULL default '0',
-##            `original_id` int(11) unsigned NOT NULL default '0',
-##            `packet_id` int(11) unsigned NOT NULL default '0',
-##            `seq` int(11) unsigned NOT NULL default '0',
-##            `length` mediumint(9) unsigned NOT NULL default '0',
-##            `cache_offset`  bigint(9) unsigned NOT NULL default '0'
-##            ) """)
-
 class ConnectionTable(FlagFramework.CaseTable):
     """ Connection table - contains infomation about all packets involved in a connection """
     name = 'connection'

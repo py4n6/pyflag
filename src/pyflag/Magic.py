@@ -15,7 +15,6 @@ header, but other tests are also possible.
 import index
 import pyflag.Registry as Registry
 import pyflag.DB as DB
-import pyflag.FileSystem as FileSystem
 import pyflag.pyflaglog as pyflaglog
 
 class MagicResolver:
@@ -122,6 +121,8 @@ class MagicResolver:
             type = row['type']
         except (DB.DBError,TypeError):
             if not data:
+                import pyflag.FileSystem as FileSystem
+
                 fsfd = FileSystem.DBFS(case)
                 fd = fsfd.open(inode_id = inode_id)
                 ## We could not find it in the mime table - lets do magic

@@ -16,6 +16,10 @@ CONFIG_THREADS = CONFIGURATION_NS + "threads"
 CONFIG_VERBOSE = CONFIGURATION_NS + "verbosity"
 CONFIG_AUTOLOAD = CONFIGURATION_NS + "autoload"
 CONFIG_PAD      = CONFIGURATION_NS + "pad"
+## This is set to control how properties are stored:
+## relative - a properties file is created relative to each URN (default)
+## combined - All properties are lumped into the same file in the volume (more efficient)
+CONFIG_PROPERTIES_STYLE = CONFIGURATION_NS + "property_style"
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
@@ -60,6 +64,7 @@ AFF4_TARGET= NAMESPACE + "target"
 AFF4_BLOCKSIZE= NAMESPACE + "blocksize"
 AFF4_IMAGE_PERIOD= NAMESPACE + "image_period"
 AFF4_TARGET_PERIOD= NAMESPACE + "target_period"
+AFF4_MAP_DATA =   NAMESPACE + "map_data"
 
 #/* Identity attributes */
 AFF4_STATEMENT        = NAMESPACE   + "statement"

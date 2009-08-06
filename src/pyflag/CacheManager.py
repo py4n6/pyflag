@@ -427,6 +427,7 @@ class AFF4Manager(DirectoryCacheManager):
         return fd
 
     def create_cache_map(self, case, path, include_in_VFS=True, size=0,
+                         target = None,
                          **kwargs):
         """ Creates a new map in the VFS.
 
@@ -438,12 +439,16 @@ class AFF4Manager(DirectoryCacheManager):
         fd.size = size
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
+        if target:
+            aff4.oracle.set(fd.urn, AFF4_TARGET, target)
+            
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
 
         if include_in_VFS:
-            self.add_to_VFS(fd, case, path, **kwargs)
+            self.add_to_VFS(fd, case, path,
+                            **kwargs)
         return fd
 
     def create_link(self, case, source, destination, include_in_VFS=True):

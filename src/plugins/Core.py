@@ -297,12 +297,8 @@ class Scan(Farm.Task):
         factories = Scanner.get_factories(case, scanners.split(","))
 
         if factories:
-            ddfs = DBFS(case)
-            print inode_id
-            fd = ddfs.open(inode_id = inode_id)
-            Scanner.scanfile(ddfs, fd, factories)
-            fd.close()
-
+            Scanner.scan_inode(case, inode_id, factories)
+            
 class DropCase(Farm.Task):
     """ This class is responsible for cleaning up cached data
     structures related to the case
