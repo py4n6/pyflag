@@ -67,8 +67,9 @@ class ViewFile(Reports.report):
             fd = fsfd.open(inode_id=inode_id)
             urn = fd.urn
 
-        content_type = self.guess_content_type(fd, query, inode_id)
-        result.generator.content_type = content_type
+        type, content_type = self.guess_content_type(fd, query, inode_id)
+        result.generator.content_type = content_type or "text/plain"
+        content_type = content_type or type
 
         ## Now establish the dispatcher for it
         for k,v in self.dispatcher.items():
@@ -84,7 +85,7 @@ class ViewFile(Reports.report):
             m = Magic.MagicResolver()
             type, content_type = m.find_inode_magic(self.case, inode_id)
 
-        return content_type
+        return type, content_type
     
     def default_handler(self, fd, ui):
         ui.generator.content_type = "text/plain"
@@ -122,7 +123,7 @@ class ViewFile(Reports.report):
         """ We sanitise the html here """
         def generator():
             parser = HTML.HTMLParser(tag_class = Curry(HTML.ResolvingHTMLTag,
-                                                       inode_id = fd.lookup_id(),
+                                                       inode_id = fd.inode_id,
                                                        case = self.case))
             #parser = HTML.HTMLParser(tag_class = HTML.Tag)
             data = fd.read(1000000)

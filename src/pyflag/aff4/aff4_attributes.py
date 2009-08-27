@@ -139,3 +139,11 @@ AFF4_MTIME = FQN + "mtime"
 AFF4_ATIME = FQN + "atime"
 AFF4_CTIME = FQN + "ctime"
 AFF4_MODE  = FQN + "mode"
+
+## Signals this object should inherit attributes from another object
+AFF4_INHERIT = FQN + "inherit"
+
+## PyFlag specific attributes
+PYFLAG_NS = "urn:pyflag:"
+PYFLAG_STREAM = PYFLAG_NS + "streams:"
+PYFLAG_REVERSE_STREAM = PYFLAG_STREAM + "reverse"

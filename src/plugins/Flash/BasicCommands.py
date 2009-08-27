@@ -81,17 +81,18 @@ class ls(pyflagsh.command):
     def list(self,path):
         """ List the files in a particular path """
         path=posixpath.abspath(posixpath.join(self.environment.CWD,path))
-        try:
-            if self.environment._FS.isdir(path):
-                if not path.endswith('/'):
-                    path=path+'/'
+        yield "%s\t%s\t%8s\t%s" % ('mode',
+                                  'size',
+                                  'inode_id',
+                                  'name')
 
+        try:
             if self.opts.has_key('-l'):
                 for dir in self.environment._FS.longls(path=path):
                     if dir['name']:
-                        yield "%s\t%s\t%s\t%s" % (dir['mode'],
+                        yield "%s\t%s\t%8d\t%s" % (dir['mode'],
                                                   dir.get('size','-'),
-                                                  dir['inode'],
+                                                  dir['inode_id'],
                                                   dir['name'])
 
             else:
@@ -548,6 +549,7 @@ class execute(pyflagsh.command):
         except Exception,e:
             pyflaglog.log(pyflaglog.WARNING, "Flash encountered the following error: %s when running query: %s" % (e,query))
             print FlagFramework.get_bt_string(e)
+            raise
             raise RuntimeError("%s: %s after %s sec" %  (sys.exc_info()[0],sys.exc_info()[1],time.time()-start_time))
 
 class reset(execute):

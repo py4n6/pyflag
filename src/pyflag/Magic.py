@@ -148,7 +148,20 @@ class MagicResolver:
         except: pass
 
         return type, content_type
-    
+
+def set_magic(case, inode_id, magic, mime=None):
+    """ Set the magic string on the inode """
+    args = dict(inode_id=inode_id,
+                type = magic)
+    if mime:
+        args['mime'] = mime
+
+    dbh = DB.DBO(case)
+    dbh.update("type", where="inode_id = '%s'" % inode_id,
+               **args)
+    if dbh.cursor.rowcount == 0:
+            dbh.insert("type", **args)
+
 class Magic:
     """ This is the base class for all Magic handlers. """
     ## The default type and mime strings

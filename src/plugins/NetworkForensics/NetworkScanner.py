@@ -187,12 +187,22 @@ class PCAPScanner(GenScanFactory):
                         target = fd.urn)
                     connection['map'] = map_stream
 
-                    map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                    r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
                         fd.case, base_urn + "reverse", timestamp = packet.ts_sec,
                         target = fd.urn)
-                    connection['reverse']['map'] = map_stream
-                    
+                    connection['reverse']['map'] = r_map_stream
 
+                    ## Add to connection table
+                    map_stream.insert_to_table("connection_details",
+                                               dict(reverse = r_map_stream.inode_id,
+                                                    src_ip = ip.src,
+                                                    src_port = tcp.source,
+                                                    dest_ip = ip.dest,
+                                                    dest_port = tcp.dest,
+                                                    _ts_sec = "from_unixtime(%s)" % packet.ts_sec,
+                                                    )
+                                               )
+                    
             elif mode == 'data':
                 try:
                     tcp = packet.find_type("TCP")
@@ -214,6 +224,20 @@ class PCAPScanner(GenScanFactory):
 
                     combined_stream = connection['combined']
                     combined_stream.close()
+                    Magic.set_magic(self.case, combined_stream.inode_id,
+                                    "Combined stream")
+
+                    map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
+                    r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
+
+                    ## FIXME - this needs to be done out of process!!!
+                    Scanner.scan_inode(self.case, map_stream.inode_id,
+                                       factories)
+                    Scanner.scan_inode(self.case, r_map_stream.inode_id,
+                                       factories)
+                    Scanner.scan_inode(self.case, combined_stream.inode_id,
+                                       factories)
+                    
 
         ## Create a tcp reassembler if we need it
         processor = reassembler.Reassembler(packet_callback = Callback)

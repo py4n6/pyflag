@@ -28,6 +28,7 @@ config=pyflag.conf.ConfObject()
 import cStringIO, os, os.path
 import pyflag.DB as DB
 import pdb
+import pyflag.Registry as Registry
 
 config.add_option("CACHE_FILENAME", default="__cache__.bin",
                   help = 'Name of consolidated cache file')
@@ -388,6 +389,52 @@ from pyflag.aff4.aff4_attributes import *
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
+class PyFlagMap(aff4.Map):
+    include_in_VFS = False
+
+    def insert_to_table(self, table, props):
+        """ This function adds the properties for this object as
+        attributes in the urn:pyflag: namespace.
+        """
+        aff4.oracle.set(self.urn, "%s%s" % (PYFLAG_NS, table), "1")
+        for k,v in props.items():
+            aff4.oracle.set(self.urn, "%s%s:%s" % (PYFLAG_NS, table, k), v)
+
+    def update_tables(self):
+        #pdb.set_trace()
+        ## We need to do this explicitely because we might end up
+        ## inserting to tables our inherited object specifies. This
+        ## essentially maintains a copy of all the attribute in our
+        ## inherited object in the same table.
+        dbh = DB.DBO(self.case)
+        for table, columns in Registry.CASE_TABLES.case_tables.items():
+            #if table=='connection_details': pdb.set_trace()
+            
+            if aff4.oracle.resolve(self.urn, "%s%s" % (PYFLAG_NS, table)):
+                args = {'inode_id': self.inode_id}
+                for column in columns:
+                    value = aff4.oracle.resolve(self.urn, "%s%s:%s" % (PYFLAG_NS, table, column))
+                    if value:
+                        args[column] = value
+                dbh.insert(table, **args)
+
+    def add_to_VFS(self, case, path, **kwargs):
+        import pyflag.FileSystem as FileSystem
+
+        ## Insert the new fd into the VFS
+        fsfd = FileSystem.DBFS(case)
+        self.inode_id = fsfd.VFSCreate(self.urn, path, **kwargs)
+        self.case = case
+
+    def close(self):
+        aff4.Map.close(self)
+        self.update_tables()
+        
+class PyFlagImage(aff4.Image, PyFlagMap):
+    def close(self):
+        aff4.Image.close(self)
+        self.update_tables()
+
 class AFF4Manager(DirectoryCacheManager):
     """ A Special Cache manager which maintains the main AFF4 Cache
     """
@@ -397,7 +444,7 @@ class AFF4Manager(DirectoryCacheManager):
 
         return volume_urn
         
-    def create_cache_fd(self, case, path, include_in_VFS=True):
+    def create_cache_fd(self, case, path, include_in_VFS=True, **kwargs):
         """ Creates a new non-seakable AFF4 Image stream that can be
         written on.
         
@@ -405,29 +452,26 @@ class AFF4Manager(DirectoryCacheManager):
         done. The new object will be added to the VFS at path (and
         that is what its URN will be too relative to the volume).
         """
-        fd = aff4.Image(None, 'w')
+        ## Drop the FQN from the path
+        if path.startswith(FQN) and "/" in path:
+            path = path[path.index("/"):]
+
+        fd = PyFlagImage(None, 'w')
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
 
+        kwargs['path'] = path
+        kwargs['case'] = case
         if include_in_VFS:
-            self.add_to_VFS(fd, case, path)
-            
-        return fd
-
-    def add_to_VFS(self, fd, case, path, **kwargs):
-        import pyflag.FileSystem as FileSystem
-
-        ## Insert the new fd into the VFS
-        fsfd = FileSystem.DBFS(case)
-        fd.inode_id = fsfd.VFSCreate(fd.urn, path, **kwargs)
-
+            fd.add_to_VFS(**kwargs)
+ 
         return fd
 
     def create_cache_map(self, case, path, include_in_VFS=True, size=0,
-                         target = None,
+                         target = None, inherited = None,
                          **kwargs):
         """ Creates a new map in the VFS.
 
@@ -435,7 +479,11 @@ class AFF4Manager(DirectoryCacheManager):
         written to the volume. The returned object is a standard AFF4
         map object and supports all the methods from the AFF4 library.
         """
-        fd = aff4.Map(None, 'w')
+        ## Drop the FQN from the path
+        if path.startswith(FQN) and "/" in path:
+            path = path[path.index("/"):]
+
+        fd = PyFlagMap(None, 'w')
         fd.size = size
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
@@ -445,13 +493,17 @@ class AFF4Manager(DirectoryCacheManager):
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
-
+        kwargs['path'] = path
+        kwargs['case'] = case
         if include_in_VFS:
-            self.add_to_VFS(fd, case, path,
-                            **kwargs)
+            fd.add_to_VFS(**kwargs)
+
+        if inherited:
+            aff4.oracle.set(fd.urn, AFF4_INHERIT, inherited)
+        
         return fd
 
-    def create_link(self, case, source, destination, include_in_VFS=True):
+    def create_link(self, case, source, destination, include_in_VFS=True, **kwargs):
         """ Creates a link object from source urn to destination urn """
         fd = aff4.Link(None, 'w')
         volume_urn = self.make_volume_urn(case)
@@ -462,7 +514,10 @@ class AFF4Manager(DirectoryCacheManager):
         fd.finish()
         fd.close()
 
-        if include_in_VFS:
-            self.add_to_VFS(fd, case, destination)
-
+        kwargs['path'] = path
+        kwargs['case'] = case
+        fd.include_in_VFS = kwargs
+        
+        return fd
+        
 AFF4_MANAGER = AFF4Manager()

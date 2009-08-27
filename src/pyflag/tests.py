@@ -80,8 +80,6 @@ class ScannerTest(unittest.TestCase):
     ## Must be overridden
     test_case = ""
     test_file = ""
-    subsystem = "EWF"
-    fstype = "Sleuthkit"
     offset = 0
     mount_point = '/'
     TZ="SYSTEM"
@@ -99,17 +97,7 @@ class ScannerTest(unittest.TestCase):
 
         if not self.test_file: return
         pyflagsh.shell_execv(command="execute",
-                             argv=["Load Data.Load IO Data Source",'case=%s' % self.test_case,
-                                   "iosource=test",
-                                   "subsys=%s" % self.subsystem,
+                             argv=["Load Data.Load AFF4 Volume",'case=%s' % self.test_case,
                                    "filename=%s" % ( self.test_file),
-                                   "offset=%s"%self.offset,
                                    "TZ=%s" % self.TZ
                                    ])
-
-        if self.fstype:
-            pyflagsh.shell_execv(command="execute",
-                             argv=["Load Data.Load Filesystem image",'case=%s' % self.test_case,
-                                   "iosource=test",
-                                   "fstype=%s" % self.fstype,
-                                   "mount_point=%s" % self.mount_point])

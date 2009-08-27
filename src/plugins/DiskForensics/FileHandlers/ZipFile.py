@@ -103,7 +103,7 @@ class ZipScan(GenScanFactory):
                 fd = self.ddfs.open(inode_id = inode_id)
                 Scanner.scanfile(self.ddfs,fd,self.factories)
 
-class GZScan(ZipScan):
+class GZScan(GenScanFactory):
     """ Decompress Gzip files """
     group = "CompressedFile"
     
@@ -112,7 +112,35 @@ class GZScan(ZipScan):
         name = "Compressed File"
         group = "CompressedFile"
         default = False
-        
+
+    def find_gzipped_filename(self, fd, type):
+        match = re.search(type,'was "([^"]+)"')
+        if match:
+            return match.groups(1)
+
+        if fd.urn.endswith(".gz"):
+            return original_filename[:-3]
+
+        return "Uncompressed"
+
+    ## For gziped files, we convert them to Image stream to provide
+    ## seekable access - This does duplicate data but otherwise we
+    ## would need to use a temporary file anyway
+    def scan(self, fd, factories, type, mime):
+        if "gzip" in type:
+            new_path = "%s/%s" % (fd.urn, self.find_gzipped_filename(fd, type))
+            new_fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.case, new_path)
+            gz = gzip.GzipFile(fileobj=fd, mode='r')
+            while 1:
+                data = gz.read(1024*1024)
+                if not data:  break
+                new_fd.write(data)
+
+            new_fd.close()
+            ## Now scan the new fd
+            Scanner.scan_inode(self.case, new_fd.inode_id,
+                               factories)
+
     class Scan(ScanIfType):
         """ If we hit a gzip file, we just create a new Inode entry in the VFS """
         types = (
@@ -135,18 +163,6 @@ class GZScan(ZipScan):
                 m = Magic.MagicResolver()
                 magic, type_mime = m.find_inode_magic(self.case, inode_id=self.fd.inode_id,
                                                       data=data[:1024])
-                match = re.search(magic,'was "([^"]+)"')
-                if match:
-                    self.filename = match.groups(1)
-                    return
-
-                path, inode, inode_id = self.ddfs.lookup(inode=self.inode)
-                original_filename = os.path.basename(path)
-                if original_filename.endswith(".gz"):
-                    self.filename=original_filename[:-3]
-                    return
-
-                self.filename="Uncompressed"
 
         def finish(self):
             if self.filename:

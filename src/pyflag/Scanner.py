@@ -415,7 +415,10 @@ def scan_inode(case, inode_id, factories):
         if c.__class__.__name__ not in scanners_run:
             type, mime = m.find_inode_magic(case, fd.inode_id)
             fd.seek(0)
-            c.scan(fd, factories=factories, type=type, mime=mime)
+            try:
+                c.scan(fd, factories=factories, type=type, mime=mime)
+            except:
+                pdb.post_mortem()
     
     global MESSAGE_COUNT
     MESSAGE_COUNT += 1

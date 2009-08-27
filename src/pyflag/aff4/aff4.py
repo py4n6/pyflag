@@ -188,7 +188,7 @@ class NoneObject(object):
 def Raise(reason):
     raise RuntimeError(reason)
 
-class AFFObject:
+class AFFObject(object):
     """ All AFF4 objects extend this one.
 
     Object protocol
@@ -258,6 +258,9 @@ class AFFObject:
     def __init__(self, urn=None, mode='r'):
         self.urn = urn or "%s%s" % (FQN, uuid.uuid4())
         self.mode = mode
+
+    def set_attribute(self, attribute, value):
+        oracle.set(self.urn, attribute, value)
         
     def finish(self):
         """ This method is called after the object is constructed and
@@ -279,7 +282,9 @@ class AFFObject:
 
         if stored:
             ## Now explain the stored URN
-            fd = oracle.open(stored, 'r')
+            try:
+                fd = oracle.open(stored, 'r')
+            except: return result
             try:
                 result += "\n ".join(fd.explain().splitlines())
             finally:
@@ -677,10 +682,11 @@ class Resolver:
         self[uri].delete(attribute)
 
     def resolve(self, uri, attribute):
-        try:
-            return self.resolve_list(uri,attribute)[0]
-        except: return NoneObject("No attribute %s found on %s" % (attribute, uri))
-    
+        for x in self.resolve_list(uri,attribute):
+            return x
+
+        return NoneObject("No attribute %s found on %s" % (attribute, uri))
+
     def resolve_list(self, uri, attribute):
         try:
             return self[uri][attribute]
@@ -721,7 +727,7 @@ class Resolver:
         result = None
 
         if uri.startswith(FQN) and \
-               not self.resolve_list(uri, AFF4_TYPE):
+               not self.resolve(uri, AFF4_TYPE):
             pdb.set_trace()
             Raise("Trying to open a non existant or already closed object %s" % uri)
 
@@ -968,7 +974,7 @@ class ImageWorker(threading.Thread):
         while self.buffer.tell() < self.buffer.len:
             data = self.buffer.read(self.chunk_size)
             if self.compression > 0:
-                cdata = zlib.compress(data, self.compression)
+                cdata = zlib.compress(data, int(self.compression))
             else:
                 cdata = data
                 
@@ -1687,33 +1693,34 @@ class Map(FileLikeObject):
         ## Parse the map now:
         if uri and mode=='r':
             target_urn = oracle.resolve(uri, AFF4_TARGET)
+            line_re = re.compile("(\d+),(\d+),(.+)")
+
             ## map data can be stored as an attribute or in its own segment
             map_data = oracle.resolve(uri, AFF4_MAP_DATA)
             if map_data:
                 map_data = map_data.decode("string_escape")
             else:
                 fd = oracle.open("%s/map" % uri)
-                fd.seek(0)
-                line_re = re.compile("(\d+),(\d+),(.+)")
-                map_data= fd.get_data()
+                try:
+                    fd.seek(0)
+                    map_data= fd.get_data()
+                finally:
+                    oracle.cache_return(fd)
                 
-            try:
-                for line in map_data.splitlines():
-                    m = line_re.match(line)
-                    if not m:
-                        DEBUG(_WARNING, "Unable to parse map line '%s'" % line)
+            for line in map_data.splitlines():
+                m = line_re.match(line)
+                if not m:
+                    DEBUG(_WARNING, "Unable to parse map line '%s'" % line)
+                else:
+                    if m.group(3) == "@":
+                        t = target_urn
                     else:
-                        if m.group(3) == "@":
-                            t = target_urn
-                        else:
-                            t = m.group(3)
+                        t = m.group(3)
 
-                        ## Add the point to the map
-                        self.add(parse_int(m.group(1)),
-                                 parse_int(m.group(2)),
-                                 t)
-            finally:
-                oracle.cache_return(fd)
+                    ## Add the point to the map
+                    self.add(parse_int(m.group(1)),
+                             parse_int(m.group(2)),
+                             t)
 
         FileLikeObject.__init__(self, uri, mode)
 
@@ -1841,7 +1848,7 @@ class Map(FileLikeObject):
 
         ## If its very small we can just store it as an attribute
         if fd.tell() < 1000:
-            oracle.set(self.urn, AFF4_MAP_DATA, fd.getvalue().encode("string_escape"))
+            oracle.set(self.urn, AFF4_MAP_DATA, str(fd.getvalue()).encode("string_escape"))
         else:
             stored = oracle.resolve(self.urn, AFF4_STORED)
             volume = oracle.open(stored, 'w')
@@ -1868,14 +1875,18 @@ class Map(FileLikeObject):
         targets.add(oracle.resolve(self.urn, AFF4_STORED))
         targets.add(oracle.resolve(self.urn, AFF4_TARGET))
 
-        fd = oracle.open("%s/map" % self.urn, 'r')
-        try:
-            for urn in self.target_urns.values():
-                targets.add(urn)
+        map = oracle.resolve(self.urn, AFF4_MAP_DATA)
+        if not map:
+            fd = oracle.open("%s/map" % self.urn, 'r')
+            try:
+                map = fd.get_data()
+            finally:
+                oracle.cache_return(fd)                
+
+        for urn in self.target_urns.values():
+            targets.add(urn)
                 
-            result += "Map %s:\n" % self.urn + fd.get_data() + "\n"
-        finally:
-            oracle.cache_return(fd)
+        result += "Map %s:\n" % self.urn + map + "\n"
 
         result += "Targets:\n"
         for target in targets:
@@ -2404,8 +2415,7 @@ def load_volume(filename, autoload=True):
 
     ## Do we need to auto load things?
     if autoload or oracle.resolve(GLOBAL, CONFIG_AUTOLOAD):
-        volumes = oracle.resolve_list(volume.urn, AFF4_AUTOLOAD)
-        for v in volumes:
+        for v in oracle.resolve_list(volume.urn, AFF4_AUTOLOAD):
             ## Have we done this volume before (stop circular autoloads)?
             if not oracle.resolve(v, AFF4_CONTAINS):
                 DEBUG(_INFO, "Autoloading %s" % v)

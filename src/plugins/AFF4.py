@@ -101,6 +101,7 @@ class DBURNObject(aff4.URNObject):
         if not self.dbh:
             DBURNObject.dbh = DB.DBO()
 
+        if not urn: pdb.set_trace()
         self.dbh.execute("select * from AFF4_urn where urn = %r", urn)
         row = self.dbh.fetch()
         if row:
@@ -109,6 +110,19 @@ class DBURNObject(aff4.URNObject):
             self.dbh.insert("AFF4_urn", _fast=True,
                             urn = urn)
             self.urn_id = self.dbh.autoincrement()
+
+        self.inheritence = [self.urn_id,]
+        self.get_inheritence(self.urn_id)
+
+    def get_inheritence(self, urn_id):
+        inheritence_id = get_attribute_id(AFF4_INHERIT)
+        self.dbh.execute("select * from AFF4 where attribute_id = %r and urn_id = %r",
+                         inheritence_id, urn_id)
+        for row in self.dbh:
+            inheritence_id = resolve_id(row['value'])
+            if inheritence_id not in self.inheritence:
+                self.inheritence.append(inheritence_id)
+                self.get_inheritence(inheritence_id)
 
     def add(self, attribute, value):
         attribute_id = get_attribute_id(attribute)
@@ -137,14 +151,12 @@ class DBURNObject(aff4.URNObject):
 
     def __getitem__(self, attribute):
         attribute_id = get_attribute_id(attribute)
-        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
-                         (attribute_id, self.urn_id))
-        result = [ x['value'] for x in self.dbh ]
-        if result:
-            return result
-        else:
-            return aff4.NoneObject("URN %s has no attribute %s" % (self.urn, attribute))
-
+        for urn_id in self.inheritence:
+            self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
+                             (attribute_id, urn_id))
+            for row in self.dbh:
+                yield row['value']
+                    
     def export(self, prefix = ''):
         result = ''
         self.dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
@@ -240,7 +252,7 @@ class LoadAFF4Volume(Reports.report):
         fsfd = DBFS(query['case'])
         base_dir = os.path.basename(filenames[0])
         for obj in NEW_OBJECTS:
-            type = obj[AFF4_TYPE][0]
+            type = aff4.oracle.resolve(obj.urn, AFF4_TYPE)
             if type in SUPPORTED_STREAMS:
                 urn = obj.urn
                 if "/" in urn:
@@ -462,9 +474,9 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-#    test_file = 'pcap.zip'
+    test_file = '/testimages/http.pcap'
 #    test_file = '/testimages/pyflag_stdimage_0.5.e01'
-    test_file = '/testimages/stdcapture_0.4.pcap.e01'
+#    test_file = '/testimages/stdcapture_0.4.pcap.e01'
 
     def test01CaseCreation(self):
         env = pyflagsh.environment(case=self.test_case)
@@ -479,8 +491,9 @@ class AFF4LoaderTest(unittest.TestCase):
                                        'filename=%s' % self.test_file])
 
             pyflagsh.shell_execv(command='scan', env=env,
-                                 argv=['*', 'TypeScan', 'PartitionScanner',
-                                       'FilesystemLoader', 'PCAPScanner'])
+                                 argv=['*', 'PartitionScanner',
+                                       'FilesystemLoader', 'PCAPScanner',
+                                       'HTTP2Scanner', 'GZScan'])
             
         fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
         fd.write("hello world")
@@ -495,7 +508,7 @@ def close_off_volume():
     dbh.execute("select value from meta where property='flag_db'")
     for row in dbh:
         volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
-        if aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
+        if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
             fd = aff4.oracle.open(volume_urn, 'w')
             print "Closing volume %s" % volume_urn
             if fd:

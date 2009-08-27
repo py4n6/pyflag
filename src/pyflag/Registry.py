@@ -338,6 +338,19 @@ class OrderedRegistry(Registry):
         else:
             raise ValueError("Object %s does not exist in the registry. Is the relevant plugin loaded?" % scanner_name)
 
+class CaseTableRegistry(OrderedRegistry):
+    def __init__(self,ParentClass):
+        Registry.__init__(self,ParentClass)
+        self.class_names = [ self.get_name(i) for i in self.classes ]
+        self.object_names = [ i.__dict__.get("name") for i in self.classes ]
+        self.class_names_ex = [ self.get_class_name(i) for i in self.classes ]
+        ## Now build a data structure for each case table:
+        self.case_tables = dict()
+        for table_cls in self.classes:
+            table = table_cls()
+            self.case_tables[table.name] = [ column.column for column in \
+                                             table.instantiate_columns() ]
+                
 class ScannerRegistry(OrderedRegistry):
     def get_name(self, cls):
         name = ("%s" % cls).split(".")[-1]
@@ -591,7 +604,7 @@ def Init():
 
     ## Register Case Tables for dynamic schema
     global CASE_TABLES
-    CASE_TABLES = OrderedRegistry(FlagFramework.CaseTable)
+    CASE_TABLES = CaseTableRegistry(FlagFramework.CaseTable)
 
     global MAGIC_HANDLERS
     import pyflag.Magic as Magic

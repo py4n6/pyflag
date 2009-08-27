@@ -10,13 +10,22 @@ to keep going as much as possible.
 
 """
 
-import lexer, struct, posixpath
+import lexer, struct, posixpath, pdb
 import sys,re,urllib,os
 import pyflag.DB as DB
 from pyflag.DB import expand
 from FlagFramework import query_type, normpath, get_bt_string, smart_str, smart_unicode, iri_to_uri
 import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
+
+def traced(func):
+    def wrapper(*__args,**__kw):
+        try:
+            return func(*__args,**__kw)
+        except:
+            pdb.post_mortem()
+
+    return wrapper
 
 XML_SPECIAL_CHARS_TO_ENTITIES = { "'" : "squot",
                                   '"' : "quote",
@@ -45,6 +54,8 @@ def url_unquote(string):
     ## page is encoded using a different charset??? This whole quoting
     ## thing is very confusing.
     return smart_unicode(string, 'utf8')
+
+url_re = re.compile("(http|ftp|HTTP|FTP|file)://([^/]+)(/[^?]*)")
 
 def decode_entity(string):
     def decoder(x):
@@ -418,7 +429,7 @@ def get_url(inode_id, case):
             url = row['url']
         else:
             ## Its not in the http take, maybe its in the VFS:
-            dbh.execute("select concat(path,name) as path from file where inode_id = %r limit 1", inode_id)
+            dbh.execute("select concat(path,name) as path from vfs where inode_id = %r limit 1", inode_id)
             row = dbh.fetch()
             if row:
                 url = row['path']
@@ -436,34 +447,10 @@ class ResolvingHTMLTag(SanitizingTag):
     to the parser because we need to know the inode and case (our
     constructor takes more parameters.
     """
-    url_re = re.compile("(http|ftp|HTTP|FTP)://([^/]+)(/[^?]*)")
     def __init__(self, case, inode_id, name=None, attributes=None, charset=None):
         self.case = case
         self.inode_id = inode_id
         SanitizingTag.__init__(self, name, attributes, charset)
-
-        ## Collect some information about this inode:
-        url = get_url(inode_id, case)
-        self.url=url
-        m=self.url_re.search(url)
-        if m:
-            self.method = m.group(1).lower()
-            self.host = m.group(2).lower()
-            self.base_url = posixpath.dirname(m.group(3))
-        else:
-            self.method = ''
-            self.host = ''
-            self.base_url = url
-
-        ##if not self.base_url.startswith("/"):
-##            self.base_url = "/"+self.base_url
-            
-##        if self.base_url.endswith("/"):
-##            self.base_url = self.base_url[:-1]
-##        else:
-##            self.base_url = posixpath.dirname(url)
-            
-        self.comment = False
 
     def make_reference_to_inode(self, inode_id, hint=None):
         """ Returns a reference to the given Inode ID.
@@ -485,102 +472,156 @@ class ResolvingHTMLTag(SanitizingTag):
         ## FIXME implement this
         return inode_id
 
+    def parse_url(self, url):
+        """ Returns a tuple of (method, host, url) """
+        ## Check if the URL is absolute
+        m = url_re.search(url)
+        if m:
+            method, host, url = m.group(1).lower(), m.group(2).lower(), m.group(3)
+        else:
+            ## Its not absolute, we need to fill in our own parameters
+            try:
+                method = self.method
+                host = self.host
+            except AttributeError:
+                dbh = DB.DBO(self.case)
+                dbh.execute("select * from http where inode_id = %r", self.inode_id)
+                row = dbh.fetch()
+                if row:
+                    self.method = method = row['method']
+                    self.host = host = row['host']
+                else:
+                    self.method = method = ''
+                    self.host = host = ''
+                
+        return method, host, url
+
+    @traced
     def resolve_reference(self, reference, hint='', build_reference=True):
         original_reference = reference
 
-        ## Absolute reference
-        if re.match("(http|ftp)", reference, re.I):
-            pass
-        elif reference.startswith("/"):
-            path = normpath("%s" % (reference))
-            reference="%s://%s%s" % (self.method, self.host, path)
-        elif self.method:
-            ## FIXME: This leads to references without methods:
-            reference="%s://%s%s" % (self.method, self.host,
-                                     FlagFramework.normpath("%s/%s" % (self.base_url, reference)))
-            if reference.startswith("http://"):
-                reference='http:/'+FlagFramework.normpath(reference[6:])
+        ## Make reference into relative reference
+        method, host, url = self.parse_url(reference)
 
-        ## If we get here the reference is not absolute, and we dont
-        ## have a method - chances are that its in the VFS:
-        else:
-            fsfd = FileSystem.DBFS(self.case)
-            new_reference = decode_entity(url_unquote(reference))
-            url = posixpath.normpath(posixpath.join(posixpath.dirname(self.base_url),
-                                                    new_reference))
-            try:
-                path, inode, inode_id = fsfd.lookup(path = url)
-                if inode_id:
-                    return self.make_reference_to_inode(inode_id)
-            except RuntimeError: pass
+        ## Maybe its in the filesystem
+        if not method:
+            dbh = DB.DBO(self.case)
+            dbh.execute("select * from vfs where inode_id = %r", self.inode_id)
+            row = dbh.fetch()
+            if row:
+                ## Try to find the reference relative to the VFS:
+                new_path = FlagFramework.normpath("/".join((row['path'], row['name'], url)))
+                
+                dbh.execute("select * from vfs where path = %r and name = %r",
+                            os.path.split(new_path))
+                row = dbh.fetch()
+                if row:
+                    return self.make_reference_to_inode(row['inode_id'])
 
-        ## Try to make reference more url friendly:
-        reference = reference.strip(" \"'\t")
-        reference = url_unquote(decode_entity(unquote(reference)))
-##        print reference, self.method, self.host, self.base_url, original_reference
-
-
+        ## Now we try to find the reference. Is the reference in the
+        ## http table:
         dbh = DB.DBO(self.case)
-        dbh.execute("select http.status,http.inode_id from http join inode on "\
-                    "inode.inode_id=http.inode_id where url=%r and not "\
-                    "isnull(http.inode_id) and size > 0 limit 1", reference)
+        dbh.execute("select * from http where method = %r and host = %r and url = %r",
+                    (method, host, url))
         row = dbh.fetch()
-        if row and row['inode_id']:
-            ## If the target was redirected - take care of that:
-            ## (DANGER - a circular redirection could be problematic)
-            ## FIXME - do this (we need to store the location header)
-            if row['status'] == 302:
-                inode_id = self.follow_redirect(dbh, row['inode_id'])
-            else:
-                inode_id = row['inode_id']
-
-            ## This is needed to stop dbh leaks due to the highly
-            ## recursive nature of this function.
-            del dbh
-
-            result = self.make_reference_to_inode(inode_id, hint)
-            
-            if build_reference:
-                result += " reference=\"%s\" " % reference
-
-            return result
-
-        ## Maybe its in the sundry table:
-        dbh.execute("select id from http_sundry where url = %r and present = 'yes'",
-                    reference)
-        row = dbh.fetch()
-        if row and row['id']:
-            del dbh
-            result = self.make_reference_to_inode(row['id'], hint)
-
-            if build_reference:
-                result += " reference=\"%s\" " % reference
-
-            return result
-
-        ## We could not find it, so we try to insert to the sundry table
-        dbh.check_index('http_sundry','url')
-        dbh.execute("select * from http_sundry where url=%r", reference)
-        row = dbh.fetch()
-        if not row:
-            dbh.insert("inode",
-                       inode = "x", _fast=True)
-            inode_id = dbh.autoincrement()
-            dbh.execute("update inode set inode = 'xHTTP%s' where inode_id = %s " %(inode_id, inode_id))
-            dbh.insert("file",
-                       inode_id = inode_id,
-                       inode = "xHTTP%s" % inode_id,
-                       path = "/http_sundry/",
-                       name = "xHTTP%s" % inode_id)
-            
-            dbh.insert('http_sundry', url = reference, id=inode_id)
+        if row:
+            return self.make_reference_to_inode(row['inode_id'])
 
         result = "images/spacer.png"
         if build_reference:
             result += " reference=\"%s\" " % reference
 
-        print "Not found '%s' (%s + %s)" % (reference,original_reference, self.url)
+        print "Not found '%s' (%s + %s)" % (reference,original_reference, url)
         return result
+
+#         ## Absolute reference
+#         if re.match("(http|ftp)", reference, re.I):
+#             pass
+#         elif reference.startswith("/"):
+#             path = normpath("%s" % (reference))
+#             reference="%s://%s%s" % (self.method, self.host, path)
+#         elif self.method:
+#             ## FIXME: This leads to references without methods:
+#             reference="%s://%s%s" % (self.method, self.host,
+#                                      FlagFramework.normpath("%s/%s" % (self.base_url, reference)))
+#             if reference.startswith("http://"):
+#                 reference='http:/'+FlagFramework.normpath(reference[6:])
+
+#         ## If we get here the reference is not absolute, and we dont
+#         ## have a method - chances are that its in the VFS:
+#         else:
+#             fsfd = FileSystem.DBFS(self.case)
+#             new_reference = decode_entity(url_unquote(reference))
+#             url = posixpath.normpath(posixpath.join(posixpath.dirname(self.base_url),
+#                                                     new_reference))
+#             try:
+#                 path, inode, inode_id = fsfd.lookup(path = url)
+#                 if inode_id:
+#                     return self.make_reference_to_inode(inode_id)
+#             except RuntimeError: pass
+
+#         ## Try to make reference more url friendly:
+#         reference = reference.strip(" \"'\t")
+#         reference = url_unquote(decode_entity(unquote(reference)))
+# ##        print reference, self.method, self.host, self.base_url, original_reference
+
+
+#         dbh = DB.DBO(self.case)
+#         dbh.execute("select http.status,http.inode_id from http join vfs on "\
+#                     "vfs.inode_id=http.inode_id where url=%r and not "\
+#                     "isnull(vfs.inode_id) and size > 0 limit 1", reference)
+#         row = dbh.fetch()
+#         if row and row['inode_id']:
+#             ## If the target was redirected - take care of that:
+#             ## (DANGER - a circular redirection could be problematic)
+#             ## FIXME - do this (we need to store the location header)
+#             if row['status'] == 302:
+#                 inode_id = self.follow_redirect(dbh, row['inode_id'])
+#             else:
+#                 inode_id = row['inode_id']
+
+#             ## This is needed to stop dbh leaks due to the highly
+#             ## recursive nature of this function.
+#             del dbh
+
+#             result = self.make_reference_to_inode(inode_id, hint)
+            
+#             if build_reference:
+#                 result += " reference=\"%s\" " % reference
+
+#             return result
+
+#         ## Maybe its in the sundry table:
+#         dbh.execute("select id from http_sundry where url = %r and present = 'yes'",
+#                     reference)
+#         row = dbh.fetch()
+#         if row and row['id']:
+#             del dbh
+#             result = self.make_reference_to_inode(row['id'], hint)
+
+#             if build_reference:
+#                 result += " reference=\"%s\" " % reference
+
+#             return result
+
+#         ## We could not find it, so we try to insert to the sundry table
+#         dbh.check_index('http_sundry','url')
+#         dbh.execute("select * from http_sundry where url=%r", reference)
+#         row = dbh.fetch()
+#         if not row:
+#             dbh.insert("vfs",
+#                        path = "/__misc__/",
+#                        name="x", _fast=True)
+#             inode_id = dbh.autoincrement()
+#             dbh.execute("update vfs set name = 'xHTTP%s' where inode_id = %s " %(inode_id, inode_id))            
+#             dbh.insert('http_sundry', url = reference, id=inode_id)
+
+#         result = "images/spacer.png"
+#         if build_reference:
+#             result += " reference=\"%s\" " % reference
+
+#         print "Not found '%s' (%s + %s)" % (reference,original_reference, self.url)
+#         return result
 
 class HTMLParser(lexer.Lexer):
     state = "CDATA"

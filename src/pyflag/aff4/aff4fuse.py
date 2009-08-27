@@ -30,7 +30,35 @@ class AFF4Fuse(Fuse):
     def __init__(self, *args, **kw):
         Fuse.__init__(self, *args, **kw)
         self.root = '/'
+
+    def getxattr(self, path, name, size):       
+        value = oracle.resolve(path, name) or ''
+        if size==0:
+            return len(value)
         
+        return value
+   
+    def listxattr(self, path, size):
+        urn = self.find_urn(path)
+        
+        aa = ["user." + a for a in ("foo", "bar")]
+        if size == 0:
+            # We are asked for size of the attr list, ie. joint size of attrs
+            # plus null separators.
+            return len("".join(aa)) + len(aa)
+        
+        return aa
+
+    def find_urn(self, path):
+        """ Resolves path back to a fully qualified URN """
+        ## It must be a full object
+        for v in VOLUMES:
+            urn = fully_qualified_name(path, v)
+            if not oracle.resolve(urn, AFF4_TYPE): continue
+
+            return urn
+        
+
     def getattr(self, path):
         path = path[1:]
         s = fuse.Stat()
@@ -55,15 +83,10 @@ class AFF4Fuse(Fuse):
             s.st_mode = 040755
             return s
         
-        ## It must be a full object
-        for v in VOLUMES:
-            urn = fully_qualified_name(path, v)
-            if not oracle.resolve(urn, AFF4_TYPE): continue
-            
-            s.st_size = parse_int(oracle.resolve(urn, AFF4_SIZE))
-            s.st_atime = s.st_mtime = s.st_ctime = parse_int(oracle.resolve(urn, AFF4_TIMESTAMP))
-            break
-        
+        urn = self.find_urn(path)
+        s.st_size = parse_int(oracle.resolve(urn, AFF4_SIZE))
+        s.st_atime = s.st_mtime = s.st_ctime = parse_int(oracle.resolve(urn, AFF4_TIMESTAMP))
+
         return s
 
     def is_dir(self, path):

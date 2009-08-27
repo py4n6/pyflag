@@ -73,13 +73,20 @@ class File:
     ignore = False
     overread = False
     
-    def __init__(self, case, inode_id):
+    def __init__(self, case, inode_id=None, urn=None):
         self.case = case
         dbh = DB.DBO()
-        dbh.execute("select urn from AFF4_urn where urn_id = %r", inode_id)
-        row = dbh.fetch() 
-        self.urn = row['urn']
-        self.inode_id = inode_id
+
+        if urn:
+            self.urn = urn
+            dbh.execute("select urn_id from AFF4_urn where urn = %r", urn)
+            self.inode_id = dbh.fetch()['urn_id']
+        else:
+            dbh.execute("select urn from AFF4_urn where urn_id = %r", inode_id)
+            row = dbh.fetch() 
+            self.urn = row['urn']
+            self.inode_id = inode_id
+            
         self.size = int(aff4.oracle.resolve(self.urn, AFF4_SIZE))
         self.readptr = 0
         
@@ -90,6 +97,9 @@ class File:
 
     def close(self):
         pass
+
+    def __getitem__(self, item):
+        return aff4.oracle.resolve(self.urn, item)
     
     def seek(self, offset, rel=None):
         """ Seeks to a specified position inside the file """
@@ -224,6 +234,7 @@ class File:
 
     def textdump(self, query,result):
         max=config.MAX_DATA_DUMP_SIZE
+        pdb.set_trace()
 
         def textdumper(offset, data,result):
             result.text(data, font='typewriter', sanitise='full', wrap='full', style='red',
@@ -435,12 +446,12 @@ class FileSystem:
         """return the inode number for the given path, or else the path for the given inode number. """
         pass
 
-    def open(self, inode_id):
+    def open(self, inode_id=None, urn=None):
         """ Opens the specified path or Inode providing a file like object.
 
         This object can then be used to read data from the specified file.
         @note: Only files may be opened, not directories."""
-        return File(self.case, inode_id)
+        return File(self.case, inode_id, urn)
 
     def istat(self, inode_id):
         """ return a dict with information (istat) for the given inode or path. """
@@ -1192,7 +1203,7 @@ def glob_sql(pattern):
         path_sql = "path rlike '^%s/?$'" % translate(path)
     else:
         ## Ensure that path has a / at the end:
-        if not path.endswith("/"): path=path+'/'
+        #if not path.endswith("/"): path=path+'/'
         
         path_sql = "path='%s'" % path
 

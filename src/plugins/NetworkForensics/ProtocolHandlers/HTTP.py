@@ -867,33 +867,6 @@ class HTTPRequestTree(Reports.CaseTableReports):
 
         result.tree(tree_cb = tree_cb, pane_cb = pane_cb)
 
-## UnitTests:
-import unittest
-import pyflag.pyflagsh as pyflagsh
-from pyflag.FileSystem import DBFS
-import pyflag.tests as tests
-
-class HTTPTests(tests.ScannerTest):
-    """ Tests HTTP Scanner """
-    test_case = "PyFlagTestCase"
-    test_file = 'stdcapture_0.4.pcap.e01'
-    subsystem = "EWF"
-    fstype = "PCAP Filesystem"
-
-    def test01HTTPScanner(self):
-        """ Test HTTP Scanner """
-        env = pyflagsh.environment(case=self.test_case)
-        pyflagsh.shell_execv(env=env,
-                             command="scan",
-                             argv=["*",                   ## Inodes (All)
-                                   "HTTPScanner",
-                                   ])                   ## List of Scanners
-        dbh = DB.DBO(self.test_case)
-        dbh.execute("select count(*) as total from http")
-        row = dbh.fetch()
-        print "Number of HTTP transfers found %s" % row['total']
-        self.failIf(row['total']==0,"Count not find any HTTP transfers?")
-
 if __name__=='__main__':
     ## update the tld field in all the HTTP columns:
     import sys

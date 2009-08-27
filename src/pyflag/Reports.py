@@ -290,39 +290,7 @@ class CaseTableReports(report):
             )        
     
     def display(self, query, result, **opts):
-        import pdb;pdb.set_trace()
         self.make_table_widget(self.columns, query, result, **opts)
-        dbh = DB.DBO(query['case'])
-        case_mode = dbh.get_meta("case_mode") or 'Full'
-
-        for cls in Registry.CASE_TABLES.classes:
-            if cls.__name__ == self.default_table:
-                case_table = cls()
-
-        print "default table %s" % self.default_table
-
-        modes = {'Full': 'All table data will be viewable'}
-        modes.update(case_table.modes)
-
-        def update_mode(query,result):            
-            if query.has_key("__submit__"):
-                dbh = DB.DBO(query['case'])
-                dbh.set_meta("case_mode", query['new_table_mode'])
-                query.clear("new_table_mode")
-                result.refresh(0, query, 'parent')
-            
-            result.heading("Update case mode")                    
-            result.para("Case mode is currently set to Full. This means that %s" % modes[case_mode])
-
-            result.start_form(result.defaults)
-            result.defaults.set('new_table_mode',case_mode)
-            result.const_selector("New Mode", 'new_table_mode', modes.keys(),
-                                  modes.keys())
-
-            result.end_form()
-            #get_attr(case_table, 'form_%s' % case_mode)(query, result)
-
-        result.toolbar(update_mode, "Case Mode: %s" % case_mode, icon='clock.png')
 
 class PreCannedCaseTableReports(CaseTableReports, Registry.PreCanned):
     """ A Convenience class to create Inlined precanned reports """
