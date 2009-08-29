@@ -79,12 +79,9 @@ class File:
 
         if urn:
             self.urn = urn
-            dbh.execute("select urn_id from AFF4_urn where urn = %r", urn)
-            self.inode_id = dbh.fetch()['urn_id']
+            self.inode_id = aff4.oracle.get_urn_by_id(urn)
         else:
-            dbh.execute("select urn from AFF4_urn where urn_id = %r", inode_id)
-            row = dbh.fetch() 
-            self.urn = row['urn']
+            self.urn = aff4.oracle.get_urn_by_id(inode_id)
             self.inode_id = inode_id
             
         self.size = int(aff4.oracle.resolve(self.urn, AFF4_SIZE))
@@ -142,9 +139,7 @@ class File:
             
     def stat(self):
         """ Returns a dict of statistics about the content of the file. """
-        urn_obj = aff4.oracle[self.urn]
-            
-        result = urn_obj.properties.copy()
+        result = {}
 
         dbh = DB.DBO(self.case)
         dbh.execute("select * from vfs where inode_id = %r", self.inode_id)
@@ -928,7 +923,7 @@ class DBFS(FileSystem):
 
         
     def VFSCreate(self,urn, path, directory=False,
-                  _fast=False, inode_id=None,
+                  _fast=True, inode_id=None,
                   status='alloc', timestamp=0,
                   **properties):
         """ Creates a new Inode in the VFS from AFF4 urn provided.
@@ -964,7 +959,7 @@ class DBFS(FileSystem):
         if directory: return
 
         if urn:
-            inode_id = aff4.oracle[urn].urn_id
+            inode_id = aff4.oracle.resolve_id(urn)
 
         if not inode_id: raise RuntimeError("No inode_id found for the urn %s" % urn)
         inode_properties = dict(status=status,

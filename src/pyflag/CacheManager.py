@@ -390,8 +390,7 @@ PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
 class PyFlagMap(aff4.Map):
-    include_in_VFS = False
-
+    include_in_VFS = {}
     def insert_to_table(self, table, props):
         """ This function adds the properties for this object as
         attributes in the urn:pyflag: namespace.
@@ -418,13 +417,21 @@ class PyFlagMap(aff4.Map):
                         args[column] = value
                 dbh.insert(table, **args)
 
-    def add_to_VFS(self, case, path, **kwargs):
+        self.add_to_VFS(**self.include_in_VFS)
+
+    def add_to_VFS(self, path, **kwargs):
         import pyflag.FileSystem as FileSystem
 
         ## Insert the new fd into the VFS
-        fsfd = FileSystem.DBFS(case)
-        self.inode_id = fsfd.VFSCreate(self.urn, path, **kwargs)
-        self.case = case
+        fsfd = FileSystem.DBFS(self.case)
+        fsfd.VFSCreate(self.urn, path, inode_id = self.inode_id,
+                       **kwargs)
+
+    def finish(self):
+        aff4.Map.finish(self)
+        
+        ## Come up with a valid inode_id
+        self.inode_id = aff4.oracle.resolve_id(self.urn)
 
     def close(self):
         aff4.Map.close(self)
@@ -434,6 +441,13 @@ class PyFlagImage(aff4.Image, PyFlagMap):
     def close(self):
         aff4.Image.close(self)
         self.update_tables()
+
+    def finish(self):
+        aff4.Image.finish(self)
+        
+        ## Come up with a valid inode_id
+        self.inode_id = aff4.oracle.resolve_id(self.urn)
+
 
 class AFF4Manager(DirectoryCacheManager):
     """ A Special Cache manager which maintains the main AFF4 Cache
@@ -464,9 +478,9 @@ class AFF4Manager(DirectoryCacheManager):
         fd.finish()
 
         kwargs['path'] = path
-        kwargs['case'] = case
+        fd.case = case
         if include_in_VFS:
-            fd.add_to_VFS(**kwargs)
+            fd.include_in_VFS = kwargs
  
         return fd
 
@@ -493,10 +507,11 @@ class AFF4Manager(DirectoryCacheManager):
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
+        
         kwargs['path'] = path
-        kwargs['case'] = case
+        fd.case = kwargs['case'] = case
         if include_in_VFS:
-            fd.add_to_VFS(**kwargs)
+            fd.include_in_VFS = kwargs
 
         if inherited:
             aff4.oracle.set(fd.urn, AFF4_INHERIT, inherited)

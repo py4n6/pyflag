@@ -62,9 +62,16 @@ def resolve_urn(inode_id):
     if row:
         return row.get('urn')
 
+def set_inheritence(child, parent):
+    """ Set the inheritence from a child to a parent. Children will
+    inherit all attributes of their parents.
+    """
+    aff4.oracle.set(child.urn, AFF4_INHERIT, parent.urn)
+    
 ## Attach this method to the oracle
 aff4.oracle.resolve_id = resolve_id
 aff4.oracle.resolve_urn = resolve_urn
+aff4.oracle.set_inheritence = set_inheritence
 
 ATTRIBUTE_CACHE = {}
 
@@ -111,19 +118,6 @@ class DBURNObject(aff4.URNObject):
                             urn = urn)
             self.urn_id = self.dbh.autoincrement()
 
-        self.inheritence = [self.urn_id,]
-        self.get_inheritence(self.urn_id)
-
-    def get_inheritence(self, urn_id):
-        inheritence_id = get_attribute_id(AFF4_INHERIT)
-        self.dbh.execute("select * from AFF4 where attribute_id = %r and urn_id = %r",
-                         inheritence_id, urn_id)
-        for row in self.dbh:
-            inheritence_id = resolve_id(row['value'])
-            if inheritence_id not in self.inheritence:
-                self.inheritence.append(inheritence_id)
-                self.get_inheritence(inheritence_id)
-
     def add(self, attribute, value):
         attribute_id = get_attribute_id(attribute)
         self.dbh.insert("AFF4", _fast=True,
@@ -151,12 +145,21 @@ class DBURNObject(aff4.URNObject):
 
     def __getitem__(self, attribute):
         attribute_id = get_attribute_id(attribute)
-        for urn_id in self.inheritence:
-            self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
-                             (attribute_id, urn_id))
-            for row in self.dbh:
-                yield row['value']
-                    
+        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
+                         (attribute_id, self.urn_id))
+        for row in self.dbh:
+            yield row['value']
+
+        ## Now search for the objects we inherit from
+        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
+                         (get_attribute_id(AFF4_INHERIT),
+                          self.urn_id))
+        inheritence = [ row['value'] for row in self.dbh ]
+
+        for i in inheritence:
+            for attribute in aff4.oracle.resolve_list(i, attribute):
+                yield attribute
+        
     def export(self, prefix = ''):
         result = ''
         self.dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
@@ -202,6 +205,10 @@ class DBURNObject(aff4.URNObject):
 ## Install this new implementation in the resolver
 aff4.oracle.urn_obj_class = DBURNObject
 
+## Move towards using the tdb resolver for AFF4
+import pyflag.aff4.tdb_resolver as tdb_resolver
+aff4.oracle = tdb_resolver.TDBResolver()
+
 class LoadAFF4Volume(Reports.report):
     """
     Load an AFF4 volume
@@ -227,19 +234,9 @@ class LoadAFF4Volume(Reports.report):
     def display(self, query, result):
         filenames = query.getarray('filename')
         print "Openning AFF4 volume %s" % (filenames,)
-
-        ## Note that we dont need to maintain any persistant
-        ## information about the volumes. Once the volumes are loaded,
-        ## their location, streams and all other information will be
-        ## stored in the AFF4 universal resolver. Even if PyFlag is
-        ## restarted, this information remains valid. In future we can
-        ## access the relevant objects directly through the oracle,
-        ## and we do not need to maintain it.
         result.heading("Loading AFF4 Volumes")
 
-        global NEW_OBJECTS, ATTRIBUTES
-        
-        NEW_OBJECTS = []
+        max_obj_id = aff4.oracle.max_urn_id()
         
         for f in filenames:
             ## Filenames are always specified relative to the upload
@@ -248,22 +245,21 @@ class LoadAFF4Volume(Reports.report):
             volumes = aff4.load_volume(filename)
             result.row("%s" % volumes)
 
-        aff4.oracle.clear_hooks()
         fsfd = DBFS(query['case'])
         base_dir = os.path.basename(filenames[0])
-        for obj in NEW_OBJECTS:
-            type = aff4.oracle.resolve(obj.urn, AFF4_TYPE)
-            if type in SUPPORTED_STREAMS:
-                urn = obj.urn
-                if "/" in urn:
-                    path = "%s/%s" % (base_dir, urn[urn.index("/"):])
-                else:
-                    path = base_dir
+        
+        for obj_id in range(max_obj_id, aff4.oracle.max_urn_id()+1):
+            urn = aff4.oracle.get_urn_by_id(obj_id)
+            if urn:
+                type = aff4.oracle.resolve(urn, AFF4_TYPE)
+                if type in SUPPORTED_STREAMS:
+                    if "/" in urn:
+                        path = "%s/%s" % (base_dir, urn[urn.index("/"):])
+                    else:
+                        path = base_dir
 
-                fsfd.VFSCreate(urn, path, _fast=True,
-                               mode=-1)
-                        
-            obj.flush(query['case'])
+                    fsfd.VFSCreate(urn, path, _fast=True,
+                                   mode=-1)
 
 class AFF4File(File):
     """ A VFS driver to read streams from AFF4 stream objects """
@@ -474,9 +470,9 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-    test_file = '/testimages/http.pcap'
+#    test_file = '/testimages/http.pcap'
 #    test_file = '/testimages/pyflag_stdimage_0.5.e01'
-#    test_file = '/testimages/stdcapture_0.4.pcap.e01'
+    test_file = '/testimages/stdcapture_0.4.pcap.e01'
 
     def test01CaseCreation(self):
         env = pyflagsh.environment(case=self.test_case)

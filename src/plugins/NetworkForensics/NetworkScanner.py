@@ -37,6 +37,7 @@ import pyflag.DB as DB
 from pyflag.FileSystem import File
 import pyflag.IO as IO
 import pyflag.FlagFramework as FlagFramework
+import pyflag.aff4.aff4 as aff4
 
 def IP2str(ip):
     """ Returns a string representation of the 32 bit network order ip """
@@ -202,6 +203,9 @@ class PCAPScanner(GenScanFactory):
                                                     _ts_sec = "from_unixtime(%s)" % packet.ts_sec,
                                                     )
                                                )
+                    ## Make sure we know they are related
+                    aff4.oracle.set_inheritence(r_map_stream, map_stream)
+                    aff4.oracle.set_inheritence(combined_stream, map_stream)
                     
             elif mode == 'data':
                 try:

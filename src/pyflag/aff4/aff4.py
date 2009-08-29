@@ -1198,12 +1198,12 @@ class RAWVolume(AFFVolume):
     def load_from(self, urn):
         fd = oracle.open(urn, 'r')
         try:
-            self.urn = fd.urn
-            basename = os.path.basename(self.urn)
+            basename = os.path.basename(fd.urn)
             new_urn = FQN + basename
-            oracle.set(new_urn, AFF4_STORED, self.urn)
+            self.urn = new_urn
+            oracle.set(new_urn, AFF4_STORED, fd.urn)
             oracle.set(new_urn, AFF4_TYPE, AFF4_RAW_STREAM)
-            oracle.set(self.urn, AFF4_CONTAINS, new_urn)
+            oracle.set(fd.urn, AFF4_CONTAINS, new_urn)
             oracle.set(new_urn, AFF4_HIGHLIGHT, _DETAILED)
             oracle.set(new_urn, AFF4_SIZE, fd.size)
         finally:
@@ -2751,6 +2751,6 @@ oracle.set(AFF4_SPECIAL_URN_NULL, CONFIG_PAD, 1)
 oracle.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
 oracle.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
 
-def DEBUG(verb, fmt, *args):
-    if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
-        print fmt % args
+#def DEBUG(verb, fmt, *args):
+#    if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
+#        print fmt % args

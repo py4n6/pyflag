@@ -150,7 +150,7 @@ class ViewFile(Reports.report):
     def css_handler(self, fd, ui):
         def generator():
             data = fd.read(100000)
-            tag = HTML.ResolvingHTMLTag(inode_id = fd.lookup_id(), case =self.case)
+            tag = HTML.ResolvingHTMLTag(inode_id = fd.inode_id, case =self.case)
             filtered = tag.css_filter(data)
             yield filtered
             

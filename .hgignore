@@ -24,7 +24,6 @@ images/changelog.html
 conf.py
 .libs/
 *.so
-pyflag
 pyflag_launch
 pyflash
 src/lib/evtool
@@ -33,3 +32,8 @@ src/mailtools/readpst
 src/regtools/reglookup
 *\#
 .\#*
+*.tdb
+
+syntax: regexp
+
+pyflag$

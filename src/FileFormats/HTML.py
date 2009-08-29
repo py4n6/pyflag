@@ -490,10 +490,16 @@ class ResolvingHTMLTag(SanitizingTag):
                 if row:
                     self.method = method = row['method']
                     self.host = host = row['host']
+                    self.url = row['url']
                 else:
                     self.method = method = ''
                     self.host = host = ''
-                
+                    self.url = ''
+
+            ## Url may be relative to the present directory
+            if not url.startswith("/"):
+                url = "/".join((os.path.dirname(self.url), url))
+
         return method, host, url
 
     @traced
@@ -531,7 +537,7 @@ class ResolvingHTMLTag(SanitizingTag):
         if build_reference:
             result += " reference=\"%s\" " % reference
 
-        print "Not found '%s' (%s + %s)" % (reference,original_reference, url)
+        print "Not found '%s' (%s)" % (reference,(method, host, url))
         return result
 
 #         ## Absolute reference
