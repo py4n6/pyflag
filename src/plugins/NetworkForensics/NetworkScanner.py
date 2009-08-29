@@ -50,102 +50,15 @@ class NetworkScanner(BaseScanner):
 
     Note that network scanners operate on discrete packets, where stream scanners operate on whole streams (and derive from StreamScannerFactory).
     """
-    def __init__(self,inode,ddfs,outer,factories=None,fd=None):
-        BaseScanner.__init__(self,inode,ddfs,outer,factories=factories,fd=fd)
-        try:
-            self.fd.link_type
-            self.ignore = False
-        except:
-            self.ignore = True
-            
-    def finish(self):
-        """ Only allow scanners to operate on pcapfs inodes """
-        try:
-            if self.fd.link_type:
-                return True
-        except:
-            return False
-    
-    def process(self,data,metadata=None):
-        """ Pre-process the data for all other network scanners """
-        try:
-            ## We may only scan network related filesystems like
-            ## pcapfs.
-            link_type = self.fd.link_type
-        except:
-            return
-        
-        ## We try to get previously set proto_tree. We store it in
-        ## a metadata structure so that scanners that follow us
-        ## can reuse it. This ensure we do not un-necessarily
-        ## dissect each packet.
-        self.packet_id = self.fd.tell()-1
-        self.packet_offset = self.fd.packet_offset
-        metadata['mime'] = "text/packet"
-          
-        try:
-            self.proto_tree = metadata['proto_tree'][self.packet_id]
-        except KeyError,e:
-            ## Now dissect it.
-            self.proto_tree = dissect.dissector(data, link_type,
-                                  self.packet_id, self.packet_offset)
-
-            ## Store it for the future
-            metadata['proto_tree']={ self.packet_id: self.proto_tree }
-
-class StreamTypeScan(ScanIfType):
-    """ By Default we now rely on the Magic to idenitify the stream.
-
-    For those streams which rely on port numbers (should not be
-    used really), you can leave the default types (it will match
-    anything - but we will only call process_stream on streams).
-    """
-    types = [ "." ]
-
-    def finish(self):            
-        ## Call the base classes process_stream method with the
-        ## given stream.
-        if not self.boring_status:
-            try:
-                self.fd.reverse
-            except AttributeError,e:
-                return
-
-            self.outer.process_stream(self.fd, self.factories)
+    pass
 
 class StreamScannerFactory(GenScanFactory):
     """ This is a scanner factory which allows scanners to only
     operate on streams.
     """
-    order = 2
-    depends = ['TypeScan']
-    group = 'NetworkScanners'
 
-    def stream_to_server(self, stream, protocol):
-        if stream.dest_port in dissect.fix_ports(protocol):
-            forward_stream = stream.inode_id
-            reverse_stream = stream.reverse
-        else:
-            return None, None
-
-        return forward_stream, reverse_stream
-
-    def process_stream(self, stream, factories):
-        """ Stream scanners need to over ride this to process each stream """
-        pass
-    
-    def scan_as_file(self, inode, factories):
-        """ Scans inode as a file (i.e. without any Stream scanners). """
-        fd = self.fsfd.open(inode=inode)
-        ## If does not matter if we use stream scanners on files
-        ## because they would ignore it anyway.
-        #factories = [ x for x in factories if not isinstance(x, StreamScannerFactory) ]
-
-        Scanner.scanfile(self.fsfd,fd,factories)
-        fd.close()
-
-    class Scan(StreamTypeScan):
-        pass
+class StreamTypeScan:
+    pass
 
 ## Below is the new implementation for PCAPScanner
 import pyflag.Magic as Magic

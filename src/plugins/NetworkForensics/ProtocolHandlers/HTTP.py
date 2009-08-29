@@ -190,384 +190,280 @@ class HTTP:
             return True
             
         return False
-
-class HTTPCaseTable(FlagFramework.CaseTable):
-    """ HTTP Table - Stores all HTTP transactions """
-    name = 'http'
-    columns = [
-        [ AFF4URN, {} ],
-        [ IntegerType, dict(name = 'Parent', column = 'parent') ],
-        [ PacketType, dict(name = 'Request Packet', column='request_packet') ],
-        [ StringType, dict(name='Method', column='method', width=10)],
-        [ StringType, dict(name='URL', column='url', width=2000)],
-        [ IntegerType, dict(name = "Response Packet", column='response_packet')],
-        [ IntegerType, dict(name = 'Status', column='status')],
-        [ StringType, dict(name='Content Type', column='content_type')],
-        [ StringType, dict(name='Referrer', column='referrer', width=500)],
-        [ TimestampType, dict(name='Date', column='date')],
-        [ StringType, dict(name='Host', column='host')],
-        [ StringType, dict(name='User Agent', column='useragent')],
-        [ StringType, dict(name='TLD', column='tld', width=50)],
-        ]
-    index = ['url','inode_id','tld','domain']
-    extras = [ [PCAPTime, dict(name='Timestamp', column='response_packet') ], ]
-
-class AttachmentColumnType(IntegerType):
-    """ View file Attachment in HTTP parameters """
+        
+# class HTTPScanner(StreamScannerFactory):
+#     """ Collect information about HTTP Transactions.
+#     """
+#     default = True
+#     group = "NetworkScanners"
+#     depends = ['TypeScan']
     
-    def __init__(self, **kwargs):
-        kwargs['name']="Attachment"
-        kwargs['column'] = 'indirect'
-        link = FlagFramework.query_type(case=kwargs.get('case'),
-                                        family='Disk Forensics',
-                                        report='ViewFile',
-                                        mode = 'Summary',
-                                        __target__ = 'inode_id')
-        kwargs['link'] = link
-        kwargs['link_pane'] = 'popup'
-        IntegerType.__init__(self, **kwargs)
+#     class Drawer(Scanner.Drawer):
+#         description = "Network Scanners"
+#         group = "NetworkScanners"
+#         contains = [ "IRCScanner", "MSNScanner", "HTTPScanner", "POPScanner",
+#                      "SMTPScanner","RFC2822", "YahooScanner", "FTPScanner",
+#                      'HotmailScanner','GmailScanner' ]
+#         default = True
+#         special_fs_name = 'PCAPFS'
 
-class HTTPParameterCaseTable(FlagFramework.CaseTable):
-    """ HTTP Parameters - Stores request details """
-    name = 'http_parameters'
-    columns = [
-        [ AFF4URN, {} ],
-        [ StringType, dict(name = 'Parameter', column = 'key') ],
-        [ StringType, dict(name = 'Value', column = 'value')],
-        [ AttachmentColumnType, {}],
-        ]
-    index = [ 'inode_id', 'key' ]
+#     def prepare(self):
+#         self.http_inodes = {}
+
+#     def reset(self, inode):
+#         dbh = DB.DBO(self.case)
+#         dbh.execute("delete from http")
+
+#     def parse_date_time_string(self, s):
+#         if not s: return 0
+#         try:
+#             return guess_date(s)
+#         except:
+#             print "Cant parse %s as a time" % s
+#             return 0
+
+#     def handle_parameters(self, request, inode_id):
+#         """ Store the parameters of the request in the http_parameters
+#         table. We parse both GET and POST parameters here.
+#         """
+#         ## FIXME: Adapt to use cgi.FieldStorage
+#         try:
+#             base, query = request['url'].split('?',1)
+#         except ValueError:
+#             base = request['url']
+#             query = ''
+#         except KeyError:
+#             return
         
-class HTTPScanner(StreamScannerFactory):
-    """ Collect information about HTTP Transactions.
-    """
-    default = True
-    group = "NetworkScanners"
-    depends = ['TypeScan']
-    
-    class Drawer(Scanner.Drawer):
-        description = "Network Scanners"
-        group = "NetworkScanners"
-        contains = [ "IRCScanner", "MSNScanner", "HTTPScanner", "POPScanner",
-                     "SMTPScanner","RFC2822", "YahooScanner", "FTPScanner",
-                     'HotmailScanner','GmailScanner' ]
-        default = True
-        special_fs_name = 'PCAPFS'
-
-    def prepare(self):
-        self.http_inodes = {}
-
-    def reset(self, inode):
-        dbh = DB.DBO(self.case)
-        dbh.execute("delete from http")
-
-    def parse_date_time_string(self, s):
-        if not s: return 0
-        try:
-            return guess_date(s)
-        except:
-            print "Cant parse %s as a time" % s
-            return 0
-
-    def handle_parameters(self, request, inode_id):
-        """ Store the parameters of the request in the http_parameters
-        table. We parse both GET and POST parameters here.
-        """
-        ## FIXME: Adapt to use cgi.FieldStorage
-        try:
-            base, query = request['url'].split('?',1)
-        except ValueError:
-            base = request['url']
-            query = ''
-        except KeyError:
-            return
+#         ## We use pythons standard CGI module for parsing, this allows
+#         ## us to handle both kinds of post encodings
+#         ## (multipart/form-data and
+#         ## application/x-www-form-urlencoded).
+#         body = request.get('body','')
         
-        ## We use pythons standard CGI module for parsing, this allows
-        ## us to handle both kinds of post encodings
-        ## (multipart/form-data and
-        ## application/x-www-form-urlencoded).
-        body = request.get('body','')
-        
-        env = dict(REQUEST_METHOD=request['method'],
-                   CONTENT_TYPE=request.get('content-type',''),
-                   CONTENT_LENGTH=len(body),
-                   QUERY_STRING=query)
+#         env = dict(REQUEST_METHOD=request['method'],
+#                    CONTENT_TYPE=request.get('content-type',''),
+#                    CONTENT_LENGTH=len(body),
+#                    QUERY_STRING=query)
 
-        dbh = DB.DBO(self.case)
+#         dbh = DB.DBO(self.case)
 
-        ## Merge in cookies if possible:
-        try:
-            cookie = request['cookie']
-            C = Cookie.SimpleCookie()
-            C.load(cookie)
-            for k in C.keys():
-                dbh.insert('http_parameters',
-                           inode_id = inode_id,
-                           key = k,
-                           value = C[k].value)
+#         ## Merge in cookies if possible:
+#         try:
+#             cookie = request['cookie']
+#             C = Cookie.SimpleCookie()
+#             C.load(cookie)
+#             for k in C.keys():
+#                 dbh.insert('http_parameters',
+#                            inode_id = inode_id,
+#                            key = k,
+#                            value = C[k].value)
                 
-        except (KeyError, Cookie.CookieError):
-            pass
+#         except (KeyError, Cookie.CookieError):
+#             pass
 
-        result =cgi.FieldStorage(environ = env, fp = cStringIO.StringIO(body))
-        self.count = 1
-        if type(result.value)==str:
-            class dummy:
-                value = result.value
-                filename = "body"
+#         result =cgi.FieldStorage(environ = env, fp = cStringIO.StringIO(body))
+#         self.count = 1
+#         if type(result.value)==str:
+#             class dummy:
+#                 value = result.value
+#                 filename = "body"
                 
-            self.process_parameter("body", dummy(), inode_id)
-        else:
-            for key in result:
-                self.process_parameter(key, result[key], inode_id)
+#             self.process_parameter("body", dummy(), inode_id)
+#         else:
+#             for key in result:
+#                 self.process_parameter(key, result[key], inode_id)
 
-    def process_parameter(self, key, value, inode_id):
-        dbh = DB.DBO(self.case) 
-       ## Non printable keys are probably not keys at all.
-        if re.match("[^a-z0-9A-Z_]+",key): return
-        try:
-            value = value[0]
-        except: pass
+#     def process_parameter(self, key, value, inode_id):
+#         dbh = DB.DBO(self.case) 
+#        ## Non printable keys are probably not keys at all.
+#         if re.match("[^a-z0-9A-Z_]+",key): return
+#         try:
+#             value = value[0]
+#         except: pass
 
-        ## Deal with potentially very large uploads:
-        if hasattr(value,'filename') and value.filename:
-            path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
-            ## This is not quite correct at the moment because the
-            ## mime VFS driver is unable to reconstruct the file
-            ## from scratch
-            new_inode = "m%s" % self.count
-            new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
-                                           value.filename,
-                                           size = len(value.value))
-            fd = self.fsfd.open(inode_id=new_inode_id)
-            ## dump the file to the correct filename:
-            CacheManager.MANAGER.create_cache_from_data(fd.case, fd.inode, value.value)
-            dbh.insert('http_parameters',
-                   inode_id = inode_id,
-                   key = key,
-                   indirect = new_inode_id)                
-        else:
-            dbh.insert('http_parameters',
-                   inode_id = inode_id,
-                   key = key,
-                   value = value.value)
+#         ## Deal with potentially very large uploads:
+#         if hasattr(value,'filename') and value.filename:
+#             path,inode,inode_id=self.fsfd.lookup(inode_id=inode_id)
+#             ## This is not quite correct at the moment because the
+#             ## mime VFS driver is unable to reconstruct the file
+#             ## from scratch
+#             new_inode = "m%s" % self.count
+#             new_inode_id = self.fsfd.VFSCreate(inode, new_inode,
+#                                            value.filename,
+#                                            size = len(value.value))
+#             fd = self.fsfd.open(inode_id=new_inode_id)
+#             ## dump the file to the correct filename:
+#             CacheManager.MANAGER.create_cache_from_data(fd.case, fd.inode, value.value)
+#             dbh.insert('http_parameters',
+#                    inode_id = inode_id,
+#                    key = key,
+#                    indirect = new_inode_id)                
+#         else:
+#             dbh.insert('http_parameters',
+#                    inode_id = inode_id,
+#                    key = key,
+#                    value = value.value)
 
-    def process_stream(self, stream, factories):
-        """ We look for HTTP requests to identify the stream. This
-        allows us to processes HTTP connections on unusual ports. This
-        situation might arise if HTTP proxies are used for example.
-        """
-        if stream.reverse:
-            combined_inode = "I%s|S%s/%s" % (stream.fd.name, stream.inode_id, stream.reverse)
-            try:
-                fd = self.fsfd.open(inode=combined_inode)
-            ## If we cant open the combined stream, we quit (This could
-            ## happen if we are trying to operate on a combined stream
-            ## already
-            except IOError: return
-        else:
-            fd = stream
+#     def process_stream(self, stream, factories):
+#         """ We look for HTTP requests to identify the stream. This
+#         allows us to processes HTTP connections on unusual ports. This
+#         situation might arise if HTTP proxies are used for example.
+#         """
+#         if stream.reverse:
+#             combined_inode = "I%s|S%s/%s" % (stream.fd.name, stream.inode_id, stream.reverse)
+#             try:
+#                 fd = self.fsfd.open(inode=combined_inode)
+#             ## If we cant open the combined stream, we quit (This could
+#             ## happen if we are trying to operate on a combined stream
+#             ## already
+#             except IOError: return
+#         else:
+#             fd = stream
             
-        p=HTTP(fd,self.fsfd)
-        ## Check that this is really HTTP
-        if not p.identify():
-            return
+#         p=HTTP(fd,self.fsfd)
+#         ## Check that this is really HTTP
+#         if not p.identify():
+#             return
         
-        pyflaglog.log(pyflaglog.DEBUG,"Openning %s for HTTP" % combined_inode)
-        ## Iterate over all the messages in this connection
-        for f in p.parse():
-            if not f: continue
-            offset, size = f
+#         pyflaglog.log(pyflaglog.DEBUG,"Openning %s for HTTP" % combined_inode)
+#         ## Iterate over all the messages in this connection
+#         for f in p.parse():
+#             if not f: continue
+#             offset, size = f
             
-            ## Create the VFS node:
-            new_inode="%s|H%s:%s" % (combined_inode,offset,size)
+#             ## Create the VFS node:
+#             new_inode="%s|H%s:%s" % (combined_inode,offset,size)
             
-            try:
-                if 'chunked' in p.response['transfer-encoding']:
-                    new_inode += "|c0"
-            except KeyError:
-                pass
+#             try:
+#                 if 'chunked' in p.response['transfer-encoding']:
+#                     new_inode += "|c0"
+#             except KeyError:
+#                 pass
 
-            try:
-                if 'gzip' in p.response['content-encoding']:
-                    new_inode += "|G1"
+#             try:
+#                 if 'gzip' in p.response['content-encoding']:
+#                     new_inode += "|G1"
 
-            except KeyError:
-                pass
+#             except KeyError:
+#                 pass
 
-            try:
-                if 'deflate' in p.response['content-encoding']:
-                    new_inode += "|d1"
+#             try:
+#                 if 'deflate' in p.response['content-encoding']:
+#                     new_inode += "|d1"
 
-            except KeyError:
-                pass
+#             except KeyError:
+#                 pass
 
-            ## stream.ts_sec is already formatted in DB format
-            ## need to convert back to utc/gmt as paths are UTC
-            timestamp =  fd.get_packet_ts(offset)
-            ds_timestamp = Time.convert(timestamp, case=self.case, evidence_tz="UTC")
-            try:
-                date_str = ds_timestamp.split(" ")[0]
-            except:
-                date_str = stream.ts_sec.split(" ")[0]
+#             ## stream.ts_sec is already formatted in DB format
+#             ## need to convert back to utc/gmt as paths are UTC
+#             timestamp =  fd.get_packet_ts(offset)
+#             ds_timestamp = Time.convert(timestamp, case=self.case, evidence_tz="UTC")
+#             try:
+#                 date_str = ds_timestamp.split(" ")[0]
+#             except:
+#                 date_str = stream.ts_sec.split(" ")[0]
                 
-            path,inode,inode_id=self.fsfd.lookup(inode=combined_inode)
+#             path,inode,inode_id=self.fsfd.lookup(inode=combined_inode)
 
-            ## Try to put the HTTP inodes at the mount point. FIXME:
-            ## This should not be needed when a http stats viewer is
-            ## written.
-            path=posixpath.normpath(path+"/../../../../../")
+#             ## Try to put the HTTP inodes at the mount point. FIXME:
+#             ## This should not be needed when a http stats viewer is
+#             ## written.
+#             path=posixpath.normpath(path+"/../../../../../")
 
-            inode_id = self.fsfd.VFSCreate(None,new_inode,
-                                           "%s/HTTP/%s/%s" % (path,date_str,
-                                                              escape(p.request['url'])),
-                                           mtime=timestamp, size=size
-                                           )
+#             inode_id = self.fsfd.VFSCreate(None,new_inode,
+#                                            "%s/HTTP/%s/%s" % (path,date_str,
+#                                                               escape(p.request['url'])),
+#                                            mtime=timestamp, size=size
+#                                            )
 
-            ## Update the inode again:
-            #new_inode = new_inode % inode_id
-            ## This updates the inode table with the new inode
-            #self.fsfd.VFSCreate(None,new_inode,
-            #                    None, update_only = True,
-            #                    inode_id = inode_id
-            #                    )
+#             ## Update the inode again:
+#             #new_inode = new_inode % inode_id
+#             ## This updates the inode table with the new inode
+#             #self.fsfd.VFSCreate(None,new_inode,
+#             #                    None, update_only = True,
+#             #                    inode_id = inode_id
+#             #                    )
             
-            ## Store information about this request in the
-            ## http table:
-            host = p.request.get("host",IP2str(stream.dest_ip))
-            url = HTML.url_unquote(p.request.get("url"))
-            try:
-                date = p.response["date"]
-                date = Time.parse(date, case=self.case, evidence_tz=None) 
-            except (KeyError,ValueError):
-                date = 0
+#             ## Store information about this request in the
+#             ## http table:
+#             host = p.request.get("host",IP2str(stream.dest_ip))
+#             url = HTML.url_unquote(p.request.get("url"))
+#             try:
+#                 date = p.response["date"]
+#                 date = Time.parse(date, case=self.case, evidence_tz=None) 
+#             except (KeyError,ValueError):
+#                 date = 0
 
-            ## Two forms for the referrer:
-            referer = p.request.get('referer', p.request.get('referrer',''))
-            if not url.startswith("http://") and not url.startswith("ftp://"):
-                url = "http://%s%s" % (host, url)
+#             ## Two forms for the referrer:
+#             referer = p.request.get('referer', p.request.get('referrer',''))
+#             if not url.startswith("http://") and not url.startswith("ftp://"):
+#                 url = "http://%s%s" % (host, url)
 
-            ## Not sure if we really care about this?
-            ## Find referred page:
-##            parent = 0
-            dbh = DB.DBO(self.case)
-##            if referer:
-##                dbh.execute("select inode_id from http where url=%r order by inode_id desc limit 1", referer)
-##                row = dbh.fetch()
+#             ## Not sure if we really care about this?
+#             ## Find referred page:
+# ##            parent = 0
+#             dbh = DB.DBO(self.case)
+# ##            if referer:
+# ##                dbh.execute("select inode_id from http where url=%r order by inode_id desc limit 1", referer)
+# ##                row = dbh.fetch()
 
-##                ## If there is no referrer we just make a psuedo entry
-##                if not row:
-##                    ## Find out the host
-##                    m=re.match("(http://|ftp://)([^/]+)([^\?\&\=]*)",
-##                               "%s" % referer)
-##                    if m:
-##                        host = m.group(2)
-##                        dbh.insert("http", url=referer, host=host)
-##                        parent = dbh.autoincrement()
-##                else:
-##                    parent = row['inode_id']
+# ##                ## If there is no referrer we just make a psuedo entry
+# ##                if not row:
+# ##                    ## Find out the host
+# ##                    m=re.match("(http://|ftp://)([^/]+)([^\?\&\=]*)",
+# ##                               "%s" % referer)
+# ##                    if m:
+# ##                        host = m.group(2)
+# ##                        dbh.insert("http", url=referer, host=host)
+# ##                        parent = dbh.autoincrement()
+# ##                else:
+# ##                    parent = row['inode_id']
 
-            args = dict(inode_id = inode_id,
-                        request_packet = p.request.get("packet_id",0),
-                        method         = p.request.get("method","-"),
-                        url            = url,
-                        response_packet= p.response.get("packet_id"),
-                        status         = p.response.get("HTTP_code"),
-                        content_type   = p.response.get("content-type","text/html"),
-                        referrer       = referer[:500],
-                        host           = host,
-                        tld            = make_tld(host),
-                        useragent      = p.request.get('user-agent', '-'),
-                        )
+#             args = dict(inode_id = inode_id,
+#                         request_packet = p.request.get("packet_id",0),
+#                         method         = p.request.get("method","-"),
+#                         url            = url,
+#                         response_packet= p.response.get("packet_id"),
+#                         status         = p.response.get("HTTP_code"),
+#                         content_type   = p.response.get("content-type","text/html"),
+#                         referrer       = referer[:500],
+#                         host           = host,
+#                         tld            = make_tld(host),
+#                         useragent      = p.request.get('user-agent', '-'),
+#                         )
 
-            if date:
-                args['date'] = date
+#             if date:
+#                 args['date'] = date
             
-            dbh.insert('http', **args)
-#                       parent         = parent)                            
+#             dbh.insert('http', **args)
+# #                       parent         = parent)                            
 
-            ## Replicate the information about the subobjects in the
-            ## connection_details table - this makes it easier to do
-            ## some queries:
-            dbh.insert("connection_details",
-                       ts_sec = stream.ts_sec,
-                       inode_id = inode_id,
-                       src_ip = stream.src_ip,
-                       src_port = stream.src_port,
-                       dest_ip = stream.dest_ip,
-                       dest_port = stream.dest_port,
-                       )
-            ## handle the request's parameters:
-            try:
-                self.handle_parameters(p.request, inode_id)
-            except (KeyError, TypeError):
-                pass
+#             ## Replicate the information about the subobjects in the
+#             ## connection_details table - this makes it easier to do
+#             ## some queries:
+#             dbh.insert("connection_details",
+#                        ts_sec = stream.ts_sec,
+#                        inode_id = inode_id,
+#                        src_ip = stream.src_ip,
+#                        src_port = stream.src_port,
+#                        dest_ip = stream.dest_ip,
+#                        dest_port = stream.dest_port,
+#                        )
+#             ## handle the request's parameters:
+#             try:
+#                 self.handle_parameters(p.request, inode_id)
+#             except (KeyError, TypeError):
+#                 pass
 
-            ## Only scan the new file using the scanner train if its
-            ## size of bigger than 0:
-            if size>0:
-                self.scan_as_file(new_inode, factories)
+#             ## Only scan the new file using the scanner train if its
+#             ## size of bigger than 0:
+#             if size>0:
+#                 self.scan_as_file(new_inode, factories)
 
-    class Scan(StreamTypeScan):
-        types = [ "protocol/x-http-request" ]
+#     class Scan(StreamTypeScan):
+#         types = [ "protocol/x-http-request" ]
 
-import pyflag.Magic as Magic
-
-class HTTPRequestMagic(Magic.Magic):
-    """ Identify HTTP Requests """
-    type = "HTTP Request stream"
-    mime = "protocol/x-http-request"
-
-    regex_rules = [
-        ( "[A-Z]+ [^ ]{1,600} HTTP/1.", (0,0)),
-        ]
-    
-    samples = [
-        ( 100, "GET /online.gif?icq=52700562&img=3 HTTP/1.1"),
-        ( 100, "GET http://www.google.com/ HTTP/1.0"),
-        ]
-
-class HTTPResponseMagic(Magic.Magic):
-    """ Identify HTTP Response streams """
-    type = "HTTP Response stream"
-    mime = "protocol/x-http-response"
-    default_score = 80
-
-    regex_rules = [
-        ## If we find one header then maybe
-        ( "HTTP/1.[01] [0-9]{1,3}", (0,10)),
-        ## If we find more headers, we definitiely are looking at HTTP stream
-        ( "\nHTTP/1.[01] [0-9]{1,3}", (1,1000))
-        ]
-
-    samples = [
-        ( 160, \
-"""HTTP/1.1 301 Moved Permanently
-
-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
-<HTML><HEAD>
-<TITLE>301 Moved Permanently</TITLE>
-</HEAD><BODY>
-
-HTTP/1.1 301 Moved Permanently
-"""),
-        ]
-
-class HTTPMagic(Magic.Magic):
-    """ HTTP Objects have content types within the protocol. These may be wrong though so we need to treat them carefully.
-    """
-    def score(self, data, case, inode_id):
-        if case:
-            dbh = DB.DBO(case)
-            dbh.execute("select content_type from http where inode_id = %r", inode_id)
-            row = dbh.fetch()
-            if row:
-                self.type = "HTTP %s" % row['content_type']
-                self.mime = row['content_type']
-                return 40
-
-        return 0
-            
 class BrowseHTTPRequests(Reports.CaseTableReports):
     name = "Browse HTTP Requests"
     family = "Network Forensics"
@@ -821,23 +717,6 @@ class HTTPTree(TreeObj.TreeObj):
     """
     node_name = "inode_id"
 
-class HTTPTLDRequests(Reports.PreCannedCaseTableReports):
-    family = ' Network Forensics'
-    description = 'View TLDs requested'
-    name = '/Network Forensics/Communications/Web/Domains'
-    default_table = 'HTTPCaseTable'
-    columns = ['Timestamp', 'Inode', 'URL', 'InodeTable.Size', 'TLD']
-    args = {'_hidden':4}
-    def display(self, query,result):
-        if not query.has_key('grouped'):
-            self.options = {'groupby':'TLD',
-                            'where': 'content_type like "%html%"'}
-        else:
-            self.options = {'where': 'content_type like "%html%"'}
-            
-        result.defaults.set('grouped',1)
-        Reports.PreCannedCaseTableReports.display(self, query, result)
-    
 class HTTPRequestTree(Reports.CaseTableReports):
     """
     Browse HTTP Request tree - Visualise HTTP requests in a tree form.

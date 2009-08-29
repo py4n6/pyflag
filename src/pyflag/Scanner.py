@@ -408,7 +408,7 @@ def scan_inode(case, inode_id, factories):
     ## The new scanning framework is much simpler - we just call the
     ## scan() method on each factory.
     m = Magic.MagicResolver()
-    messages = DB.expand("Scanning file %s%s (inode %s)",
+    messages = DB.expand("Scanning file %s/%s (inode %s)",
                          (stat['path'],stat['name'],stat['inode_id']))
 
     for c in factories:

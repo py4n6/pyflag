@@ -17,6 +17,8 @@ from pyflag.DB import expand
 from FlagFramework import query_type, normpath, get_bt_string, smart_str, smart_unicode, iri_to_uri
 import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 
 def traced(func):
     def wrapper(*__args,**__kw):
@@ -55,7 +57,7 @@ def url_unquote(string):
     ## thing is very confusing.
     return smart_unicode(string, 'utf8')
 
-url_re = re.compile("(http|ftp|HTTP|FTP|file)://([^/]+)(/[^?]*)")
+url_re = re.compile("(http|ftp|HTTP|FTP|file)://([^/]+)(/.*)")
 
 def decode_entity(string):
     def decoder(x):
@@ -481,36 +483,34 @@ class ResolvingHTMLTag(SanitizingTag):
         else:
             ## Its not absolute, we need to fill in our own parameters
             try:
-                method = self.method
                 host = self.host
             except AttributeError:
-                dbh = DB.DBO(self.case)
-                dbh.execute("select * from http where inode_id = %r", self.inode_id)
-                row = dbh.fetch()
-                if row:
-                    self.method = method = row['method']
-                    self.host = host = row['host']
-                    self.url = row['url']
-                else:
-                    self.method = method = ''
-                    self.host = host = ''
-                    self.url = ''
+                urn = aff4.oracle.get_urn_by_id(self.inode_id)
+                
+                self.host = host = aff4.oracle.resolve(
+                    urn, PYFLAG_NS + "http:host") or ''
+                self.url = aff4.oracle.resolve(
+                    urn, PYFLAG_NS + "http:url") or ''
 
             ## Url may be relative to the present directory
             if not url.startswith("/"):
-                url = "/".join((os.path.dirname(self.url), url))
+                dirname = os.path.dirname(self.url)
+                if not dirname.endswith("/"): dirname = dirname+"/"
+                url = dirname + url
 
-        return method, host, url
+        url = os.path.normpath(url)
+        
+        return host, url
 
     @traced
     def resolve_reference(self, reference, hint='', build_reference=True):
         original_reference = reference
 
         ## Make reference into relative reference
-        method, host, url = self.parse_url(reference)
+        host, url = self.parse_url(reference)
 
         ## Maybe its in the filesystem
-        if not method:
+        if not host:
             dbh = DB.DBO(self.case)
             dbh.execute("select * from vfs where inode_id = %r", self.inode_id)
             row = dbh.fetch()
@@ -527,8 +527,8 @@ class ResolvingHTMLTag(SanitizingTag):
         ## Now we try to find the reference. Is the reference in the
         ## http table:
         dbh = DB.DBO(self.case)
-        dbh.execute("select * from http where method = %r and host = %r and url = %r",
-                    (method, host, url))
+        dbh.execute("select * from http where host = %r and url = %r",
+                    (host, url))
         row = dbh.fetch()
         if row:
             return self.make_reference_to_inode(row['inode_id'])
@@ -537,7 +537,7 @@ class ResolvingHTMLTag(SanitizingTag):
         if build_reference:
             result += " reference=\"%s\" " % reference
 
-        print "Not found '%s' (%s)" % (reference,(method, host, url))
+        print "Not found '%s' (%s)" % (reference,(host, url))
         return result
 
 #         ## Absolute reference
@@ -774,7 +774,7 @@ class HTMLParser(lexer.Lexer):
         self.tag = self.Tag(charset = self.charset)
         
     def ATTRIBUTE_VALUE(self, token, match):
-        self.tag[self.current_attribute] = match.group(1) or match.group(2)
+        self.tag[self.current_attribute] = url_unquote(match.group(1) or match.group(2))
         if self.tag.name=='meta' and self.current_attribute=='content':
             m = re.search("charset=([^ \"]+)", self.tag[self.current_attribute])
             if m:

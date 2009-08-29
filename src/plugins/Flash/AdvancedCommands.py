@@ -5,7 +5,7 @@ specifically designed for testing and have little use in practice.
 import pyflag.pyflagsh as pyflagsh
 import pyflag.Registry as Registry
 import pyflag.DB as DB
-import fnmatch
+import fnmatch,pdb
 import pyflag.FileSystem as FileSystem
 import pyflag.Scanner as Scanner
 import time, types

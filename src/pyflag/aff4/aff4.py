@@ -82,6 +82,11 @@ def relative_name(filename, context_name):
 
     return filename
 
+def smart_string(data):
+    if type(data)==str: return data
+
+    return data.encode("utf8","ignore")
+
 def b64_encode(data):
     """ A convenience function to base64 encode with no line breaks """
     result = data.encode("base64").splitlines()
@@ -974,7 +979,8 @@ class ImageWorker(threading.Thread):
         while self.buffer.tell() < self.buffer.len:
             data = self.buffer.read(self.chunk_size)
             if self.compression > 0:
-                cdata = zlib.compress(data, int(self.compression))
+                cdata = zlib.compress(smart_string(data),
+                                      int(self.compression))
             else:
                 cdata = data
                 
@@ -1204,6 +1210,8 @@ class RAWVolume(AFFVolume):
             oracle.set(new_urn, AFF4_STORED, fd.urn)
             oracle.set(new_urn, AFF4_TYPE, AFF4_RAW_STREAM)
             oracle.set(fd.urn, AFF4_CONTAINS, new_urn)
+            oracle.set(fd.urn, AFF4_TYPE, AFF4_RAW_STREAM)
+            oracle.set(new_urn, AFF4_CONTAINS, fd.urn)
             oracle.set(new_urn, AFF4_HIGHLIGHT, _DETAILED)
             oracle.set(new_urn, AFF4_SIZE, fd.size)
         finally:

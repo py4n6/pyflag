@@ -1470,8 +1470,9 @@ class HTMLUI(UI.GenericUI):
 
         id=self.get_unique_id()
         
-        out+="</div>\n<div class='TabContent' id='Notebook%s'>%s</div></div>\n" % (id,result)
-        self.result+=out + "<script>AdjustHeightToPageSize('Notebook%s');</script>" % id
+        out+=DB.expand("</div>\n<div class='TabContent' id='Notebook%s'>%s</div></div>\n",
+                       (id,result))
+        self.result+=out + DB.expand("<script>AdjustHeightToPageSize('Notebook%s');</script>",( id))
 
     def get_unique_id(self):
         self.id =(self.id+1) % config.PAGESIZE

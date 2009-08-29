@@ -1,4 +1,11 @@
 """  This is an implementation of a resolver based around tdb - the trivial database.
+
+TDB is a simple key value database as used in samba:
+http://sourceforge.net/projects/tdb/
+
+In ubuntu you can get it using
+apt-get install libtdb1
+
 """
 from ctypes import *
 import ctypes.util
@@ -9,7 +16,7 @@ from aff4_attributes import *
 from os import O_RDWR, O_CREAT
 
 try:
-    libtdb = CDLL("libtdb.so")
+    libtdb = CDLL("libtdb.so.1")
     if not libtdb._name: raise OSError()
 except OSError:
     raise ImportError("libtdb not found")
@@ -18,6 +25,16 @@ class tdb_data(Structure):
     _fields_ = [ ("data", c_char_p),
                  ("size", c_int)]
 
+TDB_DEFAULT= 0  #* just a readability place holder *#
+TDB_CLEAR_IF_FIRST= 1
+TDB_INTERNAL= 2 #* don't store on disk *#
+TDB_NOLOCK =  4 #* don't do any locking *#
+TDB_NOMMAP =  8 #* don't use mmap *#
+TDB_CONVERT= 16 #* convert endian (internal use) *#
+TDB_BIGENDIAN =32 #* header is big-endian (internal use) *#
+TDB_NOSYNC =  64 #* don't use synchronous transactions *#
+TDB_SEQNUM =  128 #* maintain a sequence number *#
+TDB_VOLATILE =  256 #* Activate the per-hashchain freelist, default 5 *#
 
 libc = CDLL(ctypes.util.find_library("c"))
 libtdb.tdb_fetch.restype = tdb_data
@@ -30,7 +47,10 @@ class Tdb:
         self.filename = filename
         self.tdb_fh = libtdb.tdb_open(filename,
                                       hash_size,
-                                      0, O_RDWR | O_CREAT, 0644)
+                                      ## This doesnt seem to improve performance at all
+                                      #TDB_VOLATILE | TDB_NOSYNC | TDB_NOLOCK,
+                                      0,
+                                      O_RDWR | O_CREAT, 0644)
     def store(self, key, value):
         libtdb.tdb_store(self.tdb_fh, tdb_data(key, len(key)), tdb_data(value, len(value)))
 
@@ -102,7 +122,7 @@ class TDBResolver(aff4.Resolver):
         except ValueError: return ''
         
         for attr in self.attribute_db.list_keys():
-            values = self.resolve_list(uri, attr)
+            values = self.resolve_list(uri, attr, follow_inheritence=False)
             for v in values:
                 result += "%s%s=%s\n" % (prefix,attr, v)
 
@@ -170,6 +190,10 @@ class TDBResolver(aff4.Resolver):
             cb(uri, attribute, value)
     
     def add(self, uri, attribute, value):
+        ## Check if we need to add this value
+        for x in self.resolve_list(uri, attribute):
+            if x==value: return
+            
         key = self.calculate_key(uri, attribute)
         
         ## This is the place at the end of the file where we put the
@@ -192,42 +216,35 @@ class TDBResolver(aff4.Resolver):
         for cb in self.add_hooks:
             cb(uri, attribute, value)
 
-    def resolve(self, uri, attribute):
+    def resolve(self, uri, attribute, follow_inheritence=True):
         """ Return a single (most recently set attribute) """
-        key = self.calculate_key(uri, attribute)
-        
-        offset = self.data_db.get(key)
-        if not offset:
-            return NoneObject("No attribute %s found on %s" % (attribute, uri))
+        for x in self.resolve_list(uri, attribute, follow_inheritence):
+            return x
 
-        self.data_store.seek(int(offset))
-        offset, length = struct.unpack("<ll", self.data_store.read(8))
-        return self.data_store.read(length)
+        return NoneObject("No attribute %s found on %s" % (attribute, uri))
 
     def delete(self, uri, attribute):
         key = self.calculate_key(uri, attribute)
         self.data_db.delete(key)
 
-    def resolve_list(self, uri, attribute):
+    def resolve_list(self, uri, attribute, follow_inheritence=True):
         try:
             key = self.calculate_key(uri, attribute)
         except ValueError:
-            return []
+            return
         
         offset = self.data_db.get(key)
-        if not offset:
-            return []
-        
-        results = []
-
-        while 1:
+        while offset and offset!=-1:
             self.data_store.seek(int(offset))
             offset, length = struct.unpack("<ll", self.data_store.read(8))
-            results.append(self.data_store.read(length))
+            yield self.data_store.read(length)
 
-            if offset==-1: break
-
-        return results
+        if not follow_inheritence:
+            return
+        
+        for inherited in self.resolve_list(uri, AFF4_INHERIT, follow_inheritence=False):
+            for v in self.resolve_list(inherited, attribute):
+                yield v
 
 NoneObject = aff4.NoneObject
 

@@ -280,7 +280,7 @@ class CaseTableReports(report):
                     break
                 
         if not elements:
-            raise RuntimeError("No columns where specified in CaseTableReports")
+            raise RuntimeError("No columns were specified in CaseTableReports")
 
         result.table(
             elements = elements,

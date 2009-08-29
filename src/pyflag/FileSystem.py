@@ -229,8 +229,6 @@ class File:
 
     def textdump(self, query,result):
         max=config.MAX_DATA_DUMP_SIZE
-        pdb.set_trace()
-
         def textdumper(offset, data,result):
             result.text(data, font='typewriter', sanitise='full', wrap='full', style='red',
                         max_lines = 500)
@@ -933,7 +931,7 @@ class DBFS(FileSystem):
         ## Basically this is how this function works - if root_inode
         ## is provided we make the new inode inherit the root inodes
         ## path and inode string.
-        pyflaglog.log(pyflaglog.DEBUG,
+        pyflaglog.log(pyflaglog.VERBOSE_DEBUG,
                       DB.expand("Creating new VFS node %s", (urn)))
 
         ## Normalise the path:

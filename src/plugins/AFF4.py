@@ -29,15 +29,6 @@ import pyflag.CacheManager as CacheManager
 import PIL, cStringIO, PIL.ImageFile
 import pyflag.Registry as Registry
 
-#aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
-aff4.oracle.set(aff4.GLOBAL, CONFIG_PROPERTIES_STYLE, 'combined')
-
-## This is a persistent resolver in the database
-NEW_OBJECTS = []
-
-## All the attributes we know about
-ATTRIBUTES = {}
-
 ## Some private AFF4 namespace objects
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
@@ -46,168 +37,12 @@ PYFLAG_CASE = PYFLAG_NS + "case"
 SUPPORTED_STREAMS = [AFF4_IMAGE, AFF4_MAP, AFF4_AFF1_STREAM,
                      AFF4_EWF_STREAM, AFF4_RAW_STREAM]
 
-def resolve_id(urn):
-    PDBO = DB.DBO()
-    PDBO.execute("select urn_id from AFF4_urn where urn = %r limit 1", urn)
-    row = PDBO.fetch()
-    
-    if row:
-        return row.get('urn_id')
-
-def resolve_urn(inode_id):
-    PDBO = DB.DBO()
-    PDBO.execute("select urn from AFF4_urn where urn_id = %r limit 1", inode_id)
-    row = PDBO.fetch()
-    
-    if row:
-        return row.get('urn')
-
-def set_inheritence(child, parent):
-    """ Set the inheritence from a child to a parent. Children will
-    inherit all attributes of their parents.
-    """
-    aff4.oracle.set(child.urn, AFF4_INHERIT, parent.urn)
-    
-## Attach this method to the oracle
-aff4.oracle.resolve_id = resolve_id
-aff4.oracle.resolve_urn = resolve_urn
-aff4.oracle.set_inheritence = set_inheritence
-
-ATTRIBUTE_CACHE = {}
-
-def get_attribute_id(attribute):
-    global ATTRIBUTE_CACHE
-    try:
-        return ATTRIBUTE_CACHE[attribute]
-    except KeyError:
-        pass
-
-    dbh = DB.DBO()
-    dbh.execute("select * from AFF4_attribute where attribute = %r", attribute)
-    row = dbh.fetch()
-    if row:
-        attribute_id = row['attribute_id']
-    else:
-        dbh.insert("AFF4_attribute", _fast=True,
-                   attribute = attribute)
-        attribute_id = dbh.autoincrement()
-
-    ATTRIBUTE_CACHE[attribute] = attribute_id
-    return attribute_id
-
-
-class DBURNObject(aff4.URNObject):
-    dbh = None
-    def __init__(self, urn):
-        aff4.URNObject.__init__(self, urn)
-        self.properties = {}
-        self.urn = urn
-        global NEW_OBJECTS
-        NEW_OBJECTS.append(self)
-
-        if not self.dbh:
-            DBURNObject.dbh = DB.DBO()
-
-        if not urn: pdb.set_trace()
-        self.dbh.execute("select * from AFF4_urn where urn = %r", urn)
-        row = self.dbh.fetch()
-        if row:
-            self.urn_id = row['urn_id']
-        else:
-            self.dbh.insert("AFF4_urn", _fast=True,
-                            urn = urn)
-            self.urn_id = self.dbh.autoincrement()
-
-    def add(self, attribute, value):
-        attribute_id = get_attribute_id(attribute)
-        self.dbh.insert("AFF4", _fast=True,
-                        urn_id = self.urn_id,
-                        attribute_id = attribute_id,
-                        value = value)
-
-    def delete(self, attribute):
-        attribute_id = get_attribute_id(attribute)
-        self.dbh.delete("AFF4", _fast=True,
-                        where = "attribute_id = %s and urn_id = %s" % (
-            attribute_id,self.urn_id))
-
-    def set(self, attribute, value):
-        ## First try to update
-        attribute_id = get_attribute_id(attribute)
-        self.dbh.update("AFF4", _fast=True,
-                        value = value,
-                        where = "attribute_id = %s and urn_id = %s" % (
-                                 attribute_id, self.urn_id))
-
-        ## If that doesnt work, then insert
-        if self.dbh.cursor.rowcount == 0:
-            self.add(attribute, value)
-
-    def __getitem__(self, attribute):
-        attribute_id = get_attribute_id(attribute)
-        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
-                         (attribute_id, self.urn_id))
-        for row in self.dbh:
-            yield row['value']
-
-        ## Now search for the objects we inherit from
-        self.dbh.execute("select value from AFF4 where attribute_id = %r and urn_id = %r",
-                         (get_attribute_id(AFF4_INHERIT),
-                          self.urn_id))
-        inheritence = [ row['value'] for row in self.dbh ]
-
-        for i in inheritence:
-            for attribute in aff4.oracle.resolve_list(i, attribute):
-                yield attribute
-        
-    def export(self, prefix = ''):
-        result = ''
-        self.dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where AFF4.urn_id = %r group by urn_id, AFF4.attribute_id, value", self.urn_id)
-        for row in self.dbh:
-            if not row['attribute'].startswith(VOLATILE_NS):
-                result += "%s%s=%s\n" % (prefix, row['attribute'], row['value'])
-
-        return result
-
-    def flush(self, case=None):
-        """ Write ourselves to the DB """
-        return
-        if not self.properties: return
-        
-        if not case: pdb.set_trace()
-        PDBO = DB.DBO()
-        case = case or self.properties.get(PYFLAG_CASE,[''])[0]
-        PDBO.update("AFF4_urn", _fast=True,
-                    where="urn_id = '%s'" % self.urn_id,
-                    case=case)
-        
-        for attribute,values in self.properties.items():
-            try:
-                attribute_id = ATTRIBUTES[attribute]
-            except KeyError:
-                PDBO.execute('select attribute_id from AFF4_attribute where attribute = %r',
-                            attribute)
-                row = PDBO.fetch()
-                if row:
-                    attribute_id = row['attribute_id']
-                else:
-                    PDBO.insert("AFF4_attribute", _fast=True,
-                                attribute = attribute)
-                    attribute_id = PDBO.autoincrement()
-                    ATTRIBUTES[attribute] = attribute_id
-
-            for value in values:
-                PDBO.insert("AFF4", _fast=True,
-                            urn_id = self.urn_id,
-                            attribute_id=attribute_id,
-                            value=value)
-
-## Install this new implementation in the resolver
-aff4.oracle.urn_obj_class = DBURNObject
-
 ## Move towards using the tdb resolver for AFF4
 import pyflag.aff4.tdb_resolver as tdb_resolver
 aff4.oracle = tdb_resolver.TDBResolver()
+
+#aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
+aff4.oracle.set(aff4.GLOBAL, CONFIG_PROPERTIES_STYLE, 'combined')
 
 class LoadAFF4Volume(Reports.report):
     """
@@ -236,7 +71,7 @@ class LoadAFF4Volume(Reports.report):
         print "Openning AFF4 volume %s" % (filenames,)
         result.heading("Loading AFF4 Volumes")
 
-        max_obj_id = aff4.oracle.max_urn_id()
+        loaded_volumes = []
         
         for f in filenames:
             ## Filenames are always specified relative to the upload
@@ -244,13 +79,17 @@ class LoadAFF4Volume(Reports.report):
             filename = "file://%s/%s" % (config.UPLOADDIR, f)
             volumes = aff4.load_volume(filename)
             result.row("%s" % volumes)
+            loaded_volumes.extend(volumes)
 
         fsfd = DBFS(query['case'])
         base_dir = os.path.basename(filenames[0])
-        
-        for obj_id in range(max_obj_id, aff4.oracle.max_urn_id()+1):
-            urn = aff4.oracle.get_urn_by_id(obj_id)
-            if urn:
+
+        ## FIXME - record the fact that these volumes are loaded
+        ## already into this case...
+
+        ## Load all the objects inside the volumes
+        for v in loaded_volumes:
+            for urn in aff4.oracle.resolve_list(v, AFF4_CONTAINS):
                 type = aff4.oracle.resolve(urn, AFF4_TYPE)
                 if type in SUPPORTED_STREAMS:
                     if "/" in urn:
@@ -470,9 +309,9 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-#    test_file = '/testimages/http.pcap'
+    test_file = 'http.pcap'
 #    test_file = '/testimages/pyflag_stdimage_0.5.e01'
-    test_file = '/testimages/stdcapture_0.4.pcap.e01'
+#    test_file = 'stdcapture_0.4.pcap.e01'
 
     def test01CaseCreation(self):
         env = pyflagsh.environment(case=self.test_case)
@@ -489,11 +328,11 @@ class AFF4LoaderTest(unittest.TestCase):
             pyflagsh.shell_execv(command='scan', env=env,
                                  argv=['*', 'PartitionScanner',
                                        'FilesystemLoader', 'PCAPScanner',
-                                       'HTTP2Scanner', 'GZScan'])
+                                       'HTTPScanner', 'GZScan'])
             
-        fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
-        fd.write("hello world")
-        fd.close()
+        #fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
+        #fd.write("hello world")
+        #fd.close()
 
 
 import atexit

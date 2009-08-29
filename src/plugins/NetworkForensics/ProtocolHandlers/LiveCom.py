@@ -79,13 +79,14 @@ import pyflag.DB as DB
 import pyflag.Scanner as Scanner
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
-import re,cgi
+import re,cgi,pdb
 import pyflag.pyflaglog as pyflaglog
 import textwrap
 import pyflag.HTMLUI as HTMLUI
 import pyflag.Registry as Registry
 import pyflag.Graph as Graph
 import pyflag.Time as Time
+import pyflag.CacheManager as CacheManager
 
 class HTMLStringType(StringType):
     """ A ColumnType which sanitises its input for HTML.
@@ -128,7 +129,6 @@ class WebMailTable(FlagFramework.CaseTable):
     name = 'webmail_messages'
     columns = [
         [ AFF4URN, {} ],
-        [ AFF4URN, dict(column = 'parent_inode_id')],
         [ StringType, dict(name="Service", column='service')],
         [ StringType, dict(name='Type', column='type')],
         [ HTMLStringType, dict(name='From', column='From')],
@@ -150,211 +150,200 @@ class WebMailAttachmentTable(FlagFramework.CaseTable):
         [ StringType, dict(name = "URL", column='url')],
         ]
 
-class LiveTables(FlagFramework.EventHandler):
-    def create(self, dbh, case):
-        ## This table keeps a record of http objects which may be used
-        ## to assist with rendering. Often static content on web sites
-        ## is cached for a long time in users browsers. This means
-        ## that they are not requested by the browser at all and this
-        ## causes problems when reconstructing the pages. This table
-        ## allows us to maintain our own cache of such objects which
-        ## we can download by ourselves when needed.
-        dbh.execute("""CREATE table if not exists `http_sundry` (
-        `id` int not null auto_increment,
-        `url` VARCHAR(500),
-        `present` enum('yes', 'no') default 'no',
-        primary key (`id`))""")
-
 import fnmatch
 
 class HotmailScanner(Scanner.GenScanFactory):
     """ Detects Live.com/Hotmail web mail sessions """
     default = True
-    depends = ['TypeScan', 'HTTPScanner']
+    depends = ['HTTPScanner']
     group = 'NetworkScanners'
+    service = 'Hotmail Classic'
+    message = ''
 
-    def multiple_inode_reset(self, inode_glob):
-        Scanner.GenScanFactory.multiple_inode_reset(self, inode_glob)
-        dbh = DB.DBO(self.case)
-        sql = fnmatch.translate(inode_glob)
-        dbh.delete("webmail_messages", where="inode_id in (select inode_id from inode where inode rlike %r)" % sql) 
-    
-    class Scan(Scanner.StoreAndScanType):
-        types = (
-            'text/html',
-            )
-        parser = None
-        service = "Hotmail"
+    def fixup_page(self, result, tag_class):
+        """ Given the parse tree in root, fix up the page so it looks
+        as close as possible to the way it should.
+        """
+        if not result.get('message'): return
+        ## We have to inject the message into the edit area:
+        edit_area = self.parser.root.find("div", {"class":"EditArea"}) or \
+                    self.parser.root.find("div",{"id":"MsgContainer"}) or \
+                    self.parser.root.find("textarea",{"id":"fMessageBody"})
+        if edit_area:
+            parser = HTML.HTMLParser(tag_class = tag_class)
+            parser.feed(HTML.decode(result['message']))
+            parser.close()
+            result = parser.root.__str__()
+            result = textwrap.fill(result)
+            edit_area.prune()
+            edit_area.add_child(result)
+            edit_area.name = 'div'
 
-        def boring(self, data=''):
-            ## We dont think its boring if our base class does not:
-            ## And the data contains '<title>\s+Windows Live' in the top.
-            if not Scanner.StoreAndScanType.boring(self, data) and \
-                   re.search("<title>\s+Windows Live", data):
-                   ## Make a new parser:
-                if not self.parser:
-                    self.parser =  HTML.HTMLParser(verbose=0)
-                return False
+    def scan(self, fd, factories, type, mime):
+        if "HTML" in type:
+            data = fd.read(1024)
+            if not re.search("<title>\s+Windows Live", data): return
 
-            return True
-
-        def process(self, data):
-            Scanner.StoreAndScanType.process(self, data)
-            ## Feed our parser some more:
-            if not self.boring_status:
+            ## Ok - we know its a Live page
+            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail processing" % fd.urn)
+            self.parser =  HTML.HTMLParser(verbose=0)
+            self.parser.feed(data.decode("utf8","ignore"))
+            
+            while len(data)>0:
+                data = fd.read(1024)
                 self.parser.feed(data.decode("utf8","ignore"))
                 ## Get all the tokens
                 while self.parser.next_token(True): pass
 
-        def external_process(self, fd):
-            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail processing" % self.fd.inode)
             ## Now we should be able to parse the data out:
             self.process_send_message(fd)
             self.process_editread(fd)
             self.process_readmessage(fd)
-            self.process_mail_listing()
+            self.process_mail_listing(fd)
 
-        def process_mail_listing(self):
-            """ This looks for the listing in the mail box """
-            table = self.parser.root.find("table",{"class":"ItemListContentTable InboxTable"})
-            if not table: return False
-            
-            result = {'type': 'Listed', 'message': table}
+    def process_mail_listing(self, fd):
+        """ This looks for the listing in the mail box """
+        table = self.parser.root.find("table",{"class":"ItemListContentTable InboxTable"})
+        if not table: return False
 
-            mail_box = self.parser.root.find("li", {"class":"FolderItemSelected"})
+        result = {'type': 'Listed', 'message': table}
+
+        mail_box = self.parser.root.find("li", {"class":"FolderItemSelected"})
+        if mail_box:
+            mail_box = mail_box.find("span")
             if mail_box:
-                mail_box = mail_box.find("span")
-                if mail_box:
-                    result['From'] = mail_box.innerHTML()
+                result['From'] = mail_box.innerHTML()
 
-            title = self.parser.root.find("a",{"class":"uxp_hdr_meLink"})
-            if title:
-                result['To'] = title.innerHTML()
+        title = self.parser.root.find("a",{"class":"uxp_hdr_meLink"})
+        if title:
+            result['To'] = title.innerHTML()
 
-            return self.insert_message(result, inode_template = "l%s")
+        return self.insert_message(fd, result, inode_template = "l%s")
 
 
-        def process_send_message(self,fd):
-            ## Check to see if this is a POST request (i.e. mail is
-            ## sent to the server):
-            dbh = DB.DBO(self.case)
-            dbh.execute("select `key`,`value` from http_parameters where inode_id = %r", self.fd.inode_id)
-            query = dict([(r['key'].lower(),r['value']) for r in dbh])
-            result = {'type':'Edit Sent' }
-            for field, pattern in [('To','fto'),
-                                   ('From','ffrom'),
-                                   ('CC','fcc'),
-                                   ('BCC', 'fbcc'),
-                                   ('subject', 'fsubject'),
-                                   ('message', 'fmessagebody')]:
-                if query.has_key(pattern):
-                    result[field] = query[pattern]
+    def process_send_message(self,fd):
+        ## Check to see if this is a POST request (i.e. mail is
+        ## sent to the server):
+        dbh = DB.DBO(self.case)
+        dbh.execute("select `key`,`value` from http_parameters where inode_id = %r", fd.inode_id)
+        query = dict([(r['key'].lower(),r['value']) for r in dbh])
+        result = {'type':'Edit Sent' }
+        for field, pattern in [('To','fto'),
+                               ('From','ffrom'),
+                               ('CC','fcc'),
+                               ('BCC', 'fbcc'),
+                               ('subject', 'fsubject'),
+                               ('message', 'fmessagebody')]:
+            if query.has_key(pattern):
+                result[field] = query[pattern]
 
-            if len(result.keys())>2:
-                return self.insert_message(result)
-            else: return False
+        if len(result.keys())>2:
+            return self.insert_message(fd, result)
+        else: return False
 
-        def process_readmessage(self,fd):
-            result = {'type': 'Read', 'message':''}
-            root = self.parser.root
+    def process_readmessage(self,fd):
+        result = {'type': 'Read', 'message':''}
+        root = self.parser.root
 
-            tag = root.find('div', {'class':'ReadMsgContainer'})
-            if not tag: return
+        tag = root.find('div', {'class':'ReadMsgContainer'})
+        if not tag: return
 
-            ## Find the subject:
-            sbj = tag.find('td', {'class':'ReadMsgSubject'})
-            if sbj: result['subject'] = HTML.decode_entity(sbj.innerHTML())
+        ## Find the subject:
+        sbj = tag.find('td', {'class':'ReadMsgSubject'})
+        if sbj: result['subject'] = HTML.decode_entity(sbj.innerHTML())
 
-            ## Fill in all the other fields:
-            context = None
-            for td in tag.search('td'):
-                data = td.innerHTML()
-                if context:
-                    result[context] = HTML.decode_entity(data)
-                    context = None
-                
-                if data.lower().startswith('from:'):
-                    context = 'From'
-                elif data.lower().startswith('to:'):
-                    context = 'To'
-                elif data.lower().startswith('sent:'):
-                    context = 'sent'
+        ## Fill in all the other fields:
+        context = None
+        for td in tag.search('td'):
+            data = td.innerHTML()
+            if context:
+                result[context] = HTML.decode_entity(data)
+                context = None
 
-            ## Now the message:
-            ## On newer sites its injected using script:
-            for s in root.search('script'):
-                m=re.match("document\.getElementById\(\"MsgContainer\"\)\.innerHTML='([^']*)'", s.innerHTML())
-                if m:
-                    result['message'] += HTML.decode_unicode(m.group(1).decode("string_escape"))
-                    break
+            if data.lower().startswith('from:'):
+                context = 'From'
+            elif data.lower().startswith('to:'):
+                context = 'To'
+            elif data.lower().startswith('sent:'):
+                context = 'sent'
 
-            try:
-                result['sent'] = Time.parse(result['sent'])
-            except: pass
+        ## Now the message:
+        ## On newer sites its injected using script:
+        for s in root.search('script'):
+            m=re.match("document\.getElementById\(\"MsgContainer\"\)\.innerHTML='([^']*)'", s.innerHTML())
+            if m:
+                result['message'] += HTML.decode_unicode(m.group(1).decode("string_escape"))
+                break
 
-            return self.insert_message(result)            
+        try:
+            result['sent'] = Time.parse(result['sent'])
+        except: pass
 
-        def process_editread(self, fd):
-            ## Find the ComposeHeader table:
-            result = {'type':'Edit Read'}
+        return self.insert_message(fd, result)            
 
-            root = self.parser.root
-            tag = root.find('table', {"class":'ComposeHeader'})
-            if not tag:
-                return
+    def process_editread(self, fd):
+        ## Find the ComposeHeader table:
+        result = {'type':'Edit Read'}
 
-            ## Find the From:
-            row = tag.find( 'select', dict(name = 'ffrom'))
-            if row:
-                option = row.find('option', dict(selected='.*'))
-                result['From'] = HTML.decode_entity(option['value']) 
+        root = self.parser.root
+        tag = root.find('table', {"class":'ComposeHeader'})
+        if not tag:
+            return
 
-            for field, pattern in [('To','fto'),
-                                   ('CC','fcc'),
-                                   ('BCC', 'fbcc'),
-                                   ('subject', 'fsubject')]:
-                tmp = tag.find('input', dict(name = pattern))
-                if tmp:
-                    result[field] = HTML.decode_entity(tmp['value'])
-            
-            ## Now extract the content of the email:
-            result['message'] = ''
+        ## Find the From:
+        row = tag.find( 'select', dict(name = 'ffrom'))
+        if row:
+            option = row.find('option', dict(selected='.*'))
+            result['From'] = HTML.decode_entity(option['value']) 
 
-            ## Sometimes the message is found in the EditArea div:
-            div = root.find('div', dict(id='EditArea'))
-            if div:
-                result['message'] += div.innerHTML()
+        for field, pattern in [('To','fto'),
+                               ('CC','fcc'),
+                               ('BCC', 'fbcc'),
+                               ('subject', 'fsubject')]:
+            tmp = tag.find('input', dict(name = pattern))
+            if tmp:
+                result[field] = HTML.decode_entity(tmp['value'])
 
-            ## On newer sites its injected using script:
-            for s in root.search('script'):
-                m=re.match("document\.getElementById\(\"fEditArea\"\)\.innerHTML='([^']*)'", s.innerHTML())
-                if m:
-                    result['message'] += m.group(1).decode("string_escape")
-                    break
+        ## Now extract the content of the email:
+        result['message'] = ''
 
-            return self.insert_message(result)
-            
-        def insert_message(self, result, inode_template="l%s"):
-            dbh = DB.DBO(self.case)
+        ## Sometimes the message is found in the EditArea div:
+        div = root.find('div', dict(id='EditArea'))
+        if div:
+            result['message'] += div.innerHTML()
 
-            dbh.execute("select mtime from inode where inode_id = %r" , self.fd.inode_id)
-            row = dbh.fetch()
+        ## On newer sites its injected using script:
+        for s in root.search('script'):
+            m=re.match("document\.getElementById\(\"fEditArea\"\)\.innerHTML='([^']*)'", s.innerHTML())
+            if m:
+                result['message'] += m.group(1).decode("string_escape")
+                break
 
-            try:
-                new_inode = inode_template % self.fd.inode_id
-            except: new_inode = inode_template
+        return self.insert_message(fd, result)
 
-            inode_id = self.ddfs.VFSCreate(self.fd.inode,
-                                           new_inode,
-                                           "Message", mtime = row['mtime'],
-                                           _fast = True)
+    def insert_message(self, fd, result, inode_template="l%s"):
+        dbh = DB.DBO(self.case)
 
-            dbh.insert('webmail_messages', service=self.service,
-                       parent_inode_id = self.fd.inode_id,
-                       inode_id = inode_id,
-                       **result)
-            
-            return inode_id
+        dbh.execute("select mtime from vfs where inode_id = %r" , fd.inode_id)
+        row = dbh.fetch()
+
+        try:
+            new_inode = inode_template %  fd.inode_id
+        except: new_inode = inode_template
+
+        live_obj = CacheManager.AFF4_MANAGER.create_cache_fd(
+            fd.case, "/".join((fd.urn, "Message")),
+            inherited = fd.urn)
+
+        self.fixup_page(result, HTML.SanitizingTag)
+        
+        live_obj.write(self.parser.root.innerHTML())
+        result['service'] = self.service
+        live_obj.insert_to_table('webmail_messages', result)
+
+        live_obj.close()
+
+        return live_obj.inode_id
 
 class Live20Scanner(HotmailScanner):
     """ Parse Hotmail Web 2.0 Session """
@@ -801,13 +790,15 @@ class LiveMailViewer(FileSystem.StringIOFile):
         result.toolbar(cb = print_cb, text="Print", icon="printer.png", pane='new')
         
 ## PreCanned reports
-class AllWebMail(Registry.PreCanned):
+class AllWebMail(Reports.PreCannedCaseTableReports):
     report="Browse WebMail Messages"
     family="Network Forensics"
     args = {"order":0, "direction":1, "filter":"Type != Listed"}
+    default_table = 'WebMailTable'
     description = "View all Webmail messages"
     name = "/Network Forensics/Web Applications/Webmail"
-
+    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type' ]
+    
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh
 import pyflag.tests as tests

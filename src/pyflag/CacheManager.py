@@ -458,7 +458,8 @@ class AFF4Manager(DirectoryCacheManager):
 
         return volume_urn
         
-    def create_cache_fd(self, case, path, include_in_VFS=True, **kwargs):
+    def create_cache_fd(self, case, path, include_in_VFS=True,
+                        inherited = None,**kwargs):
         """ Creates a new non-seakable AFF4 Image stream that can be
         written on.
         
@@ -481,7 +482,10 @@ class AFF4Manager(DirectoryCacheManager):
         fd.case = case
         if include_in_VFS:
             fd.include_in_VFS = kwargs
- 
+
+        if inherited:
+            aff4.oracle.set(fd.urn, AFF4_INHERIT, inherited)
+            
         return fd
 
     def create_cache_map(self, case, path, include_in_VFS=True, size=0,

@@ -32,14 +32,30 @@ import pyflag.CacheManager as CacheManager
 from pyflag.aff4.aff4_attributes import *
 import pyflag.Scanner as Scanner
 import pyflag.pyflaglog as pyflaglog
-from pyflag.FlagFramework import make_tld
+from pyflag.FlagFramework import make_tld, CaseTable
+import pyflag.FlagFramework as FlagFramework
 import zlib, gzip
 import pyflag.Reports as Reports
 
-class HTTP2Scanner(Scanner.GenScanFactory):
+class RelaxedGzip(gzip.GzipFile):
+    """ A variant of gzip which is more relaxed about errors """
+    def _read_eof(self):
+        """ Dont check crc """
+        pass
+
+    def _read(self, size=1024):
+        """ Trap possible decompression errors """
+        try:
+            return gzip.GzipFile._read(self, size)
+        except EOFError: raise
+        except Exception,e:
+            return ''
+
+class HTTPScanner(Scanner.GenScanFactory):
     """ Scan HTTP Streams """
     order = 2
     group = 'NetworkScanners'
+    depends = [ 'PCAPScanner' ]
 
     def scan(self, fd, factories, type, mime):
         if "HTTP Request stream" in type:
@@ -120,7 +136,7 @@ class HTTP2Scanner(Scanner.GenScanFactory):
             if headers['content-encoding'] == 'gzip':
                 fd.close()
                 fd.seek(0)
-                gzip_fd = gzip.GzipFile(fileobj = fd, mode='rb')
+                gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
                 http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
                     fd.case, '/'.join((fd.urn, "decompressed")),
                     target = fd.urn, inherited = fd.urn)
@@ -216,33 +232,134 @@ class HTTP2Scanner(Scanner.GenScanFactory):
                                        factories)
             if not parse: break
 
-            
-    def identify(self):
-        offset = self.fd.tell()
-        ## Currently the HTTP scanner needs both sides of the
-        ## conversation to work properly. So we must have a request
-        ## header. We try to resync if we are given a partial HTTP/1.1
-        ## stream by looking ahead for a HTTP request. We check the
-        ## first 1024 bytes.
-        header = self.fd.read(1024)
-        m = self.request_re.search(header)
-        if m:
-            self.fd.seek(offset+m.start())
-            return True
-
-        m = self.response_re.search(header)
-        if m:
-            self.fd.seek(offset+m.start())
-            return True
-            
-        return False
-
 class HTTPRequests(Reports.PreCannedCaseTableReports):
     family = 'Network Forensics'
     description = 'View URLs requested'
     name = '/Network Forensics/URLs'
     default_table = 'HTTPCaseTable'
+    columns = ['Timestamp', 'URN', 'TLD', 'URL',]
+
+class AttachmentColumnType(IntegerType):
+    """ View file Attachment in HTTP parameters """
+    
+    def __init__(self, **kwargs):
+        kwargs['name']="Attachment"
+        kwargs['column'] = 'indirect'
+        link = FlagFramework.query_type(case=kwargs.get('case'),
+                                        family='Disk Forensics',
+                                        report='ViewFile',
+                                        mode = 'Summary',
+                                        __target__ = 'inode_id')
+        kwargs['link'] = link
+        kwargs['link_pane'] = 'popup'
+        IntegerType.__init__(self, **kwargs)
+
+class HTTPParameterCaseTable(CaseTable):
+    """ HTTP Parameters - Stores request details """
+    name = 'http_parameters'
+    columns = [
+        [ AFF4URN, {} ],
+        [ StringType, dict(name = 'Parameter', column = 'key') ],
+        [ StringType, dict(name = 'Value', column = 'value')],
+        [ AttachmentColumnType, {}],
+        ]
+    index = [ 'inode_id', 'key' ]
+
+class HTTPCaseTable(CaseTable):
+    """ HTTP Table - Stores all HTTP transactions """
+    name = 'http'
+    columns = [
+        [ AFF4URN, {} ],
+        [ IntegerType, dict(name = 'Parent', column = 'parent') ],
+        [ PacketType, dict(name = 'Request Packet', column='request_packet') ],
+        [ StringType, dict(name='Method', column='method', width=10)],
+        [ StringType, dict(name='URL', column='url', width=2000)],
+        [ IntegerType, dict(name = "Response Packet", column='response_packet')],
+        [ IntegerType, dict(name = 'Status', column='status')],
+        [ StringType, dict(name='Content Type', column='content_type')],
+        [ StringType, dict(name='Referrer', column='referrer', width=500)],
+        [ TimestampType, dict(name='Date', column='date')],
+        [ StringType, dict(name='Host', column='host')],
+        [ StringType, dict(name='User Agent', column='useragent')],
+        [ StringType, dict(name='TLD', column='tld', width=50)],
+        ]
+    index = ['url','inode_id','tld','domain']
+    extras = [ [PCAPTime, dict(name='Timestamp', column='response_packet') ], ]
+
+
+import pyflag.Magic as Magic
+
+class HTTPRequestMagic(Magic.Magic):
+    """ Identify HTTP Requests """
+    type = "HTTP Request stream"
+    mime = "protocol/x-http-request"
+
+    regex_rules = [
+        ( "[A-Z]+ [^ ]{1,600} HTTP/1.", (0,0)),
+        ]
+    
+    samples = [
+        ( 100, "GET /online.gif?icq=52700562&img=3 HTTP/1.1"),
+        ( 100, "GET http://www.google.com/ HTTP/1.0"),
+        ]
+
+class HTTPResponseMagic(Magic.Magic):
+    """ Identify HTTP Response streams """
+    type = "HTTP Response stream"
+    mime = "protocol/x-http-response"
+    default_score = 80
+
+    regex_rules = [
+        ## If we find one header then maybe
+        ( "HTTP/1.[01] [0-9]{1,3}", (0,10)),
+        ## If we find more headers, we definitiely are looking at HTTP stream
+        ( "\nHTTP/1.[01] [0-9]{1,3}", (1,1000))
+        ]
+
+    samples = [
+        ( 160, \
+"""HTTP/1.1 301 Moved Permanently
+
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<HTML><HEAD>
+<TITLE>301 Moved Permanently</TITLE>
+</HEAD><BODY>
+
+HTTP/1.1 301 Moved Permanently
+"""),
+        ]
+
+class HTTPMagic(Magic.Magic):
+    """ HTTP Objects have content types within the protocol. These may be wrong though so we need to treat them carefully.
+    """
+    def score(self, data, case, inode_id):
+        if case:
+            dbh = DB.DBO(case)
+            dbh.execute("select content_type from http where inode_id = %r", inode_id)
+            row = dbh.fetch()
+            if row:
+                self.type = "HTTP %s" % row['content_type']
+                self.mime = row['content_type']
+                return 40
+
+        return 0
+
+class HTTPTLDRequests(Reports.PreCannedCaseTableReports):
+    family = ' Network Forensics'
+    description = 'View TLDs requested'
+    name = '/Network Forensics/Communications/Web/Domains'
+    default_table = 'HTTPCaseTable'
     columns = ['Timestamp', 'URN', 'URL', 'InodeTable.Size', 'TLD']
+    args = {'_hidden':4}
+    def display(self, query,result):
+        if not query.has_key('grouped'):
+            self.options = {'groupby':'TLD',
+                            'where': 'content_type like "%html%"'}
+        else:
+            self.options = {'where': 'content_type like "%html%"'}
+            
+        result.defaults.set('grouped',1)
+        Reports.PreCannedCaseTableReports.display(self, query, result)
 
 ## UnitTests:
 import unittest
@@ -269,3 +386,4 @@ class HTTPTests(tests.ScannerTest):
         row = dbh.fetch()
         print "Number of HTTP transfers found %s" % row['total']
         self.failIf(row['total']==0,"Count not find any HTTP transfers?")
+
