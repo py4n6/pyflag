@@ -1809,6 +1809,19 @@ class Map(FileLikeObject):
         finally:
             oracle.cache_return(backing_fd)
 
+    def readline(self, size=1024):
+        offset = self.readptr
+        result = self.read(size)
+        try:
+            result = result[:result.index("\n")]
+            offset += len(result)+1
+        except ValueError:
+            offset += len(result)
+
+        self.seek(offset)
+        
+        return result
+
     def write_from(self, target_urn, target_offset, target_length):
         """ Adds the next chunk from this target_urn. This advances
         the readptr.

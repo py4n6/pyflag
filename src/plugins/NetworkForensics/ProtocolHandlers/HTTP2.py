@@ -194,7 +194,72 @@ class HTTPScanner(Scanner.GenScanFactory):
             pass
 
         return http_object
+
+    def process_cookies(self, request, request_body):
+        """ Merge in cookies if possible """
+        try:
+            cookie = request['cookie']
+            C = Cookie.SimpleCookie()
+            C.load(cookie)
+            for k in C.keys():
+                request_body.insert_to_table('http_parameters',
+                                             dict(inode_id = request_body.inode_id,
+                                                  key = k,
+                                                  value = C[k].value))
+                request_body.dirty = 1
+        except (KeyError, Cookie.CookieError):
+            pass
+
+    def process_parameter(self, key, value, request_body):
+        ## Non printable keys are probably not keys at all.
+        if re.match("[^a-z0-9A-Z_]+",key): return
+        try:
+            value = value.value
+        except: pass
+
+        ## Deal with potentially very large uploads:
+        if hasattr(value,'filename') and value.filename:
+            new_urn = request_body.urn + "/" + value.filename
+            
+            ## dump the file to the AFF4 volume
+            fd = CacheManager.AFF4_MANAGER.create_cache_fd(fd.case, new_urn,
+                                                           inherited = request_body.urn)
+            fd.write(value.value)
+            fd.close()
+        else:
+            request_body.insert_to_table('http_parameters',
+                                         dict(inode_id = request_body.inode_id,
+                                              key = key,
+                                              value = value))
+            request_body.dirty = 1
+
+    def process_post_body(self, request, request_body):
+        try:
+            base, query = request['url'].split('?',1)
+        except ValueError:
+            base = request['url']
+            query = ''
+        except KeyError:
+            return
+
+        env = dict(REQUEST_METHOD=request['method'],
+                   CONTENT_TYPE=request.get('content-type',''),
+                   CONTENT_LENGTH=request_body.size,
+                   QUERY_STRING=query)
         
+        result =cgi.FieldStorage(environ = env, fp = request_body)
+        self.count = 1
+        if type(result.value)==str:
+            class dummy:
+                value = result.value
+                filename = "body"
+
+            self.process_parameter("body", dummy(), request_body)
+        else:
+            for key in result:
+                self.process_parameter(key, result[key], request_body)
+
+
     def parse(self, forward_fd, reverse_fd, factories):
         while True:
             request = { 'url':'/unknown_request_%s' % forward_fd.inode_id,
@@ -206,11 +271,11 @@ class HTTPScanner(Scanner.GenScanFactory):
             if self.read_request(request, forward_fd):
                 parse = True
                 request_body = self.skip_body(request, forward_fd)
-                if request_body.size > 0:
-                    request_body.close()
-                    Scanner.scan_inode(self.case, request_body.inode_id,
-                                       factories)
-                    
+                request_body.dirty = 0
+                self.process_cookies(request, request_body)
+                self.process_post_body(request, request_body)
+                if request_body.size > 0 or request_body.dirty:
+                    request_body.close()                    
                     
             if self.read_response(response, reverse_fd):
                 parse = True

@@ -806,9 +806,8 @@ import pyflag.tests as tests
 class HotmailTests(tests.ScannerTest):
     """ Tests Hotmail Scanner """
     test_case = "PyFlagTestCase"
-    test_file = 'live.com.pcap.e01'
-    subsystem = "EWF"
-    fstype = "PCAP Filesystem"
+#    test_file = 'live.com.pcap.e01'
+    test_file = 'private/livecom.pcap'
 
     def test01HotmailScanner(self):
         """ Test Hotmail Scanner """

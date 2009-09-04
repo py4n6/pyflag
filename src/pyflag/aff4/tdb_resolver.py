@@ -173,6 +173,10 @@ class TDBResolver(aff4.Resolver):
         key = self.calculate_key(uri, attribute)
         value = "%s" % value
 
+        ## Check if its already been set
+        old_value = self.resolve(uri, attribute)
+        if old_value == value: return
+
         ## This is the place at the end of the file where we put the
         ## new data:
         self.data_store.seek(0,2)
@@ -190,6 +194,7 @@ class TDBResolver(aff4.Resolver):
             cb(uri, attribute, value)
     
     def add(self, uri, attribute, value):
+        value = value.__str__()
         ## Check if we need to add this value
         for x in self.resolve_list(uri, attribute):
             if x==value: return

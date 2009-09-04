@@ -358,11 +358,7 @@ class iiless(iless):
     def execute(self):
         dbh = DB.DBO(self.environment._CASE)
         for inode_id in self.args:
-            dbh.execute("select inode from inode where inode_id = %r ", inode_id)
-            row = dbh.fetch()
-            if not row['inode']: continue
-
-            fd=self.environment._FS.open(inode=row['inode'])
+            fd=self.environment._FS.open(inode_id=inode_id)
             pipe=os.popen("less","w")
             while 1:
                 data=fd.read(10000)
@@ -370,7 +366,7 @@ class iiless(iless):
                 pipe.write(data)
                 
             pipe.close()
-            yield 'Viewing of %s with less successful' % row['inode']
+            yield 'Viewing of inode_id %s with less successful' % inode_id
 
 
     
