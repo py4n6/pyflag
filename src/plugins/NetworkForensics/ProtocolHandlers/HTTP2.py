@@ -195,22 +195,22 @@ class HTTPScanner(Scanner.GenScanFactory):
 
         return http_object
 
-    def process_cookies(self, request, request_body):
+    def process_cookies(self, request, target):
         """ Merge in cookies if possible """
         try:
             cookie = request['cookie']
             C = Cookie.SimpleCookie()
             C.load(cookie)
             for k in C.keys():
-                request_body.insert_to_table('http_parameters',
-                                             dict(inode_id = request_body.inode_id,
-                                                  key = k,
-                                                  value = C[k].value))
-                request_body.dirty = 1
+                target.insert_to_table('http_parameters',
+                                       dict(key = k,
+                                            value = C[k].value))
+                target.dirty = 1
         except (KeyError, Cookie.CookieError):
             pass
 
-    def process_parameter(self, key, value, request_body):
+    def process_parameter(self, key, value, target):
+        """ All parameters are attached to target """
         ## Non printable keys are probably not keys at all.
         if re.match("[^a-z0-9A-Z_]+",key): return
         try:
@@ -219,21 +219,20 @@ class HTTPScanner(Scanner.GenScanFactory):
 
         ## Deal with potentially very large uploads:
         if hasattr(value,'filename') and value.filename:
-            new_urn = request_body.urn + "/" + value.filename
+            new_urn = target.urn + "/" + value.filename
             
             ## dump the file to the AFF4 volume
             fd = CacheManager.AFF4_MANAGER.create_cache_fd(fd.case, new_urn,
-                                                           inherited = request_body.urn)
+                                                           inherited = target.urn)
             fd.write(value.value)
             fd.close()
         else:
-            request_body.insert_to_table('http_parameters',
-                                         dict(inode_id = request_body.inode_id,
-                                              key = key,
-                                              value = value))
-            request_body.dirty = 1
+            target.insert_to_table('http_parameters',
+                                   dict(key = key,
+                                        value = value))
+            target.dirty = 1
 
-    def process_post_body(self, request, request_body):
+    def process_post_body(self, request, request_body, target):
         try:
             base, query = request['url'].split('?',1)
         except ValueError:
@@ -254,47 +253,55 @@ class HTTPScanner(Scanner.GenScanFactory):
                 value = result.value
                 filename = "body"
 
-            self.process_parameter("body", dummy(), request_body)
+            self.process_parameter("body", dummy(), target)
         else:
             for key in result:
-                self.process_parameter(key, result[key], request_body)
+                self.process_parameter(key, result[key], target)
 
-
+            self.process_parameter("request_urn", request_body.urn, target)
+                
     def parse(self, forward_fd, reverse_fd, factories):
         while True:
             request = { 'url':'/unknown_request_%s' % forward_fd.inode_id,
                         'method': 'GET' }
             response = {}
             parse = False
+            request_body = response_body = None
             
-            ## Is this a request?
+            ## First parse both request and response
             if self.read_request(request, forward_fd):
                 parse = True
                 request_body = self.skip_body(request, forward_fd)
                 request_body.dirty = 0
-                self.process_cookies(request, request_body)
-                self.process_post_body(request, request_body)
-                if request_body.size > 0 or request_body.dirty:
-                    request_body.close()                    
-                    
+
             if self.read_response(response, reverse_fd):
                 parse = True
                 response_body = self.skip_body(response, reverse_fd)
-                if response_body.size > 0:
-                    ## Store information about the object in the http table:
-                    response_body.insert_to_table("http",
-                                                  dict(method = request.get('method'),
-                                                       url = request.get('url'),
-                                                       status = response.get('HTTP_code'),
-                                                       content_type = response.get('content-type'),
-                                                       useragent = request.get('user-agent'),
-                                                       host = request.get('host'),
-                                                       tld = make_tld(request.get('host',''))
-                                                       )
-                                                  )
-                    response_body.close()
-                    Scanner.scan_inode(self.case, response_body.inode_id,
-                                       factories)
+
+            ## We hang all the parameters on the response object
+            ## (i.e. file attachment, post parameters, cookies)
+            if response_body and request_body:
+                self.process_cookies(request, response_body)
+                self.process_post_body(request, request_body, response_body)
+                if request_body.size > 0:
+                    request_body.close()
+                
+            if response_body and response_body.size > 0:
+                ## Store information about the object in the http table:
+                response_body.insert_to_table("http",
+                                              dict(method = request.get('method'),
+                                                   url = request.get('url'),
+                                                   status = response.get('HTTP_code'),
+                                                   content_type = response.get('content-type'),
+                                                   useragent = request.get('user-agent'),
+                                                   host = request.get('host'),
+                                                   tld = make_tld(request.get('host',''))
+                                                   )
+                                              )
+                response_body.close()
+                Scanner.scan_inode(self.case, response_body.inode_id,
+                                   factories)
+
             if not parse: break
 
 class HTTPRequests(Reports.PreCannedCaseTableReports):

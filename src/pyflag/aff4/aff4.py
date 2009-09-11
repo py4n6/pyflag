@@ -298,17 +298,20 @@ class AFFObject(object):
         return result
 
     def close(self):
-        if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == 'combined': return
+        pass
 
-        ## Write the properties file
-        container = oracle.resolve(self.urn, AFF4_STORED)
-        volume = oracle.open(container,'w')
-        try:
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn),
-                            compress_type = ZIP_DEFLATED)
-        finally:
-            oracle.cache_return(volume)
+#     def close(self):
+#         if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == 'combined': return
+
+#         ## Write the properties file
+#         container = oracle.resolve(self.urn, AFF4_STORED)
+#         volume = oracle.open(container,'w')
+#         try:
+#             volume.writestr(fully_qualified_name("properties", self.urn),
+#                             oracle.export(self.urn),
+#                             compress_type = ZIP_DEFLATED)
+#         finally:
+#             oracle.cache_return(volume)
             
 
 class AFFVolume(AFFObject):
@@ -1280,14 +1283,8 @@ class ZipVolume(RAWVolume):
         """
         ## Is this file dirty?
         if oracle.resolve(self.urn, AFF4_VOLATILE_DIRTY):
-            if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == "combined":
-                result = ''
-                for urn in oracle.resolve_list(self.urn, AFF4_CONTAINS):
-                    ## This makes the export absolute
-                    result += oracle.export(urn, prefix = urn +" ")
-            else:
-                result = oracle.export(self.urn)
-                
+            result = oracle.export_volume(self.urn)
+                                          
             ## Store volume properties
             self.writestr("properties", result,
                           compress_type = ZIP_DEFLATED)
@@ -1636,16 +1633,16 @@ class Link(AFFObject):
         
         return AFFObject.finish(self)
 
-    def close(self):
-        ## Make sure we write our properties file
-        stored = oracle.resolve(self.urn, AFF4_STORED)
-        volume = oracle.open(stored, 'w')
-        try:
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn),
-                            compress_type = ZIP_DEFLATED)
-        finally:
-            oracle.cache_return(volume)
+#     def close(self):
+#         ## Make sure we write our properties file
+#         stored = oracle.resolve(self.urn, AFF4_STORED)
+#         volume = oracle.open(stored, 'w')
+#         try:
+#             volume.writestr(fully_qualified_name("properties", self.urn),
+#                             oracle.export(self.urn),
+#                             compress_type = ZIP_DEFLATED)
+#         finally:
+#             oracle.cache_return(volume)
 
 class Map(FileLikeObject):
     """ A Map is an object which presents a transformed view of another

@@ -902,7 +902,6 @@ class IPType(ColumnType, LogParserMixin):
 
     display_hooks = IntegerType.display_hooks[:]
 
-## FIXME - merge all three classes:
 class AFF4URN(IntegerType):
     LogCompatible = False
     def __init__(self, name='URN', column='inode_id', **kwargs):
@@ -911,6 +910,97 @@ class AFF4URN(IntegerType):
 
     def where(self):
         return "!isnull(`%s`.inode_id)" % self.table
+
+import pyflag.Graph as Graph
+import PIL
+import pyflag.CacheManager as CacheManager
+
+class ThumbnailType(AFF4URN):
+    """ A Column showing thumbnails of inodes """
+    def __init__(self, name='Thumbnail', **args ):
+        AFF4URN.__init__(self, name, **args)
+        self.fsfd = FileSystem.DBFS(self.case)
+        self.name = name
+        
+    def select(self):
+        return "%s.inode_id" % self.table
+
+    ## When exporting to html we need to export the thumbnail too:
+    def render_html(self, inode_id, table_renderer):
+        ct=''
+        try:
+            fd = self.fsfd.open(inode_id = inode_id)
+            image = Graph.Thumbnailer(fd, 200)
+            inode_filename, ct, fd = table_renderer.make_archive_filename(inode_id)
+
+            filename, ct, fd = table_renderer.make_archive_filename(inode_id, directory = "thumbnails/")
+        
+            table_renderer.add_file_from_string(filename,
+                                                image.display())
+        except IOError,e:
+            print e
+            return "<a href=%r ><img src='images/broken.png' /></a>" % inode_filename
+
+        AFF4URN.render_html(self, inode_id, table_renderer)
+        table_renderer.add_file_to_archive(inode_id)
+        return DB.expand("<a href=%r type=%r ><img src=%r /></a>",
+                         (inode_filename, ct, filename))
+
+    def render_thumbnail_hook(self, inode_id, row, result):
+        try:
+            fd = self.fsfd.open(inode_id=inode_id)
+            image = PIL.Image.open(fd)
+        except IOError,e:
+            tmp = result.__class__(result)
+            tmp.icon("broken.png")
+            return result.row(tmp, colspan=5)
+
+        width, height = image.size
+
+        ## Calculate the new width and height:
+        new_width = 200
+        new_height = int(float(new_width) / width * height)
+
+        if new_width > width and new_height > height:
+            new_height = height
+            new_width = width
+
+        def show_image(query, result):
+            ## Try to fetch the cached copy:
+            filename = "thumb_%s" % inode_id
+
+            try:
+                ## FIXME - Store cache thumbnail in the AFF4 file:
+                fd = CacheManager.MANAGER.open(self.case, filename)
+                thumbnail = fd.read()
+            except IOError:
+                fd = self.fsfd.open(inode_id=inode_id)
+                fd = cStringIO.StringIO(fd.read(2000000) + "\xff\xd9")
+                image = PIL.Image.open(fd)
+                image = image.convert('RGB')
+                thumbnail = cStringIO.StringIO()
+
+                try:
+                    image.thumbnail((new_width, new_height), PIL.Image.NEAREST)
+                    image.save(thumbnail, 'jpeg')
+                    thumbnail = thumbnail.getvalue()
+                except IOError,e:
+                    print "PIL Error: %s" % e
+                    thumbnail = open("%s/no.png" % (config.IMAGEDIR,),'rb').read()
+
+                CacheManager.MANAGER.create_cache_from_data(self.case, filename, thumbnail)
+                fd = CacheManager.MANAGER.open(self.case, filename)
+                
+            result.result = thumbnail
+            result.content_type = 'image/jpeg'
+            result.decoration = 'raw'
+
+        
+        result.result += "<img width=%s height=%s src='f?callback_stored=%s' />" % (new_width, new_height,
+                                                                result.store_callback(show_image))
+
+    display_hooks = AFF4URN.display_hooks[:] + [render_thumbnail_hook,]
+
 
 class InodeType(AFF4URN):
     pass

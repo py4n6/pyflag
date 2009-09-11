@@ -160,9 +160,10 @@ class HotmailScanner(Scanner.GenScanFactory):
     service = 'Hotmail Classic'
     message = ''
 
-    def fixup_page(self, result, tag_class):
+    def fixup_page(self, outfd, result, tag_class):
         """ Given the parse tree in root, fix up the page so it looks
-        as close as possible to the way it should.
+        as close as possible to the way it should. We write the new
+        page on outfd.
         """
         if not result.get('message'): return
         ## We have to inject the message into the edit area:
@@ -178,6 +179,8 @@ class HotmailScanner(Scanner.GenScanFactory):
             edit_area.prune()
             edit_area.add_child(result)
             edit_area.name = 'div'
+
+        outfd.write(self.parser.root.innerHTML())
 
     def scan(self, fd, factories, type, mime):
         if "HTML" in type:
@@ -335,9 +338,8 @@ class HotmailScanner(Scanner.GenScanFactory):
             fd.case, "/".join((fd.urn, "Message")),
             inherited = fd.urn)
 
-        self.fixup_page(result, HTML.SanitizingTag)
+        self.fixup_page(live_obj, result, HTML.SanitizingTag)
         
-        live_obj.write(self.parser.root.innerHTML())
         result['service'] = self.service
         live_obj.insert_to_table('webmail_messages', result)
 
@@ -345,82 +347,89 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return live_obj.inode_id
 
+import pyflag.Magic as Magic
+
+class Live20Magic(Magic.Magic):
+    """ Identify Live 20 Messages """
+    type = "Hotmail 2.0 AJAX"
+    mime = "protocol/x-http-request"
+    default_score = 100
+
+    regex_rules = [
+        ( "new HM.FppReturnPackage", (0,0)),
+        ]
+    
+    samples = [
+        ( 100, "new HM.FppReturnPackage(0,new HM.InboxUiData(null,null,\"\r\n\r\n\r\n<"),
+        ]
+
 class Live20Scanner(HotmailScanner):
     """ Parse Hotmail Web 2.0 Session """
+    service = "Hotmail 2.0 AJAX"
 
-    class Scan(HotmailScanner.Scan):
-        data = ''
-        types = (
-            '.',)
-
-        def boring(self, data=''):
-            if not Scanner.StoreAndScanType.boring(self, data='') and \
-                   re.match("new HM.FppReturnPackage\(", data):
-                self.data = ''
-                return False
-
-            return True
-
-        def process(self, data):
-            Scanner.StoreAndScanType.process(self, data)            
-            if not self.boring_status:
-                self.data += data
-
-        def finish(self):
-            if self.boring_status: return
-            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail AJAX processing" % self.fd.inode)        
-            m=re.search("HM.InboxUiData\((.+)",self.data)
+    def scan(self, fd, factories, type, mime):
+        if "Hotmail 2.0 AJAX" in type:
+            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail AJAX processing" % fd.inode_id)
+            data = fd.read(1024 * 1024)
+            m=re.search("HM.InboxUiData\((.+)",data)
             if m:
                 string = m.group(1)
                 def a(*x):
                     try:
                         if x[0][2]:
-                            self.process_readmessage(x[0][2])
+                            self.process_readmessage(fd, x[0][2])
                     except IndexError: pass
 
                 ## Now parse the data
                 eval("a(("+string, {}, {'a':a, 'null':0})
 
-        def process_readmessage(self, message):
-            parser =  HTML.HTMLParser(verbose=0)
-            parser.feed(message)
-            parser.close()
+    def fixup_page(self, outfd, result, tag_class):
+        """ Its not really possible to represent AJAX communications
+        properly, so we just make the message here.
+        """
+        message = result.get('message','')
+        outfd.write(message)
 
-            result = {'type': 'Read', 'Message':''}
+    def process_readmessage(self, fd, message):
+        parser =  HTML.HTMLParser(verbose=0)
+        parser.feed(message)
+        parser.close()
 
-            ## Find the subject
-            sbj = parser.root.find('td', {'class':'ReadMsgSubject'})
-            if sbj: result['Subject'] = HTML.decode_entity(sbj.innerHTML())
+        result = {'type': 'Read', 'Message':''}
 
-            context = None
-            for td in parser.root.search('td'):
-                data = td.innerHTML()
-                if context:
-                    result[context] = HTML.decode_entity(data)
-                    context = None
-                
-                if data.lower().startswith('from:'):
-                    context = 'From'
-                elif data.lower().startswith('to:'):
-                    context = 'To'
-                elif data.lower().startswith('sent:'):
-                    context = 'Sent'
+        ## Find the subject
+        sbj = parser.root.find('td', {'class':'ReadMsgSubject'})
+        if sbj: result['Subject'] = HTML.decode_entity(sbj.innerHTML())
 
-            msg = parser.root.find('div', {'class':'ReadMsgContainer'})
-            if msg:
-                result['Message'] = msg.innerHTML()
+        context = None
+        for td in parser.root.search('td'):
+            data = td.innerHTML()
+            if context:
+                result[context] = HTML.decode_entity(data)
+                context = None
+
+            if data.lower().startswith('from:'):
+                context = 'From'
+            elif data.lower().startswith('to:'):
+                context = 'To'
+            elif data.lower().startswith('sent:'):
+                context = 'Sent'
+
+        msg = parser.root.find('div', {'class':'ReadMsgContainer'})
+        if msg:
+            result['message'] = msg.innerHTML()
 
 
-            ## Try to detect the message ID
-            tag = parser.root.find('div', {'mid':'.'})
-            if tag:
-                result['message_id'] = tag['mid']
+        ## Try to detect the message ID
+        tag = parser.root.find('div', {'mid':'.'})
+        if tag:
+            result['message_id'] = tag['mid']
 
-            try:
-                result[context] = Time.parse(result[context])
-            except: pass
+        try:
+            result[context] = Time.parse(result[context])
+        except: pass
 
-            return self.insert_message(result, inode_template = 'l%s')
+        return self.insert_message(fd, result, inode_template = 'l%s')
 
 import os.path
 
@@ -807,8 +816,9 @@ class HotmailTests(tests.ScannerTest):
     """ Tests Hotmail Scanner """
     test_case = "PyFlagTestCase"
 #    test_file = 'live.com.pcap.e01'
-    test_file = 'private/livecom.pcap'
-
+#    test_file = 'private/livecom.pcap'
+    test_file = 'gmail.com.pcap.e01'
+    
     def test01HotmailScanner(self):
         """ Test Hotmail Scanner """
         env = pyflagsh.environment(case=self.test_case)

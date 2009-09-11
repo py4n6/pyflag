@@ -12,8 +12,10 @@ import ctypes.util
 import pdb, sys
 import struct
 from aff4_attributes import *
+import RDF
 
 from os import O_RDWR, O_CREAT
+MAX_KEY = '__MAX'
 
 try:
     libtdb = CDLL("libtdb.so.1")
@@ -58,6 +60,7 @@ class Tdb:
         libtdb.tdb_delete(self.tdb_fh, tdb_data(key, len(key)))
 
     def get(self, key):
+        key = "%s" % key
         result = libtdb.tdb_fetch(self.tdb_fh, tdb_data(key, len(key)))
         if not result.data: return None
         
@@ -107,6 +110,9 @@ class TDBResolver(aff4.Resolver):
     def resolve_id(self, urn):
         return self.get_id(self.urn_db, urn)
 
+    def resolve_urn_from_id(self, id):
+        return self.urn_db.get(id)
+
     def lock(self, uri, mode='r'):
         ## Not implemented
         pass
@@ -114,8 +120,56 @@ class TDBResolver(aff4.Resolver):
     def unlock(self, uri):
         pass
 
+    def export_volume(self, volume_urn):
+        """ Serialize a suitable properties file for the
+        volume_urn. We include all the objects which are contained in
+        the volume.
+        """
+        storage = RDF.Storage(storage_name='hashes',
+                              name='X',
+                              options_string="new='yes',hash-type='memory',dir='.'")
+        model = RDF.Model(storage)
+        
+        for urn in aff4.oracle.resolve_list(volume_urn, AFF4_CONTAINS):
+            try:
+                urn_id = self.get_id(self.urn_db, urn)
+            except ValueError: continue
+            self.export_model(urn, model)
+
+        self.export_model(volume_urn, model)
+        serializer = RDF.Serializer("turtle")
+        return serializer.serialize_model_to_string(model)
+
+    def export_dict(self, uri):
+        """ Return a dict of all keys/values """
+        result = {}
+        for attr in self.attribute_db.list_keys():
+            if attr.startswith("__"): continue
+
+            try:
+                int(attr)
+                continue
+            except: pass
+
+            values = [ v for v in self.resolve_list(uri, attr, follow_inheritence=False) ]
+            if values:
+                result[attr] = values
+        return result
+
+    def export_model(self, uri, model):
+        for attr in self.attribute_db.list_keys():
+            if attr.startswith("__"): continue
+            
+            values = self.resolve_list(uri, attr, follow_inheritence=False)
+            for v in values:
+                statement=RDF.Statement(RDF.Uri(uri),
+                    RDF.Uri(attr),
+                    RDF.Node(v))
+
+                model.add_statement(statement)
+    
     def export(self, uri, prefix=''):
-        """ Export all the properties of uri """
+        """ Export all the properties of uri into the model """
         result = ''
         try:
             urn_id = self.get_id(self.urn_db, uri)
@@ -138,7 +192,7 @@ class TDBResolver(aff4.Resolver):
         return result
 
     def max_urn_id(self):
-        maximum_id = self.urn_db.get("MAX") or 0
+        maximum_id = self.urn_db.get(MAX_KEY) or 0
         return int(maximum_id)
 
     def get_urn_by_id(self, id):
@@ -148,9 +202,9 @@ class TDBResolver(aff4.Resolver):
         """ Given an attribute returns its ID """
         id = tdb.get(attribute)
         if not id:
-            maximum_id = int(tdb.get("MAX") or 0)
+            maximum_id = int(tdb.get(MAX_KEY) or 0)
             id = maximum_id = "%d" % (maximum_id + 1)
-            tdb.store("MAX", maximum_id)
+            tdb.store(MAX_KEY, maximum_id)
             tdb.store(attribute, maximum_id)
             tdb.store(maximum_id, attribute)
         

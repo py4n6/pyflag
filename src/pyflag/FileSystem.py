@@ -1009,17 +1009,11 @@ class DBFS(FileSystem):
         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
 
     def istat(self, inode_id):
-        dbh = DB.DBO()
-        result = {}
-        dbh.execute("select attribute, value from AFF4_attribute join AFF4 on AFF4_attribute.attribute_id = AFF4.attribute_id where urn_id = %r", inode_id)
-        for row in dbh:
-            attribute = row['attribute']
-            try:
-                result[attribute].append(row['value'])
-            except KeyError:
-                result[attribute] = [row['value'],]
-
+        urn = aff4.oracle.resolve_urn_from_id(inode_id)
+        result = aff4.oracle.export_dict(urn)
+        result['urn'] = [urn,]
         return result
+            
 
     def isdir(self,directory):
         directory=posixpath.normpath(directory)

@@ -44,7 +44,7 @@ import pyflag.pyflaglog as pyflaglog
 import os, pdb
 import pyflag.FlagFramework as FlagFramework
 import pyflag.Registry as Registry
-from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, FilenameType, IntegerType, DeletedType, SetType, BigIntegerType
+from pyflag.ColumnTypes import AFF4URN, StringType, FilenameType, DeletedType, IntegerType, TimestampType, BigIntegerType
 
 config.add_option("SCHEMA_VERSION", default=3, absolute=True,
                   help="Current schema version")

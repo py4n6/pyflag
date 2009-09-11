@@ -107,11 +107,10 @@ class MagicResolver:
         We check the db cache first.
         """
         dbh = DB.DBO(case)
-        
         if urn:
-            dbh.execute("select inode_id from inode where inode = %r", inode)
-            row = dbh.fetch()
-            inode_id = row['inode_id']
+            import pyflag.aff4.aff4 as aff4
+            
+            inode_id = aff4.oracle.resolve_id(urn)
 
         ## Is it already in the type table?
         try:
@@ -145,8 +144,9 @@ class MagicResolver:
                        inode_id = inode_id,
                        mime = content_type,
                        type = type)
-        except: pass
-
+        except Exception,e:
+            pass
+            
         return type, content_type
 
 def set_magic(case, inode_id, magic, mime=None):

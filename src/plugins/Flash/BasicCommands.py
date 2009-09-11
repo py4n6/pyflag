@@ -1,4 +1,3 @@
-
 """ These are basic flash commnads for the flag shell """
 # Michael Cohen <scudette@users.sourceforge.net>
 # David Collett <daveco@users.sourceforge.net>
@@ -34,6 +33,8 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import fnmatch
 import pyflag.TEXTUI as TEXTUI
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 
 class load(pyflagsh.command):
     """ Assigns a current case for use in the shell """
@@ -200,7 +201,11 @@ class less(ls):
                 yield "Error: No such file"
                 
             for arg in glob_files:
-                fd=self.environment._FS.open(arg)
+                if arg.startswith(FQN):
+                    fd = aff4.oracle.open(arg)
+                else:
+                    fd=self.environment._FS.open(arg)
+                    
                 pipe=os.popen("less","w")
                 while 1:
                     data=fd.read(10000)
@@ -309,30 +314,32 @@ class exit(pyflagsh.command):
     def execute(self):
         sys.exit()
 
-class istat(pyflagsh.command):
-    """ stats an inode in the filesystem """
-    def help(self):
-        return "istat: Stats an inode in the file system returning statistics. Arg can be a regex which will match inodes (e.g. /Itest|K0.*/)"
-
+class fstat(pyflagsh.command):
+    """ stats an file in the filesystem """
     def execute(self):
         args=self.args
         for arg in args:
+            path, name = os.path.split(arg)
             ## Glob the inodes:
             dbh = DB.DBO(self.environment._CASE)
-            if arg[0]=='/':
-                dbh.execute("select inode from inode where inode rlike %r", arg[1:-1])
-            else:
-                dbh.execute("select inode from inode where inode like %r", arg)
-
+            dbh.execute("select inode_id from vfs where path=%r and name=%r", path, name)
             for row in dbh:
-                inode = row['inode']                
-                filename, inode, inode_id = self.environment._FS.lookup(inode=inode)
-                status=self.environment._FS.istat(inode=inode)
+                inode_id = row['inode_id']      
+                status=self.environment._FS.istat(inode_id=inode_id)
                 if not status:
                     raise RuntimeError("No status available for %s" % arg)
-                
-                status['filename'] = filename
+
                 yield status
+
+class istat(pyflagsh.command):
+    """ Stats an object in the VFS based on its inode id """
+    def execute(self):
+        for inode_id in self.args:
+            status = self.environment._FS.istat(inode_id=inode_id)
+            if not status:
+                raise RuntimeError("No status available for %s" % inode_id)
+            
+            yield status
 
 class iless(istat):
     """ Pipes the content of an inode to less """
@@ -424,23 +431,10 @@ class iicp(iless):
             yield 'Copying of %s into %s successful' % (inode_id,self.args[-1])
 
 class stat(ls):
-    """ stats a list of files in the filesystem """
-    def help(self):
-        return "stat: Stats a list of files in the file system. Files can consist of any glob pattern"
-
+    """ stats a urn in the filesystem """
     def execute(self):
-        args=self.args
-        for arg in self.glob_files(args):
-            try:
-                path,inode,inode_id = self.environment._FS.lookup(arg)
-                status=self.environment._FS.istat(inode=inode)
-                if not status:
-                    raise RuntimeError("No status available for %s" % arg)
-
-                status['filename'] = arg
-                yield status
-            except IOError:
-                pass
+        for arg in self.args:
+            yield aff4.oracle.export_dict(arg)
             
 class execute(pyflagsh.command):
     """ Executes a report's analysis method with the required parameters """
@@ -614,15 +608,14 @@ class find_dict(find):
 class file(ls):
     """ Returns the file magic of args """
     def execute(self):
-        dbh=DB.DBO(self.environment._CASE)
         #Find the inode of the file:
-        
-        for path in self.glob_files(self.args):
-            path,inode, inode_id = self.environment._FS.lookup(path=path)
-            dbh.execute("select type.inode_id,name, mime,type from type,file where file.inode_id =%r and file.inode_id=type.inode_id",(inode_id))
-            row = dbh.fetch()
-            if row:
-                yield row
+        import pyflag.Magic as Magic
+
+        m = Magic.MagicResolver()
+        for path in self.args:
+            type, mime = m.find_inode_magic(case = self.environment._CASE, urn = path)
+
+            yield dict(type=type, mime = mime)
 
 class delete_case(load):
     """ Drop a case and delete all its data """

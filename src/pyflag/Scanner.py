@@ -377,10 +377,12 @@ def resetfile(ddfs, inode_id,factories):
 MESSAGE_COUNT = 0
 
 ### This is used to scan a file with all the requested scanner factories
-def scan_inode(case, inode_id, factories):
+def scan_inode(case, inode_id, factories, force=False):
     """ Scans the given inode_id with all the factories provided. Each
     factory is used to instantiate a Scan() object, then we call
     Scan.scan() on the inode_id.
+
+    if force is set we just scan anyway - even if its already been scanned.
     """
     import pyflag.FileSystem as FileSystem
 
@@ -403,6 +405,9 @@ def scan_inode(case, inode_id, factories):
     except:
         scanners_run = []
 
+    ## Force the scanners to run anyway
+    if force: scanners_run = []
+    
     fd.inode_id = row['inode_id']
 
     ## The new scanning framework is much simpler - we just call the

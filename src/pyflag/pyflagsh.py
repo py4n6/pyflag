@@ -61,7 +61,6 @@ class environment:
         self.interactive = True
 
 class command:
-    """ Base class for each command """
     optlist=""
     long_opts = []
     def __init__(self,args,env=None):
@@ -74,22 +73,30 @@ class command:
 
     def glob_files(self, args):
         ## Glob the path if possible:
-        files = {}
+        files = set()
         for arg in args:
+            if arg.startswith("urn"):
+                files.add(arg)
+                continue
+            
             ## Add the implied CWD:
             if not arg.startswith("/"): arg=FlagFramework.normpath(self.environment.CWD+"/"+arg)
             for path in FileSystem.glob(arg, case=self.environment._CASE):
-                files[path]=True
+                files.add(path)
 
         ## This is used to collate files which may appear in multiple globs
-        files = files.keys()
+        files = list(files)
         files.sort()
 
         return files
 
     def help(self):
         """ Help function to print when the user asked for help """
-        raise ParserException("No help available")
+        try:
+            if self.__doc__:
+                return self.__doc__
+        except: 
+            raise ParserException("No help available")
 
     def parse(self,args):
         """ This method parses the args storing the option args in self.opts and non-option args in self.args.

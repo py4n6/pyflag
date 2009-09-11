@@ -132,7 +132,7 @@ class delete_iosource(pyflagsh.command):
 
             dbh.delete("iosources", where=DB.expand("name=%r", iosource))
             yield "Removed IOSource %s" % iosource
-        
+
 class scan(pyflagsh.command):
     """ Scan a glob of inodes with a glob of scanners """
     def help(self):
@@ -202,6 +202,23 @@ class scan(pyflagsh.command):
             if row and row['total']==0: break
 
             time.sleep(1)
+
+class scan_inode(scan):
+    """ Scan an inode id with the specified scanners """
+    def execute(self):
+        if len(self.args)<2:
+            yield self.help()
+            return
+
+        case = self.environment._CASE
+        scanners = []
+        for i in range(1,len(self.args)):
+            scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
+            
+        scanners = ScannerUtils.fill_in_dependancies(scanners)
+        factories = Scanner.get_factories(case, scanners)
+        
+        Scanner.scan_inode(case, self.args[0], factories, force = True)
 
 class scan_file(scan,BasicCommands.ls):
     """ Scan a file in the VFS by name """
