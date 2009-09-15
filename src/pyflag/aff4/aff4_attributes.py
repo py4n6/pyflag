@@ -141,7 +141,7 @@ AFF4_CTIME = FQN + "ctime"
 AFF4_MODE  = FQN + "mode"
 
 ## Signals this object should inherit attributes from another object
-AFF4_INHERIT = FQN + "inherit"
+AFF4_INHERIT = NAMESPACE + "inherit"
 
 ## PyFlag specific attributes
 PYFLAG_NS = "urn:pyflag:"

@@ -89,21 +89,21 @@ class PCAPScanner(GenScanFactory):
                         ip.source_addr, ip.dest_addr,
                         tcp.source, tcp.dest)
 
-                    combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "combined", timestamp = packet.ts_sec,
-                        target = fd.urn)
-                    
-                    connection['reverse']['combined'] = combined_stream
-                    connection['combined'] = combined_stream
-                    
                     map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
                         fd.case, base_urn + "forward", timestamp = packet.ts_sec,
                         target = fd.urn)
                     connection['map'] = map_stream
 
+                    combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "combined", timestamp = packet.ts_sec,
+                        target = fd.urn, inherited = map_stream.urn)
+                    
+                    connection['reverse']['combined'] = combined_stream
+                    connection['combined'] = combined_stream
+                    
                     r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
                         fd.case, base_urn + "reverse", timestamp = packet.ts_sec,
-                        target = fd.urn)
+                        target = fd.urn, inherited = map_stream.urn)
                     connection['reverse']['map'] = r_map_stream
 
                     ## Add to connection table
@@ -116,9 +116,6 @@ class PCAPScanner(GenScanFactory):
                                                     _ts_sec = "from_unixtime(%s)" % packet.ts_sec,
                                                     )
                                                )
-                    ## Make sure we know they are related
-                    aff4.oracle.set_inheritence(r_map_stream, map_stream)
-                    aff4.oracle.set_inheritence(combined_stream, map_stream)
                     
             elif mode == 'data':
                 try:

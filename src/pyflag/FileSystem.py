@@ -79,7 +79,7 @@ class File:
 
         if urn:
             self.urn = urn
-            self.inode_id = aff4.oracle.get_urn_by_id(urn)
+            self.inode_id = aff4.oracle.get_id_by_urn(urn)
         else:
             self.urn = aff4.oracle.get_urn_by_id(inode_id)
             self.inode_id = inode_id
@@ -957,7 +957,7 @@ class DBFS(FileSystem):
         if directory: return
 
         if urn:
-            inode_id = aff4.oracle.resolve_id(urn)
+            inode_id = aff4.oracle.get_id_by_urn(urn)
 
         if not inode_id: raise RuntimeError("No inode_id found for the urn %s" % urn)
         inode_properties = dict(status=status,
@@ -1009,11 +1009,10 @@ class DBFS(FileSystem):
         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
 
     def istat(self, inode_id):
-        urn = aff4.oracle.resolve_urn_from_id(inode_id)
+        urn = aff4.oracle.get_urn_by_id(inode_id)
         result = aff4.oracle.export_dict(urn)
         result['urn'] = [urn,]
         return result
-            
 
     def isdir(self,directory):
         directory=posixpath.normpath(directory)

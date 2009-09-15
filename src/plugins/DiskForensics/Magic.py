@@ -14,6 +14,7 @@ class HTML(Magic.Magic):
     literal_rules = [
         ( "<html", (0,500)),
         ( "<body", (0,500)),
+        ( "<head", (0,500)),
         ( "<div", (0,500)),
         ( "<title", (0,500)),
         ( "<table", (0,500)),

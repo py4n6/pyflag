@@ -4,6 +4,8 @@ SUBDIRS		= . pyewf pyaff
 
 INCLUDES        	= -I$(top_srcdir)/src/include -include config.h
 
+AM_LDFLAGS = -ltdb
+
 # main bin and lib targets
 #noinst_PROGRAMS		= open
 bin_PROGRAMS		= sgzip evtool
@@ -12,13 +14,17 @@ bin_PROGRAMS		= sgzip evtool
 noinst_HEADERS		= $(srcdir)/*.h
 
 # python stuff
-noinst_LTLIBRARIES 	= liboo.la libexcept.la libsgz.la libevf.la libmd5.la pypacket.la pyxpress.la
-nodist_pkgpyexec_PYTHON	= pypacket$(PYTHON_EXTENSION) pyxpress$(PYTHON_EXTENSION)
+noinst_LTLIBRARIES 	= liboo.la libexcept.la libsgz.la libevf.la libmd5.la pypacket.la pyxpress.la pytdb.la
+nodist_pkgpyexec_PYTHON	= pypacket$(PYTHON_EXTENSION) pyxpress$(PYTHON_EXTENSION) pytdb$(PYTHON_EXTENSION)
 
 pypacket_la_SOURCES	= pypacket.c
 pypacket_la_CPPFLAGS	= $(PYTHON_CPPFLAGS) -I$(top_srcdir)/src/include
 pypacket_la_LDFLAGS	= -module $(PYTHON_LDFLAGS)
 pypacket_la_LIBADD	= liboo.la
+
+pytdb_la_SOURCES	= pytdb.c
+pytdb_la_CPPFLAGS	= $(PYTHON_CPPFLAGS) -I$(top_srcdir)/src/include
+pytdb_la_LDFLAGS	= -module $(PYTHON_LDFLAGS)
 
 pyxpress_la_SOURCES	= pyxpress.c
 pyxpress_la_CPPFLAGS	= $(PYTHON_CPPFLAGS) -I$(top_srcdir)/src/include

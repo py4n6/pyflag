@@ -229,7 +229,8 @@ class TextTag(Tag):
         data = re.sub(r"[\r\n]+","\n",data)
         data = re.sub(r" +"," ",data)
         data = unquote(data)
-        #data = data.replace("\n","<br />")
+        ## Make sure that no tags end up there
+        data = data.replace("<","&lt;")
 
         return data+" "
 
@@ -256,7 +257,7 @@ class SanitizingTag(Tag):
     allowable_attributes = ['color', 'bgolor', 'width', 'border',
                             'rules', 'cellspacing', 'id',
                             'cellpadding', 'height',
-                            'align', 'bgcolor', 'rowspan', 
+                            'align', 'bgcolor', 'rowspan', 'style',
                             'colspan', 'valign','id', 'class','name', 
                             'compact', 'type', 'start', 'rel',
                             'value', 'checked', 'rows','cols','media',
@@ -485,12 +486,14 @@ class ResolvingHTMLTag(SanitizingTag):
             try:
                 host = self.host
             except AttributeError:
-                urn = aff4.oracle.get_urn_by_id(self.inode_id)
-                
-                self.host = host = aff4.oracle.resolve(
-                    urn, PYFLAG_NS + "http:host") or ''
-                self.url = aff4.oracle.resolve(
-                    urn, PYFLAG_NS + "http:url") or ''
+                dbh = DB.DBO(self.case)
+                dbh.execute("select host, url from http where inode_id = %r", self.inode_id)
+                row = dbh.fetch()
+                if row:
+                    self.host = host = row['host']
+                    self.url = row['url']
+                else:
+                    self.host = host = self.url = url = ''
 
             ## Url may be relative to the present directory
             if not url.startswith("/"):

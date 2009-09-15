@@ -12,7 +12,7 @@ automatically. Otherwise the highest score wins.
 The usual tests include a set of regexs to be run over the file
 header, but other tests are also possible.
 """
-import index
+import index, pdb
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.pyflaglog as pyflaglog
@@ -110,7 +110,7 @@ class MagicResolver:
         if urn:
             import pyflag.aff4.aff4 as aff4
             
-            inode_id = aff4.oracle.resolve_id(urn)
+            inode_id = aff4.oracle.get_id_by_urn(urn)
 
         ## Is it already in the type table?
         try:

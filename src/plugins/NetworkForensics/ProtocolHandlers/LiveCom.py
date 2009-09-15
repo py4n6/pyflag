@@ -75,6 +75,7 @@ that HTTP object id.
 import pyflag.FlagFramework as FlagFramework
 from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType
 import FileFormats.HTML as HTML
+import FileFormats.Javascript as Javascript
 import pyflag.DB as DB
 import pyflag.Scanner as Scanner
 import pyflag.Reports as Reports
@@ -87,6 +88,154 @@ import pyflag.Registry as Registry
 import pyflag.Graph as Graph
 import pyflag.Time as Time
 import pyflag.CacheManager as CacheManager
+
+
+Live20Style = """.SortSearchContainer{z-index:3;background-color:#BBD8FB;background-position:left bottom;background-repeat:repeat-x;height:2.15em;}
+.Managed .SortSearchContainer{position:absolute;top:0px;left:0em;right:0em;}
+.IE_M6 .Managed .SortSearchContainer{anchor:horizontal;behavior:expression(Anchor(this));width:100%;}
+.SortSearchContainerHidden{z-index:-1;display:none;}
+.SortSearchContainer .Toolbar{border:none;}
+.SortSearchContainer .ToolbarItem UL{padding:2px;}
+.SortSearchContainer .ToolbarItem UL A{padding:4px;}
+.c_m .GroupHeading{border-top-width:1px;border-top-style:solid;border-top-color:#ccc;padding-top:4px;}
+.ToolbarItemCheckbox INPUT{margin:0px;}
+HTML.IE_M7 .ToolbarItemCheckbox INPUT{margin-left:3px;}
+HTML.IE_M6 .ToolbarItemCheckbox INPUT{margin-left:3px;margin-right:3px;}
+.SortSearchContainer .ToolbarItemCheckbox{padding-left:10px;padding-top:0.4em;}
+.IE .SortSearchContainer .ToolbarItemCheckbox{padding-left:7px;}
+.SortSearchContainer .ToolbarItemFirst .c_ml{padding-left:10px;}
+.MessageListSplitPane{margin-top:2px;top:2.15em;z-index:2;}
+.Managed .MessageListSplitPane{position:absolute;display:block;left:0em;overflow:hidden;}
+.MessageListSplitPaneFull{bottom:0px;right:0px;}
+.BottomUnmanaged .MessageListSplitPaneFull{margin-top:0px;position:static;}
+.IE_M6 .MessageListSplitPaneFull{anchor:all;behavior:expression(Anchor(this));width:100%;height:100%;}
+.IE_M6 .BottomUnmanaged .MessageListSplitPaneFull, .IE_M6 .BottomUnmanaged .ReadingPaneSplitPaneFull{width:auto;}
+.MessageListSplitPaneHidden{z-index:-1;display:none;}
+.MessageListItems{background-color:#ffffff;}
+.Managed .MessageListItems{position:absolute;top:0px;bottom:25px;left:0px;right:0px;overflow-y:auto;overflow-x:hidden;}
+.IE_M6 .Managed .MessageListItems{anchor:all;behavior:expression(Anchor(this));width:100%;height:80%;}
+.PaginationContainer{background-color:#F3F7FD;height:1.8em;}
+.Managed .PaginationContainer{position:absolute;bottom:0px;left:0px;right:0px;}
+.IE_M6 .Managed .PaginationContainer{anchor:horizontal;behavior:expression(Anchor(this));width:100%;}
+.SplitterBar{position:absolute;}
+.IE_M6 .SplitterBar{overflow:hidden;background-color:white;}
+.SplitterBarHidden{z-index:-1;display:none;}
+.ReadingPaneSplitPane{border:1px solid #ccc;z-index:0;display:block;}
+.Managed .ReadingPaneSplitPane{position:absolute;bottom:0em;right:0em;}
+.ReadingPaneSplitPaneFull{top:0px;left:0px;}
+.BottomUnmanaged .ReadingPaneSplitPaneFull{margin-top:0px;position:static;}
+.IE_M6 .ReadingPaneSplitPaneFull{anchor:all;behavior:expression(Anchor(this));width:100%;height:100%;}
+.ReadingPaneSplitPaneHidden{z-index:-1;display:none;}
+.ReadingPaneSplitPaneFull .FullViewButton{display:none;}
+.ActionBar{background-color:#ffffff;}
+.Managed .ActionBar{position:absolute;top:0px;left:0px;right:0px;height:2.15em;}
+.IE_M6 .ActionBar{anchor:horizontal;behavior:expression(Anchor(this));width:100%;}
+.ReadingPaneContainer{margin-top:1px;background-color:#ffffff;}
+.Managed .ReadingPaneContainer{position:absolute;top:2.15em;bottom:0px;left:0em;right:0px;overflow-y:auto;overflow-x:auto;}
+.IE_M6 .Managed .ReadingPaneContainer{anchor:all;behavior:expression(Anchor(this));width:100%;height:80%;}
+.ReadingPaneContainerNoActionBar{top:0px !important;}
+.BottomUnmanaged .ReadMsgBody{overflow-x:hidden;}
+.BottomUnmanaged .ReadingPaneContainer.ExpandMessage .ReadMsgBody{overflow-x:visible;}
+.BottomUnmanaged .WithSkyscraper .ExpandMessageButton{display:block;}
+.InboxTable{width:100%;table-layout:fixed;border-collapse:collapse;}
+.IE .InboxTable{width:auto;}
+.IE_M6 .InboxTable{position:relative;}
+.InboxTable A{text-decoration:none;white-space:nowrap;}
+.IE_M6 .InboxTable A{text-decoration:none !important;}
+.InboxTable INPUT, .InboxTable IMG{border:none;margin:0px;padding:0px;}
+.IE_M7 .InboxTable IMG{vertical-align:middle;}
+.IE .InboxTable INPUT, .IE .ToolbarItemCheckbox INPUT{width:15px;}
+.InboxTable TD{border-bottom-width:1px;border-bottom-style:solid;border-bottom-color:#f0f0f0;padding-top:1px;padding-bottom:1px;overflow:hidden;cursor:pointer;white-space:nowrap;}
+.InboxTable .Ico, .InboxTable .Imp, .InboxTable .Att{padding-top:2px;padding-bottom:0px;}
+.IE_M6 .InboxTable .Ico, .IE_M6 .InboxTable .Imp, .IE_M6 .InboxTable .Att{padding-left:4px;}
+.InboxTable .Chk{padding-left:10px;padding-right:8px;}
+.InboxTable .Frm{padding-left:12px;text-overflow:ellipsis;}
+.InboxTable .Imp{padding-left:16px;}
+.InboxTable .Att{padding-left:4px;}
+.InboxTable .Sbj{padding-left:8px;text-overflow:ellipsis;}
+.InboxTable .Dat, .InboxTable .Siz{padding-left:16px;padding-right:10px;text-align:right;color:#888;font-weight:normal !important;}
+.InboxTable .CheckBoxCol{width:34px;}
+.InboxTable .IconCol{width:17px;}
+.InboxTable .FromCol{width:162px;}
+.InboxTable .ImportanceCol{width:25px;}
+.InboxTable .AttachmentCol{width:22px;}
+.InboxTable .DateCol, .InboxTable .SizeCol{width:96px;}
+.IE .InboxTable .CheckBoxCol{width:15px;}
+.IE .InboxTable .IconCol{width:17px;}
+.IE .InboxTable .FromCol{width:150px;}
+.IE .InboxTable .ImportanceCol{width:9px;}
+.IE .InboxTable .DateCol, .IE .InboxTable .SizeCol{width:80px;}
+.PageNavigation{padding-right:8px;}
+.PageNavigation UL{margin:0px;}
+.PageNavigation LI{padding:4px 2px;height:100%;list-style:none;float:left;}
+.PageNavigation LI A, .PageNavigation LI DIV{display:block;}
+.PageNavigationPrev{margin-left:6px;}
+.IE .PageNavigationPrev, .IE .PageNavigationNext{vertical-align:middle;}
+.PageNavigationMsgRange{padding:4px 10px;float:left;}
+.DragNDrop{position:absolute;z-index:1000;top:0px;left:0px;}
+.rtl .DragNDrop{width:15em;}
+.Firefox .DragNDrop, .Safari .DragNDrop{width:auto;}
+.DragNDrop .Content{border:1px solid #ccc;padding:8px 8px 5px;position:relative;background-color:white;color:#444;z-index:2;white-space:nowrap;}
+.App.Managed .MasterSplitter{cursor:col-resize;}
+.ReadMsgContainer{padding:0px 12px;background-color:#FFFFFF;}
+.ReadMsgHeader{padding-bottom:5px;height:auto !important;}
+HTML.IE .ReadMsgHeader, HTML.IE .ReadMsgContainer{height:1%;}
+.ReadMsgHeader TD{padding-right:4px;padding-bottom:2px;vertical-align:top;}
+.ReadMsgHeaderCol1{color:#888;white-space:nowrap;}
+.ReadMsgHeaderCol2{width:100%;}
+.AttachmentContainer .AttachmentRow{padding-bottom:2px;}
+.AttachmentContainer .AttachmentCount td{vertical-align:bottom;}
+.AttachmentContainer .AttachmentCount .AttIcon{padding-bottom:3px;width:7px;}
+.AttachmentContainer .AttachmentCount .ScanLogo{text-align:right;}
+.AttachmentDownloadIframe{border:none;width:0px;height:0px;}
+HTML.IE .AttachmentDownloadIframe, HTML.Firefox .AttachmentDownloadIframe{display:none;}
+.ReadMsgHeader IMG{vertical-align:middle;}
+.IE .ReadMsgHeader IMG{vertical-align:bottom;}
+.ReadMsgSubject{padding:12px 0px 8px;font-size:1.46em;}
+.ReadMsgHeader .SenderSafetyMsg{padding:0px 4px;}
+.ReadMsgHeader .SenderSafetyLinks{padding:0px 8px;display:inline-block;}
+.ReadMsgBody{padding:10px 0px;}
+.PlainTextMessageBody PRE{white-space:normal;}
+.MessageSelection{padding:8px 4px 6px;}
+.MessageSelection H2{font-size:132%;font-weight:bold;color:#444444;}
+.ReadMsgSafetyBar, .WideMessageBar{margin-top:8px;padding:3px 8px 5px;height:auto !important;}
+.MessageLevel{vertical-align:bottom;}
+.SafetyBarPri-high{background-color:#FFAEB9;}
+.SafetyBarPri-medium, .WideMessageBar{background-color:#FFFFAE;}
+.SafetyBarPri-low{background-color:#FFFFFF;}
+.SafetyBarItem{padding:3px 4px;clear:both;}
+.SafetyBarItem A, .WideMessageBar A{margin:0px 20px;display:inline-block;}
+.SafetyBarItem A.FirstLink{margin-right:8px;}
+.SafetyBarItem A.LastLink{margin-left:8px;}
+.MeetingReqBar A{margin:4px 0px;padding:0px 8px;display:block;color:#000000;}
+.MeetingReqBar A *{padding:4px 0px;vertical-align:middle;}
+.ButtonList{padding-left:10px;padding-right:10px;background-color:#eceeee;}
+.ButtonList UL{margin:0em;padding:0em;list-style-type:none;list-style-image:none;}
+.ButtonList UL LI{margin:2px 0px;float:left;height:22px;}
+.ButtonList LI A{border:1px solid transparent;text-decoration:none;position:relative;display:block;top:.25em;height:16px;width:16px;overflow:hidden;direction:ltr;outline:0em;}
+.ButtonList LI A:hover{text-decoration:none;}
+.ButtonList LI A.dropdown{color:#444;direction:inherit;width:90%;height:auto;}
+.ButtonList LI A.dropdown .caption{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;width:85%;}
+.ButtonList A.ImageIcon{top:.4em;}
+.IE_M6 .ButtonList LI A{border:1px solid #eee;}
+.ButtonList LI IMG{border-width:0px;position:relative;}
+.ButtonList LI.Selected A{border:1px solid #83aada;background-color:#DDECFE;}
+.Menu{position:absolute;top:0px;left:0px;overflow:visible;}
+.Menu, .Menu DIV{min-width:15em;}
+.IE_M6 .Menu, .rtl.IE_M7 .Menu{width:15em;}
+.Menu .shadow{position:absolute;top:3px;left:3px;width:100%;height:100%;background-color:#000000;opacity:0.3;filter:alpha(opacity=30);}
+.Menu UL{border:1px solid #ccc;margin:0px;padding:0px;position:relative;background-color:#FCFCFC;z-index:1;list-style-type:none;}
+.Menu UL LI{margin:2px;padding:0px;}
+.Menu UL LI.Divider{line-height:4px;display:block;height:4px;overflow:hidden;}
+HTML.IE_M6 .Menu UL LI.Divider{height:auto;overflow:auto;}
+.Menu UL LI.Divider DIV{border-width:0px 0px 1px;border-style:solid;border-color:#fcfcfc #fcfcfc #ccc;margin:2px;height:2px;overflow:hidden;position:relative;top:-2px;}
+HTML.IE_M6 .Menu UL LI.Divider DIV{margin:auto;height:1px;position:static;left:auto;top:auto;}
+.Menu .Disabled A{color:#BBB;}
+.Menu .Selected A{border:1px solid #83aada;background-color:#DDECFE;}
+.Menu A{border:1px solid #fcfcfc;padding:2px 5px 4px;color:#444 !important;white-space:nowrap;text-overflow:ellipsis;width:auto;display:block;position:relative;z-index:1;}
+.IE_M6 .Menu A{height:100%;}
+.Menu A:hover{border:1px solid #bbd8fb;background-color:#F3F7FD;text-decoration:none;}
+"""
 
 class HTMLStringType(StringType):
     """ A ColumnType which sanitises its input for HTML.
@@ -160,7 +309,7 @@ class HotmailScanner(Scanner.GenScanFactory):
     service = 'Hotmail Classic'
     message = ''
 
-    def fixup_page(self, outfd, result, tag_class):
+    def fixup_page(self, result, tag_class):
         """ Given the parse tree in root, fix up the page so it looks
         as close as possible to the way it should. We write the new
         page on outfd.
@@ -180,7 +329,7 @@ class HotmailScanner(Scanner.GenScanFactory):
             edit_area.add_child(result)
             edit_area.name = 'div'
 
-        outfd.write(self.parser.root.innerHTML())
+        return self.parser.root.innerHTML()
 
     def scan(self, fd, factories, type, mime):
         if "HTML" in type:
@@ -188,7 +337,7 @@ class HotmailScanner(Scanner.GenScanFactory):
             if not re.search("<title>\s+Windows Live", data): return
 
             ## Ok - we know its a Live page
-            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail processing" % fd.urn)
+            pyflaglog.log(pyflaglog.DEBUG,"Opening (%s) %s for Hotmail processing" % (fd.inode_id, fd.urn))
             self.parser =  HTML.HTMLParser(verbose=0)
             self.parser.feed(data.decode("utf8","ignore"))
             
@@ -325,24 +474,18 @@ class HotmailScanner(Scanner.GenScanFactory):
         return self.insert_message(fd, result)
 
     def insert_message(self, fd, result, inode_template="l%s"):
-        dbh = DB.DBO(self.case)
-
-        dbh.execute("select mtime from vfs where inode_id = %r" , fd.inode_id)
-        row = dbh.fetch()
-
         try:
-            new_inode = inode_template %  fd.inode_id
-        except: new_inode = inode_template
-
-        live_obj = CacheManager.AFF4_MANAGER.create_cache_fd(
+            assert(result['message'])
+        except: return
+        data = self.fixup_page(result, HTML.SanitizingTag)
+        
+        live_obj = CacheManager.AFF4_MANAGER.create_cache_data(
             fd.case, "/".join((fd.urn, "Message")),
+            data.encode("utf8"),
             inherited = fd.urn)
 
-        self.fixup_page(live_obj, result, HTML.SanitizingTag)
-        
         result['service'] = self.service
         live_obj.insert_to_table('webmail_messages', result)
-
         live_obj.close()
 
         return live_obj.inode_id
@@ -370,36 +513,61 @@ class Live20Scanner(HotmailScanner):
     def scan(self, fd, factories, type, mime):
         if "Hotmail 2.0 AJAX" in type:
             pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail AJAX processing" % fd.inode_id)
-            data = fd.read(1024 * 1024)
-            m=re.search("HM.InboxUiData\((.+)",data)
-            if m:
-                string = m.group(1)
-                def a(*x):
-                    try:
-                        if x[0][2]:
-                            self.process_readmessage(fd, x[0][2])
-                    except IndexError: pass
+            js_parser = Javascript.JSParser()
+            js_parser.parse_string(fd.read().decode("utf8"))
 
-                ## Now parse the data
-                eval("a(("+string, {}, {'a':a, 'null':0})
+            ## Find the InboxUiData function in the AST
+            f = js_parser.root.find("function", dict(name="InboxUiData"))
+            if f:
+                ## Im sure the args mean something but we just process
+                ## them all the same - we can usually determine which
+                ## arg goes where by the div classes.
+                result = ''
+                for child in f:
+                    if child.name == 'string':
+                        result += child.innerHTML()
+                        
+                self.process_string(fd, result)
 
-    def fixup_page(self, outfd, result, tag_class):
-        """ Its not really possible to represent AJAX communications
-        properly, so we just make the message here.
-        """
-        message = result.get('message','')
-        outfd.write(message)
-
-    def process_readmessage(self, fd, message):
+    def process_string(self, fd, string):
         parser =  HTML.HTMLParser(verbose=0)
-        parser.feed(message)
+        parser.feed(string)
         parser.close()
 
-        result = {'type': 'Read', 'Message':''}
+        self.process_readmessage(fd, parser)
+        self.process_listing(fd, parser)
+
+    def process_listing(self, fd, parser):
+        result = {'type':'Listing'}
+
+        ## Find the currently highlighted mailbox
+        mb = parser.root.find('li', {"class":"FolderItemSelected"})
+        if mb:
+            result['subject'] = mb.find('span').innerHTML()
+
+        lst = parser.root.find("div", {"class":"MessageListItems"})
+        if lst:
+            result['message'] = lst.innerHTML()
+
+        return self.insert_message(fd, result)        
+
+    def fixup_page(self, result, tag_class):
+        """ Its not really possible to represent AJAX communications
+        properly, so we just write the message here.
+
+        FIXME - It may be possible to render the page by inserting the
+        message into a template created by other pages.
+        """
+        message = result.get('message','')
+        return "<html>\r\n<head>\r\n<style>%s</style></head>\r\n<body>%s</body></html>" % (
+            Live20Style,message)
+
+    def process_readmessage(self, fd, parser):
+        result = {'type': 'Read'}
 
         ## Find the subject
-        sbj = parser.root.find('td', {'class':'ReadMsgSubject'})
-        if sbj: result['Subject'] = HTML.decode_entity(sbj.innerHTML())
+        sbj = parser.root.find('div', {'class':'ReadMsgSubject'})
+        if sbj: result['subject'] = HTML.decode_entity(sbj.innerHTML())
 
         context = None
         for td in parser.root.search('td'):
@@ -429,7 +597,7 @@ class Live20Scanner(HotmailScanner):
             result[context] = Time.parse(result[context])
         except: pass
 
-        return self.insert_message(fd, result, inode_template = 'l%s')
+        return self.insert_message(fd, result)
 
 import os.path
 
@@ -565,7 +733,7 @@ class AttachmentColumn(AFF4URN):
                                                        inode_id = row['inode_id']))
             result.row(link)
 
-class WebMailMessages(Reports.report):
+class WebMailMessages(Reports.CaseTableReports):
     """
     Browse WebMail messages.
     --------------------------------
@@ -573,29 +741,11 @@ class WebMailMessages(Reports.report):
     This allows the results from the various webmail scanners to be viewed.
 
     """
-
     name = "Browse WebMail Messages"
     family = "Network Forensics"
-
-    def display(self, query, result):
-        result.table(
-            elements = [ TimestampType('Timestamp','mtime', table='inode'),
-                         AFF4URN(case = query['case']),
-                         StringType('From', 'From'),
-                         StringType('To', 'To'),
-                         StringType('CC', 'CC'),
-                         StringType('BCC', 'BCC'),
-                         StringType('Subject', 'Subject'),
-                         HTMLStringType('Message','Message'),
-                         #StringType('MessageID', 'message_id'),
-                         AttachmentColumn(name='Attachment',case = query['case']),
-                         StringType('Type','type'),
-                         StringType('Service','service'),
-                         ],
-            table = 'webmail_messages',
-            case = query['case']
-            )
-
+    columns = ['URN', 'AFF4VFS.Modified', 'From','To', 'Subject','Message','Type','Service']
+    default_table = 'WebMailTable'
+    
 import textwrap
 
 ## A VFS File driver which formats a row in the db nicely:
@@ -817,7 +967,8 @@ class HotmailTests(tests.ScannerTest):
     test_case = "PyFlagTestCase"
 #    test_file = 'live.com.pcap.e01'
 #    test_file = 'private/livecom.pcap'
-    test_file = 'gmail.com.pcap.e01'
+    test_file = 'private/hotmail_test.pcap'
+#    test_file = 'gmail.com.pcap.e01'
     
     def test01HotmailScanner(self):
         """ Test Hotmail Scanner """
@@ -825,7 +976,7 @@ class HotmailTests(tests.ScannerTest):
         pyflagsh.shell_execv(env=env,
                              command="scan",
                              argv=["*",                   ## Inodes (All)
-                                   "HotmailScanner",
+                                   "HotmailScanner", "Live20Scanner",
                                    ])                   ## List of Scanners
 
         dbh = DB.DBO(self.test_case)

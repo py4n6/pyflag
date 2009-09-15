@@ -181,6 +181,7 @@ import atexit,os,signal,time
 import pyflag.DB as DB
 import pyflag.Registry as Registry
 import pyflag.Store as Store
+import pdb
 
 ## This is the type of process we are in.
 TYPE = "main"
@@ -431,7 +432,8 @@ def worker_run(keepalive=None):
                      task.run(row['arg1'], row['arg2'], row['arg3'])
                  except Exception,e:
                      pyflaglog.log(pyflaglog.ERRORS, "Error %s(%s,%s,%s) %s" % (task.__class__.__name__,row['arg1'], row['arg2'],row['arg3'],e))
-
+                     pdb.post_mortem()
+                     
              finally:
                  try:
                      if keepalive:

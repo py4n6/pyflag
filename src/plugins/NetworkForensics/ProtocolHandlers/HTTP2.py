@@ -46,8 +46,9 @@ class RelaxedGzip(gzip.GzipFile):
     def _read(self, size=1024):
         """ Trap possible decompression errors """
         try:
-            return gzip.GzipFile._read(self, size)
-        except EOFError: raise
+            ## just do big reads here
+            return gzip.GzipFile._read(self, 1024000)
+        except (EOFError, IOError): raise
         except Exception,e:
             return ''
 
@@ -137,15 +138,24 @@ class HTTPScanner(Scanner.GenScanFactory):
                 fd.close()
                 fd.seek(0)
                 gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
-                http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
-                    fd.case, '/'.join((fd.urn, "decompressed")),
-                    target = fd.urn, inherited = fd.urn)
+                ## If the file is small enough we just put it in a
+                ## segment:
+                if fd.size < 100000:
+                    data = gzip_fd.read(1024 * 1024)
+                    http_object = CacheManager.AFF4_MANAGER.create_cache_data(
+                        fd.case, '/'.join((fd.urn, "decompressed")),
+                        data,
+                        target = fd.urn, inherited = fd.urn)
+                else:
+                    http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
+                        fd.case, '/'.join((fd.urn, "decompressed")),
+                        target = fd.urn, inherited = fd.urn)
                 
-                while 1:
-                    data = gzip_fd.read(1024*1024)
-                    if not data: break
-                    
-                    http_object.write(data)
+                    while 1:
+                        data = gzip_fd.read(1024*1024)
+                        if not data: break
+
+                        http_object.write(data)
 
                 return http_object
         except KeyError: pass

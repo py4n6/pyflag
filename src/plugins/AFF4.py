@@ -189,8 +189,8 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-#    test_file = 'http_small.pcap'
-    test_file = 'http.pcap'
+    test_file = 'http_small.pcap'
+#    test_file = 'http.pcap'
 #    test_file = '/testimages/pyflag_stdimage_0.5.e01'
 #    test_file = 'stdcapture_0.4.pcap.e01'
 

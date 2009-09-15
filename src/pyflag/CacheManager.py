@@ -92,7 +92,7 @@ class PyFlagMap(aff4.Map):
         aff4.Map.finish(self)
         
         ## Come up with a valid inode_id
-        self.inode_id = aff4.oracle.resolve_id(self.urn)
+        self.inode_id = aff4.oracle.get_id_by_urn(self.urn)
 
     def close(self):
         aff4.Map.close(self)
@@ -107,8 +107,25 @@ class PyFlagImage(aff4.Image, PyFlagMap):
         aff4.Image.finish(self)
         
         ## Come up with a valid inode_id
-        self.inode_id = aff4.oracle.resolve_id(self.urn)
+        self.inode_id = aff4.oracle.get_id_by_urn(self.urn)
 
+class PyFlagSegment(PyFlagMap):
+    def __init__(self, case, volume_urn, segment_urn, data):
+        self.urn = segment_urn
+        volume = aff4.oracle.open(volume_urn, 'w')
+        try:
+            aff4.oracle.set(segment_urn, AFF4_STORED, volume_urn)
+            aff4.oracle.set(segment_urn, PYFLAG_CASE, case)
+            volume.writestr(segment_urn, data, compress_type=aff4.ZIP_DEFLATED)
+        finally:
+            aff4.oracle.cache_return(volume)
+            
+        self.inode_id = aff4.oracle.get_id_by_urn(segment_urn)
+        self.case = case
+        self.size = len(data)
+        
+    def close(self):
+        self.update_tables()
 
 class AFF4Manager:
     """ A Special Cache manager which maintains the main AFF4 Cache
@@ -118,6 +135,28 @@ class AFF4Manager:
         volume_urn = aff4.oracle.resolve(volume_path, aff4.AFF4_CONTAINS)
 
         return volume_urn
+
+    def create_cache_data(self, case, path, data, include_in_VFS=True,
+                          inherited = None,**kwargs):
+        """ Creates a new AFF4 segment. A segment is useful for 
+        storing small amounts of data in a single compressed file.
+
+        We return the URN of the created object so callers can use
+        this to set properties on it.
+        """
+        ## Drop the FQN from the path
+        if path.startswith(FQN) and "/" in path:
+            path = path[path.index("/"):]
+
+        volume_urn = self.make_volume_urn(case)
+        urn = aff4.fully_qualified_name(path, volume_urn)
+        fd = PyFlagSegment(case, volume_urn, urn, data)
+        
+        kwargs['path'] = path
+        if include_in_VFS:
+            fd.include_in_VFS = kwargs
+            
+        return fd
         
     def create_cache_fd(self, case, path, include_in_VFS=True,
                         inherited = None,**kwargs):
@@ -132,7 +171,7 @@ class AFF4Manager:
         if path.startswith(FQN) and "/" in path:
             path = path[path.index("/"):]
 
-        fd = PyFlagImage(None, 'w')
+        fd = PyFlagImage(None, 'w', inherited)
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
@@ -144,9 +183,6 @@ class AFF4Manager:
         if include_in_VFS:
             fd.include_in_VFS = kwargs
 
-        if inherited:
-            aff4.oracle.set(fd.urn, AFF4_INHERIT, inherited)
-            
         return fd
 
     def create_cache_map(self, case, path, include_in_VFS=True, size=0,
@@ -158,6 +194,7 @@ class AFF4Manager:
         written to the volume. The returned object is a standard AFF4
         map object and supports all the methods from the AFF4 library.
         """
+        #pdb.set_trace()
         ## Drop the FQN from the path
         if path.startswith(FQN) and "/" in path:
             path = path[path.index("/"):]
@@ -166,6 +203,9 @@ class AFF4Manager:
         fd.size = size
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
+        if inherited:
+            fd.set_inheritence(inherited)
+        
         if target:
             aff4.oracle.set(fd.urn, AFF4_TARGET, target)
             
@@ -178,9 +218,6 @@ class AFF4Manager:
         if include_in_VFS:
             fd.include_in_VFS = kwargs
 
-        if inherited:
-            aff4.oracle.set(fd.urn, AFF4_INHERIT, inherited)
-        
         return fd
 
     def create_link(self, case, source, destination, include_in_VFS=True, **kwargs):

@@ -300,6 +300,9 @@ class AFFObject(object):
     def close(self):
         pass
 
+    def set_inheritence(self, inherited):
+        oracle.add(self.urn, AFF4_INHERIT, inherited)
+
 #     def close(self):
 #         if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == 'combined': return
 
@@ -326,7 +329,10 @@ class FileLikeObject(AFFObject):
 
     def __init__(self, urn=None, mode='r'):
         AFFObject.__init__(self, urn, mode)
-        self.size = parse_int(read_with_default(self.urn, AFF4_SIZE, 0))
+        if mode=='r':
+            self.size = parse_int(oracle.resolve(self.urn, AFF4_SIZE)) or 0
+        else:
+            self.size = 0
 
     def seek(self, offset, whence=0):
         if whence == 0:
@@ -402,8 +408,7 @@ class FileBackedObject(FileLikeObject):
             except:
                 self.fd = open(escaped, 'w+b')
                 
-        self.urn = uri
-        self.mode = mode
+        AFFObject.__init__(self, uri, mode)
 
     def seek(self, offset, whence=0):
         self.fd.seek(offset, whence)
@@ -1180,7 +1185,7 @@ class RAWVolume(AFFVolume):
     """
     type = AFF4_RAW_VOLUME
     
-    def __init__(self, urn, mode):
+    def __init__(self, urn, mode='r'):
         if urn:
             self.urn = urn
             stored = oracle.resolve(urn, AFF4_STORED) or \
@@ -2719,7 +2724,7 @@ class CreateNewVolume:
             oracle.cache_return(image_fd)
 
             return AFF4Image(image_fd.urn, self, link=link,
-                             mode='w', )
+                             mode='w')
 
     def sync_identities(self):
         ## Write off any Identities we may have

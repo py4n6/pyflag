@@ -104,12 +104,15 @@ class JSParser(lexer.Lexer):
     def STRING_ADD(self, t, m):
         self.current += m.group(0)
 
+    def parse_string(self, string):
+        self.feed(string)
+        while self.next_token(): pass
+
 if __name__=='__main__':
     try:
         parser = JSParser(verbose = 10)
-        parser.feed(open(sys.argv[1]).read().decode("utf8"))
-
-        while parser.next_token(): pass
+        parser.parse_string(open(sys.argv[1]).read().decode("utf8"))
+        
         print parser.root.innerHTML().encode("utf8")
     except:
         raise
