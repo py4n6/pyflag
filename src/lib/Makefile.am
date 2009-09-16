@@ -4,7 +4,7 @@ SUBDIRS		= . pyewf pyaff
 
 INCLUDES        	= -I$(top_srcdir)/src/include -include config.h
 
-AM_LDFLAGS = -ltdb
+AM_LDFLAGS = -ltdb -lraptor
 
 # main bin and lib targets
 #noinst_PROGRAMS		= open

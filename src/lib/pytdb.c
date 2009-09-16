@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <tdb.h>
+#include <raptor.h>
+
+#define BUFF_SIZE 1024
+#define MAX_KEY "__MAX"
+#define INHERIT "urn:aff4:inherit"
 
 typedef struct {
   PyObject_HEAD
@@ -74,7 +79,7 @@ static PyObject *pytdb_get(PyTDB *self, PyObject *args, PyObject *kwds) {
   // Make a python string of the data  
   value = tdb_fetch(self->context, key);
   if(value.dptr) {
-    result = PyString_FromStringAndSize(value.dptr, value.dsize);
+    result = PyString_FromStringAndSize((char *)value.dptr, value.dsize);
     free(value.dptr);
     
     return result;
@@ -90,7 +95,7 @@ static PyObject *pytdb_list_keys(PyTDB *self, PyObject *args, PyObject *kwds) {
   PyObject *tmp;
 
   while(first.dptr) {
-    tmp = PyString_FromStringAndSize(first.dptr, first.dsize);
+    tmp = PyString_FromStringAndSize((char *)first.dptr, first.dsize);
     if(!tmp) return NULL;
 
     PyList_Append(result, tmp);
@@ -163,17 +168,747 @@ static PyTypeObject tdbType = {
     0,                         /* tp_new */
 };
 
+typedef struct {
+  PyObject_HEAD
+  struct tdb_context *urn_db;
+  struct tdb_context *attribute_db;
+  struct tdb_context *data_db;
+  int data_store_fd;
+  uint32_t hashsize;
+} BaseTDBResolver;
 
-static PyMethodDef PyTDBResolver_methods[] = {
 
+static int tdbresolver_dealloc(BaseTDBResolver *self) {
+  tdb_close(self->urn_db);
+  tdb_close(self->attribute_db);
+  tdb_close(self->data_db);
+  close(self->data_store_fd);
 
+  return 1;
+};
+
+typedef struct TDB_DATA_LIST {
+  uint32_t offset;
+  uint32_t length;
+} TDB_DATA_LIST;
+
+/* Given an int serialise into the buffer */
+static int from_int(uint32_t i, char *buff, int buff_len) {
+  return snprintf(buff, buff_len, "__%d", i) + 1;
+};
+
+/** Given a buffer unserialise an int from it */
+static uint32_t to_int(TDB_DATA string) {
+  unsigned char *buff = string.dptr;
+  int buff_len = string.dsize;
+
+  if(buff_len < 2) return 0;
+
+  //Make sure its null terminated
+  buff[buff_len-1]=0;
+
+  return strtol((char *)buff+2, NULL, 0);
+};
+
+static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"path", "hashsize", NULL};
+  char buff[BUFF_SIZE];
+  char *path = ".";
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "|sL", kwlist, 
+				  &path, &self->hashsize))
+    return -1;
+
+  if(snprintf(buff, BUFF_SIZE, "%s/urn.tdb", path) >= BUFF_SIZE)
+    goto error;
+  
+  self->urn_db = tdb_open(buff, self->hashsize,
+			  0,
+			  O_RDWR | O_CREAT, 0644);
+
+  if(snprintf(buff, BUFF_SIZE, "%s/attribute.tdb", path) >= BUFF_SIZE)
+    goto error1;
+
+  self->attribute_db = tdb_open(buff, self->hashsize,
+				0,
+				O_RDWR | O_CREAT, 0644);
+
+  if(snprintf(buff, BUFF_SIZE, "%s/data.tdb", path) >= BUFF_SIZE)
+    goto error2;
+
+  self->data_db = tdb_open(buff, self->hashsize,
+			   0,
+			   O_RDWR | O_CREAT, 0644);
+  
+  if(snprintf(buff, BUFF_SIZE, "%s/data_store.tdb", path) >= BUFF_SIZE)
+    goto error3;
+
+  self->data_store_fd = open(buff, O_RDWR | O_CREAT, 0644);
+  if(self->data_store_fd < 0)
+    goto error3;
+
+  // This ensures that the data store never has an offset of 0 (This
+  // indicates an error)
+  if(lseek(self->data_store_fd, 0, SEEK_END)==0) {
+    (void)write(self->data_store_fd, "data",4);
+  };
+
+  return 0;
+
+ error3:
+  tdb_close(self->data_db);
+ error2:
+  tdb_close(self->attribute_db);
+ error1:
+  tdb_close(self->urn_db);
+ error:
+  PyErr_Format(PyExc_IOError, "Unable to open tdb files");
+
+  return -1;
+};
+
+static PyObject *get_urn_by_id(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"id", NULL};
+  char buff[BUFF_SIZE];
+  uint32_t id;
+  PyObject *result, *id_obj;
+  TDB_DATA urn;
+  TDB_DATA key;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, 
+				  &id_obj))
+    return NULL;
+
+  id_obj = PyNumber_Long(id_obj);
+  if(!id_obj) return NULL;
+
+  id = PyLong_AsUnsignedLongLong(id_obj);
+  Py_DECREF(id_obj);
+
+  /* We get given an ID and we retrieve the URN it belongs to */
+  key.dptr = (unsigned char *)buff;
+  key.dsize = from_int(id, buff, BUFF_SIZE);
+
+  urn = tdb_fetch(self->urn_db, key);
+
+  if(urn.dptr) {
+    result = PyString_FromStringAndSize((char *)urn.dptr, urn.dsize);
+    free(urn.dptr);
+    return result;
+  };
+
+  Py_RETURN_NONE;
+};
+
+/** Fetches the id for the given key from the database tdb - if
+    create_new is set and there is no id present, we create a new id
+    and return id.
+*/
+static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
+  char buff[BUFF_SIZE];
+  TDB_DATA urn_id;
+  uint32_t max_id=0;
+  uint32_t result=0;
+  
+  /* We get given an ID and we retrieve the URN it belongs to */
+  urn_id = tdb_fetch(tdb, key);
+
+  if(urn_id.dptr) {
+    result = to_int(urn_id);
+    free(urn_id.dptr);
+
+    return result;
+  } else if(create_new) {
+    TDB_DATA max_key;
+
+    max_key.dptr = (unsigned char *)MAX_KEY;
+    max_key.dsize = strlen(MAX_KEY);
+
+    urn_id = tdb_fetch(tdb, max_key);
+    if(urn_id.dptr) {
+      max_id = to_int(urn_id);
+      free(urn_id.dptr);
+    };
+
+    max_id++;
+    
+    // Update the new MAX_KEY
+    urn_id.dptr = (unsigned char *)buff;
+    urn_id.dsize = from_int(max_id, buff, BUFF_SIZE);
+    tdb_store(tdb, key, urn_id, TDB_REPLACE);
+    tdb_store(tdb, max_key, urn_id, TDB_REPLACE);
+    tdb_store(tdb, urn_id, key, TDB_REPLACE);
+
+    return max_id;
+  };
+
+  // This should never happen
+  return 0;
 };
 
 
+static PyObject *get_id_by_urn(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "create_new", NULL};
+  TDB_DATA key;
+  int create_new=0;
+  
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|L", kwlist, 
+				  &key.dptr, &key.dsize, &create_new))
+    return NULL;
+
+  return PyLong_FromUnsignedLongLong(get_id(self->urn_db, key, create_new));
+};
+
+/** Writes the data key onto the buffer - this is a combination of the
+    uri_id and the attribute_id 
+*/
+static int calculate_key(BaseTDBResolver *self, TDB_DATA uri, 
+			 TDB_DATA attribute, char *buff,
+			 int buff_len, int create_new) {
+  uint32_t urn_id = get_id(self->urn_db, uri, create_new);
+  uint32_t attribute_id = get_id(self->attribute_db, attribute, create_new);
+
+  // urn or attribute not found
+  if(urn_id == 0 || attribute_id == 0) return 0;
+
+  return snprintf(buff, buff_len, "%d:%d", urn_id, attribute_id);
+};
+
+/** returns the list head in the data file for the uri and attribute
+    specified. Return 1 if found, 0 if not found. */
+static int get_data_head(BaseTDBResolver *self, TDB_DATA uri, TDB_DATA attribute, 
+			 TDB_DATA_LIST *result ) {
+  char buff[BUFF_SIZE];
+  TDB_DATA data_key;
+
+  data_key.dptr = (unsigned char *)buff;
+  data_key.dsize = calculate_key(self, uri, attribute, buff, BUFF_SIZE, 0);
+
+  if(data_key.dsize > 0) {
+    // We found these attribute/urn
+    TDB_DATA offset_serialised = tdb_fetch(self->data_db, data_key);
+    if(offset_serialised.dptr) {
+      // We found the head - read the struct
+      uint32_t offset = to_int(offset_serialised);
+      lseek(self->data_store_fd, offset, SEEK_SET);
+      if(read(self->data_store_fd, result, sizeof(*result)) == sizeof(*result)) {
+	return offset;
+      };
+      
+      free(offset_serialised.dptr);
+    };
+  };
+
+  return 0;
+};
+
+static inline int get_data_next(BaseTDBResolver *self, TDB_DATA_LIST *i){
+  if(i->offset > 0) {
+    lseek(self->data_store_fd, i->offset, SEEK_SET);
+    if(read(self->data_store_fd, i, sizeof(*i)) == sizeof(*i)) {
+      return 1;
+    };
+  };
+
+  return 0;
+};
+
+static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  char buff[BUFF_SIZE];
+  char buff2[BUFF_SIZE];
+  static char *kwlist[] = {"urn", "attribute", "value", NULL};
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA key;
+  PyObject *value_obj, *value_str;
+  TDB_DATA value;
+  TDB_DATA offset;
+  TDB_DATA_LIST i;
+  uint32_t previous_offset=0;
+  uint32_t new_offset;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O", kwlist, 
+				  &urn.dptr, &urn.dsize, 
+				  &attribute.dptr, &attribute.dsize,
+				  &value_obj))
+    return NULL;
+
+  // Convert the object to a string
+  value_str = PyObject_Str(value_obj);
+  if(!value_str) return NULL;
+
+  PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
+
+  /** We go through the attribute list to check if the new value is
+      unique 
+  */
+  if(get_data_head(self, urn, attribute, &i)) {
+    do {
+      if(value.dsize == i.length && i.length < 100000) {
+	char buff[value.dsize];
+	
+	// Read this much from the file
+	if(read(self->data_store_fd, buff, i.length) < i.length) {
+	  // Oops cant read enough
+	  Py_DECREF(value_str);
+	  return PyErr_Format(PyExc_IOError, "Unable to read data store?");
+	};
+
+	if(!memcmp(buff, value.dptr, value.dsize)) {
+	  // The value is already stored - just ignore it.
+	  goto exit;
+	};
+      };
+    } while(get_data_next(self, &i));
+  };
+
+  // Ok if we get here, the value is not already stored there.
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
+
+  offset = tdb_fetch(self->data_db, key);
+  if(offset.dptr) {
+    previous_offset = to_int(offset);
+    free(offset.dptr);
+  };
+
+  // Go to the end and write the new record
+  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  i.offset = previous_offset;
+  i.length = value.dsize;
+
+  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, value.dptr, value.dsize);
+
+  // Now store the offset to this in the tdb database
+  value.dptr = (unsigned char *)buff2;
+  value.dsize = from_int(new_offset, buff2, BUFF_SIZE);
+
+  tdb_store(self->data_db, key, value, TDB_REPLACE);
+
+  exit:
+  Py_DECREF(value_str);
+  Py_RETURN_NONE;
+};
+
+static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  char buff[BUFF_SIZE];
+  char buff2[BUFF_SIZE];
+  static char *kwlist[] = {"urn", "attribute", "value", NULL};
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA key;
+  PyObject *value_obj, *value_str;
+  TDB_DATA value;
+  TDB_DATA offset;
+  TDB_DATA_LIST i;
+  uint32_t new_offset;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O", kwlist, 
+				  &urn.dptr, &urn.dsize, 
+				  &attribute.dptr, &attribute.dsize,
+				  &value_obj))
+    return NULL;
+
+  // Convert the object to a string
+  value_str = PyObject_Str(value_obj);
+  if(!value_str) return NULL;
+
+  PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
+
+  // Ok if we get here, the value is not already stored there.
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
+
+  // Go to the end and write the new record
+  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  i.offset = 0;
+  i.length = value.dsize;
+
+  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, value.dptr, value.dsize);
+
+  offset.dptr = (unsigned char *)buff2;
+  offset.dsize = from_int(new_offset, buff2, BUFF_SIZE);
+
+  tdb_store(self->data_db, key, offset, TDB_REPLACE);
+
+  Py_RETURN_NONE;
+};
+
+static PyObject *delete(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "attribute", NULL};
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA key;
+  char buff[BUFF_SIZE];
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#", kwlist, 
+				  &urn.dptr, &urn.dsize, 
+				  &attribute.dptr, &attribute.dsize
+				  ))
+    return NULL;
+
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 0);
+
+  // Remove the key from the database
+  tdb_delete(self->data_db, key);
+
+  Py_RETURN_NONE;
+};
+
+/** Resolves a single attribute and fills into value. Value needs to
+    be freed by callers. */
+static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA value) {
+  TDB_DATA_LIST i;
+
+  if(get_data_head(self, urn, attribute, &i)) {
+    char *buff = (char *)malloc(i.length);
+      
+    // Read this much from the file
+    if(read(self->data_store_fd, buff, i.length) < i.length) {
+      // Oops cant read enough
+      goto error;
+    };
+
+    value.dptr = (unsigned char *)buff;
+    value.dsize= i.length;
+    return 1;
+  };
+
+ error:
+  value.dptr = NULL;
+  value.dsize = 0;
+  return 0;
+};
+
+static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "attribute", "follow_inheritence", NULL};
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA_LIST i;
+  PyObject *result;
+  int follow_inheritence=0;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#|L", kwlist, 
+				  &urn.dptr, &urn.dsize, 
+				  &attribute.dptr, &attribute.dsize,
+				  &follow_inheritence))
+    return NULL;
+
+  result = PyList_New(0);
+
+  if(get_data_head(self, urn, attribute, &i) && i.length < 100000) {
+    do {
+      PyObject *tmp = PyString_FromStringAndSize(NULL, i.length);
+      char *buff;
+      
+      if(!tmp) return NULL;
+      
+      buff = PyString_AsString(tmp);
+      // Read this much from the file
+      if(read(self->data_store_fd, buff, i.length) < i.length) {
+	// Oops cant read enough
+	Py_DECREF(tmp);
+	goto exit;
+      };
+      
+      // Add the data to the list
+      PyList_Append(result, tmp);
+      Py_DECREF(tmp);
+    } while(get_data_next(self, &i));
+  };
+
+ exit:
+  return result;
+};
+
+static PyMethodDef PyTDBResolver_methods[] = {
+  {"get_urn_by_id",(PyCFunction)get_urn_by_id, METH_VARARGS|METH_KEYWORDS,
+   "Resolves a URN by an id"},
+  {"get_id_by_urn",(PyCFunction)get_id_by_urn, METH_VARARGS|METH_KEYWORDS,
+   "Resolves a unique ID for a urn"},
+  {"set",(PyCFunction)set, METH_VARARGS|METH_KEYWORDS,
+   "Sets a attribute for a given URN"},
+  {"add",(PyCFunction)add, METH_VARARGS|METH_KEYWORDS,
+   "Adds an attribute for a URN"},
+  {"delete",(PyCFunction)delete, METH_VARARGS|METH_KEYWORDS,
+   "deletes all attributes for a URN"},
+  {"resolve_list",(PyCFunction)resolve_list, METH_VARARGS|METH_KEYWORDS,
+   "Returns a list of attribute values for a URN"},
+  {NULL}  /* Sentinel */
+};
+
+static PyTypeObject PyTDBResolver_Type = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /* ob_size */
+    "pytdb.BaseTDBResolver",               /* tp_name */
+    sizeof(BaseTDBResolver),            /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)tdbresolver_dealloc,/* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_compare */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    0,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
+    "TDB Resolver object",     /* tp_doc */
+    0,	                       /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    PyTDBResolver_methods,            /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)tdbresolver_init,      /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
 
 static PyMethodDef tdb_methods[] = {
   {NULL}  /* Sentinel */
 };
+
+/***** Following is an implementation of a serialiser */
+typedef struct {
+  PyObject_HEAD
+  raptor_serializer *rdf_serializer;
+  PyObject *write_callback;
+  PyObject *user_data;
+  BaseTDBResolver *resolver;
+} RDFSerializer;
+
+static int rdfserializer_dealloc(RDFSerializer *self) {
+  Py_DECREF(self->write_callback);
+  Py_DECREF(self->user_data);
+  Py_DECREF(self->resolver);
+  raptor_free_serializer(self->rdf_serializer);
+
+  return 1;
+};
+
+static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"resolver", "write_callback", "data", "type", NULL};
+  self->user_data = NULL;
+  char *type = "turtle";
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "OO|Os", kwlist, 
+				  &self->resolver, 
+				  &self->write_callback,
+				  &self->user_data, &type))
+    goto error;
+
+  if(!PyCallable_Check(self->write_callback)) {
+    PyErr_Format(PyExc_RuntimeError, "Write callback is not callable?");
+    goto error;
+  };
+
+  // Try to make a new serialiser
+  self->rdf_serializer = raptor_new_serializer(type);
+  if(!self->rdf_serializer) {
+    PyErr_Format(PyExc_RuntimeError, "Cant create serializer of type %s", type);
+    goto error;
+  };
+
+  if(0) {
+    raptor_serialize_start_to_file_handle(self->rdf_serializer, 
+					  NULL, stdout);
+  } else {
+    raptor_serialize_start_to_filename(self->rdf_serializer, 
+				       "/tmp/foobar.turtle");
+  };
+
+  Py_INCREF(self->write_callback);
+  Py_INCREF(self->resolver);
+  if(self->user_data)
+    Py_INCREF(self->user_data);
+
+  return 0;
+
+ error:
+  return -1;
+};
+
+static PyObject *rdfserializer_serialize_urn(RDFSerializer *self, 
+					     PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", NULL};
+  TDB_DATA urn,id;
+  int max_attr_id=1,i, urn_id;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
+				  &urn.dptr, &urn.dsize))
+    return NULL;
+     
+  // Find the URN id
+  {
+    id = tdb_fetch(self->resolver->urn_db, urn);
+    if(!id.dptr)
+      return PyErr_Format(PyExc_RuntimeError, "Urn %s not found", urn.dptr);
+    
+    urn_id = to_int(id);
+    free(id.dptr);
+  };
+
+  //Find the maximum attribute ID
+  {
+    TDB_DATA max_key;
+
+    max_key.dptr = (unsigned char *)MAX_KEY;
+    max_key.dsize = strlen(MAX_KEY);
+
+    id = tdb_fetch(self->resolver->attribute_db, max_key);
+    if(id.dptr) {
+      max_attr_id = to_int(id);
+      free(id.dptr);
+    };
+  };
+
+  // Now just iterate over all the attribute id's and guess if they
+  // are present - this avoids having to allocate memory
+  // unnecessarily.
+  for(i=1; i<=max_attr_id; i++) {
+    TDB_DATA key, offset;
+    char buff[BUFF_SIZE];
+
+    // Make up the key to the data table
+    key.dptr = buff;
+    key.dsize = snprintf(buff, BUFF_SIZE, "%d:%d", urn_id, i);
+    
+    offset = tdb_fetch(self->resolver->data_db, key);
+    if(offset.dptr) {
+      // Found it
+      TDB_DATA attribute;
+      char buff[BUFF_SIZE];
+
+      // Resolve the attribute_id back to a named attribute
+      attribute.dptr = buff;
+      attribute.dsize = from_int(i, buff, BUFF_SIZE);
+
+      attribute = tdb_fetch(self->resolver->attribute_db, attribute);
+      if(attribute.dptr) {
+	// Get the offset to the value and retrieve it from the data
+	// store:
+	TDB_DATA_LIST tmp;
+	tmp.offset = to_int(offset);
+	
+	// Iterate over all hits in the attribute list
+	while(tmp.offset) {
+	  lseek(self->resolver->data_store_fd, tmp.offset, SEEK_SET);
+	  if(read(self->resolver->data_store_fd, &tmp, sizeof(tmp))==sizeof(tmp) && 
+	     tmp.length < 10000) {
+	    char buff[tmp.length];
+
+	    buff[tmp.length]=0;
+	    read(self->resolver->data_store_fd, buff, tmp.length);
+
+	    // Now export this statement:
+	    {
+	      raptor_statement triple;
+
+	      urn.dptr[urn.dsize]=0;
+	      attribute.dptr[attribute.dsize-1]=0;
+
+	      triple.subject = (void*)raptor_new_uri((const unsigned char*)urn.dptr);
+	      triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+	      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute.dptr);
+	      triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+	      triple.object = buff;
+	      triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+	      triple.object_literal_datatype = 0;
+	      //triple.object_literal_language=(const unsigned
+	      //char*)"en";
+	      triple.object_literal_language=NULL;
+
+	      raptor_serialize_statement(self->rdf_serializer, &triple);
+	      raptor_free_uri((raptor_uri*)triple.subject);
+	      raptor_free_uri((raptor_uri*)triple.predicate);	      
+	    };
+	  } else break;
+	};
+
+	free(attribute.dptr);
+      };
+      free(offset.dptr);
+    };
+  };
+
+  Py_RETURN_NONE;
+};
+
+static PyObject *rdfserializer_close(RDFSerializer *self, 
+					     PyObject *args, PyObject *kwds) {
+  raptor_serialize_end(self->rdf_serializer);
+
+  Py_RETURN_NONE;
+};
+
+static PyMethodDef RDFSerializer_methods[] = {
+    {"serialize_urn", (PyCFunction)rdfserializer_serialize_urn, METH_VARARGS|METH_KEYWORDS,
+     "serializes all the statements for a given URN" },
+    {"close", (PyCFunction)rdfserializer_close, METH_VARARGS | METH_KEYWORDS,
+     "closes the serializer and forces any pending output to be flushed"},
+    {NULL}  /* Sentinel */
+};
+
+static PyTypeObject RDFSerializer_Type = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /* ob_size */
+    "pytdb.RDFSerializer",               /* tp_name */
+    sizeof(RDFSerializer),            /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)rdfserializer_dealloc,/* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_compare */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    0,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
+    "An RDF Serializer",     /* tp_doc */
+    0,	                       /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    RDFSerializer_methods,            /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)rdfserializer_init,      /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
+
 
 PyMODINIT_FUNC initpytdb(void) {
   /* create module */
@@ -187,4 +922,20 @@ PyMODINIT_FUNC initpytdb(void) {
 
   Py_INCREF(&tdbType);
   PyModule_AddObject(m, "PyTDB", (PyObject *)&tdbType);
+
+  PyTDBResolver_Type.tp_new = PyType_GenericNew;
+  if (PyType_Ready(&PyTDBResolver_Type) < 0)
+    return;
+
+  Py_INCREF(&PyTDBResolver_Type);
+  PyModule_AddObject(m, "BaseTDBResolver", (PyObject *)&PyTDBResolver_Type);
+
+  RDFSerializer_Type.tp_new = PyType_GenericNew;
+  if (PyType_Ready(&RDFSerializer_Type) < 0)
+    return;
+
+  Py_INCREF(&RDFSerializer_Type);
+  PyModule_AddObject(m, "RDFSerializer", (PyObject *)&RDFSerializer_Type);
+
+  raptor_init();
 }

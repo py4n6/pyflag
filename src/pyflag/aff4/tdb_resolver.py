@@ -103,24 +103,12 @@ class Tdb:
 #    def __del__(self):
 #        libtdb.close(self.tdb_fh)
 
-## Use the fast C binding if its available
-try:
-    import pytdb
-
-    Tdb = pytdb.PyTDB
-except ImportError:
-    pass
-
 import aff4
 NoneObject = aff4.NoneObject
 
-class BASETDBResolver(aff4.Resolver):
+class BASETDBResolver:
     """ A basic resolver based on TDB """
     def __init__(self):
-        self.read_cache = aff4.Store(50)
-        self.write_cache = aff4.Store(50)
-        self.clear_hooks()
-
         ## urn -> urn_id, and urn_id -> urn
         self.urn_db = Tdb("urn.tdb")
 
@@ -135,20 +123,6 @@ class BASETDBResolver(aff4.Resolver):
         self.data_store.seek(0,2)
         if self.data_store.tell() == 0:
             self.data_store.write("data")
-
-    def __str__(self):
-        return ''
-
-    def lock(self, uri, mode='r'):
-        ## Not implemented
-        pass
-
-    def unlock(self, uri):
-        pass
-
-    def max_urn_id(self):
-        maximum_id = to_int(self.urn_db.get(MAX_KEY)) or 1
-        return maximum_id
 
     def get_urn_by_id(self, id):
         return self.urn_db.get(from_int(id))
@@ -176,6 +150,7 @@ class BASETDBResolver(aff4.Resolver):
         return struct.pack("<LL",attribute_id, urn_id)
         
     def set(self, uri, attribute, value):
+        print "Setting %s, %s, %s" %(uri,attribute,value)
         key = self.calculate_key(uri, attribute)
         value = "%s" % value
 
@@ -200,6 +175,7 @@ class BASETDBResolver(aff4.Resolver):
             cb(uri, attribute, value)
     
     def add(self, uri, attribute, value):
+        print "Adding %s, %s, %s" %(uri,attribute,value)
         value = value.__str__()
         ## Check if we need to add this value
         for x in self.resolve_list(uri, attribute):
@@ -227,13 +203,6 @@ class BASETDBResolver(aff4.Resolver):
         for cb in self.add_hooks:
             cb(uri, attribute, value)
 
-    def resolve(self, uri, attribute, follow_inheritence=True):
-        """ Return a single (most recently set attribute) """
-        for x in self.resolve_list(uri, attribute, follow_inheritence):
-            return x
-
-        return NoneObject("No attribute %s found on %s" % (attribute, uri))
-
     def delete(self, uri, attribute):
         key = self.calculate_key(uri, attribute)
         self.data_db.delete(key)
@@ -253,14 +222,12 @@ class BASETDBResolver(aff4.Resolver):
 
         if not follow_inheritence:
             return
-        
+        ## FIXME:
+        return
         for inherited in self.resolve_list(uri, AFF4_INHERIT, follow_inheritence=False):
             for v in self.resolve_list(inherited, attribute):
                 yield v
 
-
-class TDBResolver(BASETDBResolver):
-    """ A resolver based on TDB """
     def export_volume(self, volume_urn):
         """ Serialize a suitable properties file for the
         volume_urn. We include all the objects which are contained in
@@ -273,13 +240,52 @@ class TDBResolver(BASETDBResolver):
         
         for urn in aff4.oracle.resolve_list(volume_urn, AFF4_CONTAINS):
             try:
-                urn_id = self.get_id(self.urn_db, urn)
+                urn_id = self.get_id_by_urn(urn)
             except ValueError: continue
             self.export_model(urn, model)
 
         self.export_model(volume_urn, model)
         serializer = RDF.Serializer("turtle")
         return serializer.serialize_model_to_string(model)
+
+## Use the fast C binding if its available
+try:
+    import pytdb
+
+    Tdb = pytdb.PyTDB
+    class BaseTDBResolver(pytdb.BaseTDBResolver):
+        def export_volume(self, volume_urn):
+            def cb(data, *args): print data
+            
+            serializer = pytdb.RDFSerializer(self, cb, None)
+            
+            for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):
+                serializer.serialize_urn(urn)
+
+            serializer.close()
+
+            return ''
+
+    BASETDBResolver = BaseTDBResolver
+except ImportError,e:
+    print e
+    pass
+
+## Now extend this
+class TDBResolver(BASETDBResolver, aff4.Resolver):
+    """ A resolver based on TDB """
+    def __init__(self):
+        self.read_cache = aff4.Store(50)
+        self.write_cache = aff4.Store(50)
+        self.clear_hooks()
+        BASETDBResolver.__init__(self)
+
+    def resolve(self, uri, attribute, follow_inheritence=True):
+        """ Return a single (most recently set attribute) """
+        for x in self.resolve_list(uri, attribute, follow_inheritence):
+            return x
+
+        return NoneObject("No attribute %s found on %s" % (attribute, uri))
 
     def export_dict(self, uri):
         """ Return a dict of all keys/values """
@@ -327,6 +333,16 @@ class TDBResolver(BASETDBResolver):
                 result += "\n************** %s **********\n%s" % (urn, data)
 
         return result
+
+    def __str__(self):
+        return ''
+
+    def lock(self, uri, mode='r'):
+        ## Not implemented
+        pass
+
+    def unlock(self, uri):
+        pass
     
 NoneObject = aff4.NoneObject
 

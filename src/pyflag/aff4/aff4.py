@@ -2775,5 +2775,5 @@ oracle.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
 oracle.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
 
 #def DEBUG(verb, fmt, *args):
-#    if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
+#    if verb <= _DEBUG:
 #        print fmt % args
