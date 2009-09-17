@@ -13,6 +13,7 @@ import pdb, sys
 import struct
 from aff4_attributes import *
 import RDF
+import cStringIO
 
 from os import O_RDWR, O_CREAT
 MAX_KEY = '__MAX'
@@ -255,16 +256,21 @@ try:
     Tdb = pytdb.PyTDB
     class BaseTDBResolver(pytdb.BaseTDBResolver):
         def export_volume(self, volume_urn):
-            def cb(data, *args): print data
+            result = cStringIO.StringIO()
             
-            serializer = pytdb.RDFSerializer(self, cb, None)
+            def cb(self, data):
+                result.write(data)
             
+            serializer = pytdb.RDFSerializer(resolver = self, write_callback = cb,
+                                             data = self, base = volume_urn)
+
+            #serializer.set_namespace(volume_urn, "VFS")
             for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):
                 serializer.serialize_urn(urn)
 
             serializer.close()
 
-            return ''
+            return result.getvalue()
 
     BASETDBResolver = BaseTDBResolver
 except ImportError,e:

@@ -6,7 +6,13 @@
 #include <tdb.h>
 #include <raptor.h>
 
+#undef min
+#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
+#undef max
+#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
+
 #define BUFF_SIZE 1024
+#define SERIALIZER_BUFF_SIZE 102400
 #define MAX_KEY "__MAX"
 #define INHERIT "urn:aff4:inherit"
 
@@ -199,13 +205,15 @@ static int from_int(uint32_t i, char *buff, int buff_len) {
 
 /** Given a buffer unserialise an int from it */
 static uint32_t to_int(TDB_DATA string) {
-  unsigned char *buff = string.dptr;
-  int buff_len = string.dsize;
+  unsigned char buff[BUFF_SIZE];
+  int buff_len = min(string.dsize, BUFF_SIZE-1);
 
   if(buff_len < 2) return 0;
 
+  memcpy(buff, string.dptr, buff_len);
+
   //Make sure its null terminated
-  buff[buff_len-1]=0;
+  buff[buff_len]=0;
 
   return strtol((char *)buff+2, NULL, 0);
 };
@@ -690,32 +698,93 @@ static PyMethodDef tdb_methods[] = {
 typedef struct {
   PyObject_HEAD
   raptor_serializer *rdf_serializer;
-  PyObject *write_callback;
-  PyObject *user_data;
+  raptor_iostream *iostream;
   BaseTDBResolver *resolver;
+  PyObject *callback;
+  PyObject *data;
+
+  // We buffer the data through here to minimize expensive python
+  // calls:
+  char buffer[SERIALIZER_BUFF_SIZE];
+  int size;
 } RDFSerializer;
 
 static int rdfserializer_dealloc(RDFSerializer *self) {
-  Py_DECREF(self->write_callback);
-  Py_DECREF(self->user_data);
+  Py_DECREF(self->callback);
+  Py_DECREF(self->data);
   Py_DECREF(self->resolver);
   raptor_free_serializer(self->rdf_serializer);
 
   return 1;
 };
 
-static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwds) {
-  static char *kwlist[] = {"resolver", "write_callback", "data", "type", NULL};
-  self->user_data = NULL;
-  char *type = "turtle";
+/** Flush the buffer to the python callback */
+static void flush(void *context) {
+  RDFSerializer *self=context;
+  PyObject *result;
 
-  if(!PyArg_ParseTupleAndKeywords(args, kwds, "OO|Os", kwlist, 
+  if(self->size > 0) {
+    result = PyObject_CallFunction(self->callback, "Os#", self->data, 
+				   self->buffer, self->size);
+    if(result) {
+      Py_DECREF(result);
+    };
+    // Swallow the data
+    self->size = 0;
+  };
+};
+
+static int iostream_write_byte(void *context, const int byte) {
+  RDFSerializer *self=context;
+
+  if(self->size + 1 >= SERIALIZER_BUFF_SIZE) {
+    flush(self);
+  };
+
+  self->buffer[self->size] = byte;
+  self->size++;
+  
+  return 1;
+};
+
+static int iostream_write_bytes(void *context, const void *ptr, size_t size, size_t nmemb) {
+  RDFSerializer *self=context;
+  int length = nmemb * size;
+
+  if(self->size + length >= SERIALIZER_BUFF_SIZE) {
+    flush(self);
+  };
+
+  memcpy(self->buffer+self->size, ptr, length);
+  self->size += length;
+
+  return length;
+}
+
+raptor_iostream_handler2 python_iostream_handler = {
+  .version = 2,
+  .write_byte = iostream_write_byte,
+  .write_bytes = iostream_write_bytes,
+  .finish = flush,
+  .write_end = flush
+};
+
+static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"resolver", "write_callback", "data", "base", "type", NULL};
+  char *type = "turtle";
+  char *base = "";
+
+  self->iostream = raptor_new_iostream_from_handler2((void *)self, &python_iostream_handler);
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "OO|Oss", kwlist, 
 				  &self->resolver, 
-				  &self->write_callback,
-				  &self->user_data, &type))
+				  &self->callback,
+				  &self->data, 
+				  &base,
+				  &type))
     goto error;
 
-  if(!PyCallable_Check(self->write_callback)) {
+  if(!PyCallable_Check(self->callback)) {
     PyErr_Format(PyExc_RuntimeError, "Write callback is not callable?");
     goto error;
   };
@@ -727,18 +796,16 @@ static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwd
     goto error;
   };
 
-  if(0) {
-    raptor_serialize_start_to_file_handle(self->rdf_serializer, 
-					  NULL, stdout);
-  } else {
-    raptor_serialize_start_to_filename(self->rdf_serializer, 
-				       "/tmp/foobar.turtle");
+  {
+    raptor_uri uri = raptor_new_uri((const unsigned char*)base);
+    raptor_serialize_start(self->rdf_serializer, 
+			   uri, self->iostream);
   };
 
-  Py_INCREF(self->write_callback);
+  Py_INCREF(self->callback);
   Py_INCREF(self->resolver);
-  if(self->user_data)
-    Py_INCREF(self->user_data);
+  if(self->data)
+    Py_INCREF(self->data);
 
   return 0;
 
@@ -821,14 +888,24 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
 	    // Now export this statement:
 	    {
 	      raptor_statement triple;
+	      char urn_buf[BUFF_SIZE];
+	      char attribute_buf[BUFF_SIZE];
 
-	      urn.dptr[urn.dsize]=0;
-	      attribute.dptr[attribute.dsize-1]=0;
+	      urn.dsize = min(urn.dsize, BUFF_SIZE-1);
+	      memcpy(urn_buf, urn.dptr, urn.dsize);
 
-	      triple.subject = (void*)raptor_new_uri((const unsigned char*)urn.dptr);
+	      attribute.dsize = min(attribute.dsize, BUFF_SIZE-1);
+	      memcpy(attribute_buf, attribute.dptr, attribute.dsize);
+
+	      urn_buf[urn.dsize]=0;
+	      attribute_buf[attribute.dsize]=0;
+
+	      triple.subject = (void*)raptor_new_uri((const unsigned char*)urn_buf);
 	      triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-	      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute.dptr);
+
+	      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute_buf);
 	      triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+
 	      triple.object = buff;
 	      triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
 	      triple.object_literal_datatype = 0;
@@ -853,8 +930,27 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
 };
 
 static PyObject *rdfserializer_close(RDFSerializer *self, 
-					     PyObject *args, PyObject *kwds) {
+				     PyObject *args, PyObject *kwds) {
   raptor_serialize_end(self->rdf_serializer);
+
+  Py_RETURN_NONE;
+};
+
+static PyObject *rdfserializer_set_namespace(RDFSerializer *self,
+					     PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "namespace", NULL};
+  char *urn, *namespace;
+  raptor_uri *uri;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss", kwlist, 
+				  &urn, &namespace))
+    return NULL;
+
+  uri = (void*)raptor_new_uri((const unsigned char*)urn);
+  if(raptor_serialize_set_namespace(self->rdf_serializer, uri, namespace)) {
+    return PyErr_Format(PyExc_RuntimeError, 
+			"Unable to set namespace %s for urn %s", namespace, urn);
+  };
 
   Py_RETURN_NONE;
 };
@@ -864,6 +960,8 @@ static PyMethodDef RDFSerializer_methods[] = {
      "serializes all the statements for a given URN" },
     {"close", (PyCFunction)rdfserializer_close, METH_VARARGS | METH_KEYWORDS,
      "closes the serializer and forces any pending output to be flushed"},
+    {"set_namespace", (PyCFunction)rdfserializer_set_namespace, METH_VARARGS | METH_KEYWORDS,
+     "Adds a new namespace."},
     {NULL}  /* Sentinel */
 };
 
