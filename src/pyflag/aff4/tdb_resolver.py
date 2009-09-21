@@ -14,6 +14,7 @@ import struct
 from aff4_attributes import *
 import RDF
 import cStringIO
+import uuid
 
 from os import O_RDWR, O_CREAT
 MAX_KEY = '__MAX'
@@ -285,6 +286,26 @@ class TDBResolver(BASETDBResolver, aff4.Resolver):
         self.write_cache = aff4.Store(50)
         self.clear_hooks()
         BASETDBResolver.__init__(self)
+
+    def add(self, uri, attribute, value):
+        ## A dict means we store an anonymous object:
+        if 0:
+            try:
+                items = value.iteritems()
+
+                ## we create an annonymous object to contain the data
+                annon = "urn:annon:%s" % uuid.uuid4()
+                stored = self.resolve(uri, AFF4_STORED)
+                BASETDBResolver.set(self, annon, AFF4_STORED, stored)
+                BASETDBResolver.add(self, stored, AFF4_CONTAINS, annon)
+
+                for k,v in items:
+                    BASETDBResolver.set(self, annon, k, v.encode("utf8"))
+
+                value = annon
+            except AttributeError: pass
+        
+        BASETDBResolver.add(self, uri, attribute, value)
 
     def resolve(self, uri, attribute, follow_inheritence=True):
         """ Return a single (most recently set attribute) """

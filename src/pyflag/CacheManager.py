@@ -47,9 +47,11 @@ class PyFlagMap(aff4.Map):
         try:
             del props['inode_id']
         except: pass
-        
+        #aff4.oracle.add(self.urn, "%s%s" % (PYFLAG_NS, table),
+        #                props)
+
         aff4.oracle.add(self.urn, "%s%s" % (PYFLAG_NS, table),
-                        cPickle.dumps(props, protocol=0))
+                        cPickle.dumps(props,protocol=2).encode("string_escape"))
         #aff4.oracle.set(self.urn, "%s%s" % (PYFLAG_NS, table), "1")
         #for k,v in props.items():
         #    aff4.oracle.set(self.urn, "%s%s:%s" % (PYFLAG_NS, table, k), v)
@@ -62,22 +64,23 @@ class PyFlagMap(aff4.Map):
         ## inherited object in the same table.
         dbh = DB.DBO(self.case)
         for table, columns in Registry.CASE_TABLES.case_tables.items():
-            #if table=='connection_details': pdb.set_trace()
-            
-            for data in aff4.oracle.resolve_list(self.urn, "%s%s" % (PYFLAG_NS, table)):
-                args = {'inode_id': self.inode_id}                
-                tmp_args = cPickle.loads(data)
-                for column in columns:
-                    try:
-                        args[column] = tmp_args[column]
-                    except KeyError:
-                        try:
-                            args["_"+column] = tmp_args["_"+column]
-                        except KeyError:
-                            pass
+            for data_urn in aff4.oracle.resolve_list(self.urn, "%s%s" % (PYFLAG_NS, table)):
+                args = {'inode_id': self.inode_id}
+                if 0:
+                    ## We try to load all the attributes of the data_urn:
+                    for column in columns:
+                        arg = aff4.oracle.resolve(data_urn, column)
+                        if not arg:
+                            column = "_" + column
+                            arg = aff4.oracle.resolve(data_urn, column)
+
+                        if arg:
+                            args[column] = arg
+                else:
+                    args.update(cPickle.loads(data_urn.decode("string_escape")))
                     
                 dbh.insert(table, **args)
-
+                
         self.add_to_VFS(**self.include_in_VFS)
 
     def add_to_VFS(self, path, **kwargs):

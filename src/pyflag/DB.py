@@ -716,7 +716,7 @@ class PooledDBO:
                 else:
                     break
 
-        raise e
+                raise e
             
     def __iter__(self):
         return self

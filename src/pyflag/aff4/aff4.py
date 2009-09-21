@@ -562,7 +562,7 @@ except ImportError:
 
 class Store:
     """ This is a cache which expires objects in oldest first manner. """
-    def __init__(self, limit=5):
+    def __init__(self, limit=50):
         self.age = []
         self.hash = {}
         self.limit = limit
@@ -672,6 +672,17 @@ class Resolver:
 
     def set(self, uri, attribute, value):
         DEBUG(_DEBUG, "Setting %s: %s=%s", uri, attribute, value);
+        ## A dict means we store an anonymous object:
+        try:
+            items = value.iteritems()
+            pdb.set_trace()
+            annon = "urn:annon:%s" % uuid4.uuid4()
+            for k,v in items:
+                self.set(annon, k ,v)
+
+            value = anon
+        except AttributeError: pass
+
         self[uri].set(attribute, value)
         
         ## Notify all interested parties
@@ -739,19 +750,19 @@ class Resolver:
         """
         result = None
 
-        if uri.startswith(FQN) and \
-               not self.resolve(uri, AFF4_TYPE):
-            pdb.set_trace()
-            Raise("Trying to open a non existant or already closed object %s" % uri)
+        #if uri.startswith(FQN) and \
+        #       not self.resolve(uri, AFF4_TYPE):
+        #    pdb.set_trace()
+        #    Raise("Trying to open a non existant or already closed object %s" % uri)
 
         ## If the uri is not complete here we guess its a file://
         if ":" not in uri:
             uri = "file://%s" % uri
 
         ## Check for links
-        if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
-            uri = oracle.resolve(uri, AFF4_TARGET)
-        
+        #if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
+        #    uri = oracle.resolve(uri, AFF4_TARGET)
+
         try:
             if mode =='r':
                 result = self.read_cache[uri]
@@ -1865,8 +1876,13 @@ class Map(FileLikeObject):
                 if prediction == self.target_offsets[x]:
                     continue
 
+            ## Try to compress the targets if possible (@ refers to
+            ## the target attribute)
+            target = self.target_urns[x]
+            if target == self.target: target = "@"
+
             fd.write("%d,%d,%s\n" % (x, self.target_offsets[x],
-                                     self.target_urns[x]))
+                                     target))
             previous = x
 
         ## If its very small we can just store it as an attribute

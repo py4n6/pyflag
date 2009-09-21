@@ -171,13 +171,19 @@ class scan(pyflagsh.command):
 
         for row in dbh:
             inode_id = row['inode_id']
-            pdbh.mass_insert(
-                command = 'Scan',
-                arg1 = self.environment._CASE,
-                arg2 = inode_id,
-                arg3 = ','.join(scanners),
-                cookie=cookie,
-                )
+            case = self.environment._CASE
+
+            if 1:
+                factories = Scanner.get_factories(case, scanners)
+                Scanner.scan_inode(case, inode_id, factories)
+            else:
+                pdbh.mass_insert(
+                    command = 'Scan',
+                    arg1 = case,
+                    arg2 = inode_id,
+                    arg3 = ','.join(scanners),
+                    cookie=cookie,
+                    )
 
         pdbh.mass_insert_commit()
 

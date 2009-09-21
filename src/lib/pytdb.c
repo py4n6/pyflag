@@ -14,7 +14,12 @@
 #define BUFF_SIZE 1024
 #define SERIALIZER_BUFF_SIZE 102400
 #define MAX_KEY "__MAX"
-#define INHERIT "urn:aff4:inherit"
+#define VOLATILE_NS "aff4volatile:"
+
+static TDB_DATA INHERIT = {
+  .dptr = "aff4:inherit",
+  .dsize = 12
+};
 
 typedef struct {
   PyObject_HEAD
@@ -183,6 +188,7 @@ typedef struct {
   uint32_t hashsize;
 } BaseTDBResolver;
 
+static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value);
 
 static int tdbresolver_dealloc(BaseTDBResolver *self) {
   tdb_close(self->urn_db);
@@ -200,7 +206,7 @@ typedef struct TDB_DATA_LIST {
 
 /* Given an int serialise into the buffer */
 static int from_int(uint32_t i, char *buff, int buff_len) {
-  return snprintf(buff, buff_len, "__%d", i) + 1;
+  return snprintf(buff, buff_len, "__%d", i);
 };
 
 /** Given a buffer unserialise an int from it */
@@ -421,10 +427,58 @@ static inline int get_data_next(BaseTDBResolver *self, TDB_DATA_LIST *i){
   return 0;
 };
 
+// check if the value is already set for urn and attribute - honors inheritance
+static int is_value_present(BaseTDBResolver *self,TDB_DATA urn, TDB_DATA attribute,
+			    TDB_DATA value, int follow_inheritence) {
+  TDB_DATA_LIST i;
+  char buff[BUFF_SIZE];
+  TDB_DATA tmp;
+
+  while(1) {
+
+    // Check the current urn,attribute set
+    if(get_data_head(self, urn, attribute, &i)) {
+      do {
+	if(value.dsize == i.length && i.length < 100000) {
+	  char buff[value.dsize];
+	  
+	  // Read this much from the file
+	  if(read(self->data_store_fd, buff, i.length) < i.length) {
+	    return 0;
+	  };
+	  
+	  if(!memcmp(buff, value.dptr, value.dsize)) {
+	    // Found it:
+	    return 1;
+	  };
+	};
+      } while(get_data_next(self, &i));
+    };
+
+    if(!follow_inheritence) break;
+
+    // Follow inheritence
+    tmp.dptr = buff;
+    tmp.dsize = BUFF_SIZE;
+    // Substitute our urn with a possible inherited URN
+    if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
+      // Copy the urn
+      urn.dptr = buff;
+      urn.dsize = tmp.dsize;
+    } else {
+      break;
+    };
+
+    // Do it all again with the inherited URN
+  };
+    
+  return 0;
+};
+
 static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
-  static char *kwlist[] = {"urn", "attribute", "value", NULL};
+  static char *kwlist[] = {"urn", "attribute", "value", "unique", NULL};
   TDB_DATA urn;
   TDB_DATA attribute;
   TDB_DATA key;
@@ -434,11 +488,12 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   TDB_DATA_LIST i;
   uint32_t previous_offset=0;
   uint32_t new_offset;
+  int unique = 0;
 
-  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O", kwlist, 
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O|L", kwlist, 
 				  &urn.dptr, &urn.dsize, 
 				  &attribute.dptr, &attribute.dsize,
-				  &value_obj))
+				  &value_obj, &unique))
     return NULL;
 
   // Convert the object to a string
@@ -447,27 +502,11 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 
   PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
 
-  /** We go through the attribute list to check if the new value is
-      unique 
+  /** If the value is already in the list, we just ignore this
+      request.
   */
-  if(get_data_head(self, urn, attribute, &i)) {
-    do {
-      if(value.dsize == i.length && i.length < 100000) {
-	char buff[value.dsize];
-	
-	// Read this much from the file
-	if(read(self->data_store_fd, buff, i.length) < i.length) {
-	  // Oops cant read enough
-	  Py_DECREF(value_str);
-	  return PyErr_Format(PyExc_IOError, "Unable to read data store?");
-	};
-
-	if(!memcmp(buff, value.dptr, value.dsize)) {
-	  // The value is already stored - just ignore it.
-	  goto exit;
-	};
-      };
-    } while(get_data_next(self, &i));
+  if(unique && is_value_present(self, urn, attribute, value, 1)) {
+    goto exit;
   };
 
   // Ok if we get here, the value is not already stored there.
@@ -524,7 +563,14 @@ static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 
   PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
 
-  // Ok if we get here, the value is not already stored there.
+  /** If the value is already in the list, we just ignore this
+      request.
+  */
+  if(is_value_present(self, urn, attribute, value, 1)) {
+    goto exit;
+  };
+
+  // Update the value in the db and replace with new value
   key.dptr = (unsigned char *)buff;
   key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
 
@@ -541,6 +587,8 @@ static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 
   tdb_store(self->data_db, key, offset, TDB_REPLACE);
 
+ exit:
+  Py_DECREF(value_str);
   Py_RETURN_NONE;
 };
 
@@ -567,36 +615,67 @@ static PyObject *delete(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 };
 
 /** Resolves a single attribute and fills into value. Value needs to
-    be freed by callers. */
-static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA value) {
+    be initialised with a valid dptr and dsize will indicate the
+    buffer size
+*/
+static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value) {
   TDB_DATA_LIST i;
-
+  
   if(get_data_head(self, urn, attribute, &i)) {
-    char *buff = (char *)malloc(i.length);
-      
+    int length = min(value->dsize, i.length);
+    
     // Read this much from the file
-    if(read(self->data_store_fd, buff, i.length) < i.length) {
+    if(read(self->data_store_fd, value->dptr, length) < length) {
       // Oops cant read enough
       goto error;
     };
 
-    value.dptr = (unsigned char *)buff;
-    value.dsize= i.length;
+    value->dsize= length;
     return 1;
   };
 
  error:
-  value.dptr = NULL;
-  value.dsize = 0;
+  value->dsize = 0;
+
   return 0;
+};
+
+
+/** Given a head in the data store, construct a python list with all
+    the values and return it.
+*/
+static PyObject *retrieve_attribute_list(BaseTDBResolver *self, TDB_DATA_LIST *head) {
+  PyObject *result = PyList_New(0);
+
+  do {
+    PyObject *tmp = PyString_FromStringAndSize(NULL, head->length);
+    char *buff;
+    
+    if(!tmp) return NULL;
+    
+    buff = PyString_AsString(tmp);
+    // Read this much from the file
+    if(read(self->data_store_fd, buff, head->length) < head->length) {
+      // Oops cant read enough
+      Py_DECREF(tmp);
+      goto exit;
+    };
+    
+    // Add the data to the list
+    PyList_Append(result, tmp);
+    Py_DECREF(tmp);
+  } while(get_data_next(self, head));
+
+ exit:
+  return result;
 };
 
 static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"urn", "attribute", "follow_inheritence", NULL};
-  TDB_DATA urn;
+  TDB_DATA urn,tmp;
+  char buff[BUFF_SIZE];
   TDB_DATA attribute;
   TDB_DATA_LIST i;
-  PyObject *result;
   int follow_inheritence=0;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#|L", kwlist, 
@@ -605,31 +684,27 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
 				  &follow_inheritence))
     return NULL;
 
-  result = PyList_New(0);
+  tmp.dptr = buff;
 
-  if(get_data_head(self, urn, attribute, &i) && i.length < 100000) {
-    do {
-      PyObject *tmp = PyString_FromStringAndSize(NULL, i.length);
-      char *buff;
-      
-      if(!tmp) return NULL;
-      
-      buff = PyString_AsString(tmp);
-      // Read this much from the file
-      if(read(self->data_store_fd, buff, i.length) < i.length) {
-	// Oops cant read enough
-	Py_DECREF(tmp);
-	goto exit;
-      };
-      
-      // Add the data to the list
-      PyList_Append(result, tmp);
-      Py_DECREF(tmp);
-    } while(get_data_next(self, &i));
+  while(1) {
+    if(get_data_head(self, urn, attribute, &i) && i.length < 100000) {
+      return retrieve_attribute_list(self, &i);
+    };
+    
+    if(!follow_inheritence) break;
+    
+    tmp.dsize = BUFF_SIZE;
+    // Substitute our urn with a possible inherited URN
+    if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
+      // Copy the urn
+      urn.dptr = buff;
+      urn.dsize = tmp.dsize;
+    } else {
+      break;
+    };
   };
-
- exit:
-  return result;
+  
+  return PyList_New(0);
 };
 
 static PyMethodDef PyTDBResolver_methods[] = {
@@ -869,7 +944,9 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
       attribute.dsize = from_int(i, buff, BUFF_SIZE);
 
       attribute = tdb_fetch(self->resolver->attribute_db, attribute);
-      if(attribute.dptr) {
+      // Ignore volatile namespace attributes
+      if(attribute.dptr && memcmp(attribute.dptr, VOLATILE_NS, 
+				  min(strlen(VOLATILE_NS), attribute.dsize))) {
 	// Get the offset to the value and retrieve it from the data
 	// store:
 	TDB_DATA_LIST tmp;
@@ -1018,21 +1095,21 @@ PyMODINIT_FUNC initpytdb(void) {
   if (PyType_Ready(&tdbType) < 0)
     return;
 
-  Py_INCREF(&tdbType);
+  Py_INCREF((PyObject *)&tdbType);
   PyModule_AddObject(m, "PyTDB", (PyObject *)&tdbType);
 
   PyTDBResolver_Type.tp_new = PyType_GenericNew;
   if (PyType_Ready(&PyTDBResolver_Type) < 0)
     return;
 
-  Py_INCREF(&PyTDBResolver_Type);
+  Py_INCREF((PyObject *)&PyTDBResolver_Type);
   PyModule_AddObject(m, "BaseTDBResolver", (PyObject *)&PyTDBResolver_Type);
 
   RDFSerializer_Type.tp_new = PyType_GenericNew;
   if (PyType_Ready(&RDFSerializer_Type) < 0)
     return;
 
-  Py_INCREF(&RDFSerializer_Type);
+  Py_INCREF((PyObject *)&RDFSerializer_Type);
   PyModule_AddObject(m, "RDFSerializer", (PyObject *)&RDFSerializer_Type);
 
   raptor_init();

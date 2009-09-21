@@ -594,7 +594,7 @@ class Live20Scanner(HotmailScanner):
             result['message_id'] = tag['mid']
 
         try:
-            result[context] = Time.parse(result[context])
+            result['Sent'] = Time.parse(result['Sent'])
         except: pass
 
         return self.insert_message(fd, result)
