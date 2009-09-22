@@ -245,8 +245,6 @@ class scan_file(scan,BasicCommands.ls):
         if len(self.args)<2:
             yield self.help()
             return
-        import pdb; pdb.set_trace()
-        
         pdbh = DB.DBO()
         pdbh.mass_insert_start('jobs')
         cookie = int(time.time())

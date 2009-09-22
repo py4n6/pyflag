@@ -34,37 +34,54 @@ import pyflag.Scanner as Scanner
 import dissect
 import struct,sys,cStringIO
 import pyflag.DB as DB
-from pyflag.FileSystem import File
-import pyflag.IO as IO
 import pyflag.FlagFramework as FlagFramework
 import pyflag.aff4.aff4 as aff4
-
-def IP2str(ip):
-    """ Returns a string representation of the 32 bit network order ip """
-    tmp = list(struct.unpack('=BBBB',struct.pack('=L',ip)))
-    tmp.reverse()
-    return ".".join(["%s" % i for i in tmp])
-                
-class NetworkScanner(BaseScanner):
-    """ This is the base class for network scanners.
-
-    Note that network scanners operate on discrete packets, where stream scanners operate on whole streams (and derive from StreamScannerFactory).
-    """
-    pass
-
-class StreamScannerFactory(GenScanFactory):
-    """ This is a scanner factory which allows scanners to only
-    operate on streams.
-    """
-
-class StreamTypeScan:
-    pass
-
-## Below is the new implementation for PCAPScanner
 import pyflag.Magic as Magic
 import reassembler, pypcap
 import pdb
 from aff4.aff4_attributes import *
+from pyflag.ColumnTypes import AFF4URN, IntegerType, IPType, ShortIntegerType, TimestampType, StateType
+import pyflag.Reports as Reports
+
+class PCAPMagic(Magic.Magic):
+    """ Identify PCAP files """
+    type = "PCAP tcpdump file"
+    mime = "binary/x-pcap"
+    default_score = 100
+
+    regex_rules = [
+        ( r"\xd4\xc3\xb2\xa1", (0,1)),
+        ( r"\xa1\xb2\xc3\xd4", (0,1))
+        ]
+
+    samples = [
+        ( 100, "\xd4\xc3\xb2\xa1sddsadsasd")
+        ]
+
+class ConnectionDetailsTable(FlagFramework.CaseTable):
+    """ Connection Details - Contains details about each connection """
+    name ='connection_details'
+    columns = [
+        [ AFF4URN, {} ],
+        [ IntegerType, dict(name='Reverse', column='reverse')],
+        [ IPType, dict(name='Source IP', column='src_ip')],
+        [ ShortIntegerType, dict(name='Source Port', column='src_port')],
+        [ IPType, dict(name='Destination IP', column='dest_ip')],
+        [ ShortIntegerType, dict(name='Destination Port', column='dest_port')],
+        [ IntegerType, dict(name='ISN', column='isn'), 'unsigned default 0'],
+        [ TimestampType, dict(name='Timestamp', column='ts_sec')],
+        [ StateType, dict(name='Type', column='type', states={'tcp':'tcp', 'udp':'udp'})]
+        ]
+
+class ViewConnections(Reports.PreCannedCaseTableReports):
+    """ View the connection table """
+    description = "View the connection table"
+    name = "/Network Forensics/View Connections"
+    family = "Network Forensics"
+    default_table = "ConnectionDetailsTable"
+    columns = ['Inode', "Timestamp", "Source IP", "Source Port", "Destination IP",
+               "Destination Port", "Type"]
+
 
 class PCAPScanner(GenScanFactory):
     """ A scanner for PCAP files. We reasemble streams and load them
@@ -171,3 +188,112 @@ class PCAPScanner(GenScanFactory):
             except StopIteration: break
 
         del processor
+
+
+class ViewDissectedPacket(Reports.report):
+    """ View Dissected packet in a tree. """
+    parameters = {'id':'numeric'}
+    name = "View Packet"
+    family = "Network Forensics"
+    description = "Views the packet in a tree"
+
+    def form(self,query,result):
+        try:
+            result.case_selector()
+            result.textfield('Packet ID','id')
+        except KeyError:
+            pass
+
+    def display(self,query,result):
+        dbh = DB.DBO(query['case'])
+        dbh.execute("select * from pcap where id=%r limit 1", query['id'])
+        row=dbh.fetch()
+        
+        io = IO.open(query['case'], row['iosource'])
+        packet = pypcap.PyPCAP(io)
+        packet.seek(row['offset'])
+        dissected_packet = packet.dissect()
+        
+        id = int(query['id'])
+        
+        def get_node(branch):
+            """ Locate the node specified by the branch.
+
+            branch is a list of attribute names.
+            """
+            result = dissected_packet
+            for b in branch:
+                try:
+                    result = getattr(result, b)
+                except: pass
+
+            return result
+        
+        def tree_cb(path):
+            branch = FlagFramework.splitpath(path)
+            
+            node = get_node(branch)
+            try:
+                for field in node.list():
+                    if field.startswith("_"): continue
+
+                    child = getattr(node, field)
+                    try:
+                        yield  ( field, child.get_name(), 'branch')
+                    except AttributeError:
+                        yield  ( field, field, 'leaf')
+
+            except AttributeError:
+                pass
+            
+            return
+        
+        def pane_cb(path,result):
+            branch = FlagFramework.splitpath(path)
+            
+            node = get_node(branch)
+
+            result.heading("Packet %s" % id)
+            data = dissected_packet.serialise()
+            
+            h=FlagFramework.HexDump(data, result)
+            try:
+                result.text("%s" % node.get_name(), font='bold')
+                result.text('',style='black', font='normal')
+                start,length = node.get_range()
+                
+            except AttributeError:
+                result.text("%s\n" % node, style='red', wrap='full', font='typewriter', sanitise='full')
+                result.text('',style='black', font='normal')
+                node = get_node(branch[:-1])
+                start,length = node.get_range(branch[-1])
+
+            h.dump(highlight=[[start,length,'highlight'],])
+
+            return
+
+        result.tree(tree_cb=tree_cb, pane_cb=pane_cb, branch=[''])
+
+        ## We add forward and back toolbar buttons to let people move
+        ## to next or previous packet:
+        dbh.execute("select min(id) as id from pcap")
+        row = dbh.fetch()
+
+        new_query=query.clone()
+        if id>row['id']:
+            del new_query['id']
+            new_query['id']=id-1
+            result.toolbar(text="Previous Packet",icon="stock_left.png",link=new_query)
+        else:
+            result.toolbar(text="Previous Packet",icon="stock_left_gray.png")
+            
+        dbh.execute("select max(id) as id from pcap")
+        row = dbh.fetch()
+        
+        if id<row['id']:
+            del new_query['id']
+            new_query['id']=id+1
+            result.toolbar(text="Next Packet",icon="stock_right.png",link=new_query)
+        else:
+            result.toolbar(text="Next Packet",icon="stock_right_gray.png")
+

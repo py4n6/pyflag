@@ -38,6 +38,8 @@ from pyflag.ColumnTypes import IPType, PCAPTime
 import pyflag.Reports as Reports
 import pyflag.CacheManager as CacheManager
 
+active = False
+
 class DataType(StringType):
     hidden = True
     LogCompatible = False
@@ -416,14 +418,6 @@ class StreamFile(File):
 
         result.row("Stream %s" % self.inode, tmp, **{'class':'explainrow'})
 
-class ViewConnections(Reports.PreCannedCaseTableReports):
-    """ View the connection table """
-    description = "View the connection table"
-    name = "/Network Forensics/View Connections"
-    family = "Network Forensics"
-    default_table = "ConnectionDetailsTable"
-    columns = ['Inode', "Timestamp", "Source IP", "Source Port", "Destination IP",
-               "Destination Port", "Type"]
 
 config.add_option("MAX_SESSION_AGE", default=100000, type='int',
                   help="Maximum age (in packets) for a session before it "

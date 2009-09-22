@@ -1891,26 +1891,11 @@ class ChatMessages(Reports.PreCannedCaseTableReports):
     default_table = "MSNSessionTable"
     columns = ['Packet', 'InodeTable.Modified', 'Type', "Sender", "Recipient", "Message", ]
 
-class MSNScanner(StreamScannerFactory):
+class MSNScanner(Scanner.GenScanFactory):
     """ Collect information about MSN Instant messanger traffic """
     default = True
     group = 'NetworkScanners'
-
-    def __init__(self,fsfd):
-        StreamScannerFactory.__init__(self,fsfd)
-
-        # Should hit the reverse stream within 30 streams (usually it
-        # is the very next one)
-        
-        self.processed=RingBuffer(30)
-
-    ## TODO
-    #def multiple_inode_reset(self, inode_glob):
-    #    StreamScannerFactor.multiple_inode_reset(self, inode_glob)
-                
-
-    def prepare(self):
-        self.msn_connections = {}
+    depends = ['PCAPScanner']
 
     def process_stream(self, stream, factories):
         forward_stream, reverse_stream = self.stream_to_server(stream, "MSN")
@@ -2355,9 +2340,7 @@ class MSNTests(pyflag.tests.ScannerTest):
     # We pick an obscure name on purpose
     test_case = "PyFlagTestCase"
     test_file = "/NetworkForensics/ProtocolHandlers/MSN/MSN_Cap1_Ver8_LoginWithMessages.pcap"
-    order = 21
-    subsystem = "Standard"
-    fstype = "PCAP Filesystem"
+
     ## Test protocol version 8 handling...
     def test01Scan(self):
         """ Scan for MSN Messages """
@@ -2368,7 +2351,6 @@ class MSNTests(pyflag.tests.ScannerTest):
                                    "MSNScanner"
                                    ])                   ## List of Scanners
 
-    def test02Scanner(self):
         """ Test MSN Scanner Handling Basic Protocol Ver 8 Commands"""
         ## What should we have found?
         dbh = DB.DBO(self.test_case)

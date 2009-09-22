@@ -356,13 +356,6 @@ class CaseDBInit(FlagFramework.EventHandler):
         PRIMARY KEY(`id`)
         )""")        
 
-        # create the "groupware" tables 
-        # NOTE: davec: DISABLED contact/appointment/journal, not currently
-        # used, should be moved into plugin if ever re-enabled anyway.  
-        # FIXME: move email into RFC2822 scanner since thats what seems to use
-        # it
-        case_dbh.execute("CREATE TABLE IF NOT EXISTS `email` (`inode` VARCHAR(250), `date` TIMESTAMP, `to` VARCHAR(250), `from` VARCHAR(250), `subject` VARCHAR(250));")
-
         ## Create a directory inside RESULTDIR for this case to store its temporary files:
         try:
             path = os.path.join(config.RESULTDIR, "case_%s" % case)
@@ -371,29 +364,6 @@ class CaseDBInit(FlagFramework.EventHandler):
             print "Error Creating dir %s" % e
             pass
 
-        case_dbh.execute("""CREATE TABLE IF NOT EXISTS block (
-        `inode` VARCHAR(250) NOT NULL,
-        `index` INT NOT NULL,
-        `block` BIGINT NOT NULL,
-        `count` INT NOT NULL)""")
-
-        case_dbh.execute("""CREATE TABLE IF NOT EXISTS resident (
-        `inode` VARCHAR(250) NOT NULL,
-        `data` TEXT)""")
-
-        case_dbh.execute("""CREATE TABLE IF NOT EXISTS `filesystems` (
-        `iosource` VARCHAR( 50 ) NOT NULL ,
-        `property` VARCHAR( 50 ) NOT NULL ,
-        `value` MEDIUMTEXT NOT NULL ,
-        KEY ( `iosource` )
-        )""")
-
-        case_dbh.execute("""CREATE TABLE if not exists `xattr` (
-                            `inode_id` INT NOT NULL ,
-                            `property` VARCHAR(250) NOT NULL ,
-                            `value` TEXT NOT NULL
-                            ) """)
-        
         case_dbh.execute("""CREATE TABLE `GUI_filter_history` (
                             `id` int auto_increment,
                             `filter` VARCHAR(250),
@@ -504,50 +474,14 @@ class CaseDBInit(FlagFramework.EventHandler):
         Scanner.factories.expire(key_re)
 
 
-#class FileTable(FlagFramework.CaseTable):
-class FileTable:
-    """ File table - Complements the VFS inodes with filenames """
-    name = 'file'
-    columns = [ [ AFF4URN, {} ],
-                [ StringType, dict(name = 'Inode String', column = 'inode')],
-                [ StringType, dict(name = 'Mode', column = 'mode', width=3)],
-                [ StringType, dict(name = 'Status', column = 'status', width=8)],
-                [ FilenameType, {}],
+class TypeCaseTable(FlagFramework.CaseTable):
+    """ Type Table """
+    name = 'type'
+    columns = [ [ AFF4URN, {}],
+                [ StringType, dict(name = 'Mime', column = 'mime')],
+                [ StringType, dict(name = 'Type', column = 'type')],
                 ]
-    index = [ 'inode_id', 'inode']
-
-#class InodeTable(FlagFramework.CaseTable):
-class InodeTable:
-    """ Inode Table - stores information related to VFS Inodes """
-    name = 'inode'
-    primary = 'inode_id'
-    columns = [ [ AFF4URN, {}, "auto_increment" ],
-                [ StringType, dict(name = 'Inode String', column = 'inode')],
-                [ DeletedType, {} ],
-                [ IntegerType, dict(name = 'UID', column = 'uid')],
-                [ IntegerType, dict(name = 'GID', column = 'gid')],
-                [ TimestampType, dict(name = 'Modified', column='mtime')],
-                [ TimestampType, dict(name = 'Accessed', column='atime')],
-                [ TimestampType, dict(name = 'Changed', column='ctime')],
-                [ TimestampType, dict(name = 'Deleted', column='dtime')],
-                [ IntegerType, dict(name = 'Mode', column='mode')],
-                [ IntegerType, dict(name = 'Links', column='links')],
-                [ StringType, dict(name='Link', column='link', width=500)],
-                [ BigIntegerType, dict(name = 'Size', column='size')],
-                ## The dictionary version used on this inode:
-                [ IntegerType, dict(name = "Index Version", column='version', default=0)],
-                [ IntegerType, dict(name = 'Desired Version', column='desired_version')],
-                ]
-
-    index = [ "Inode String", ]
-    
-    def __init__(self):
-        scanners = set([ "%s" % s.__name__ for s in Registry.SCANNERS.classes ])
-        self.columns = self.columns + [ [ SetType,
-                                          dict(name='Scanner Cache', column='scanner_cache',
-                                               states = scanners)
-                                          ],
-                                        ]
+    index = [ 'type', ]
 
 class CaseConfiguration(Reports.report):
     """

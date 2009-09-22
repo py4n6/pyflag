@@ -201,12 +201,3 @@ def operator_has_magic(self, column, operator, magic):
            (self.escape_column_name(self.column), magic)
 
 AFF4URN.operator_has_magic = operator_has_magic
-
-class TypeCaseTable(FlagFramework.CaseTable):
-    """ Type Table """
-    name = 'type'
-    columns = [ [ AFF4URN, {}],
-                [ StringType, dict(name = 'Mime', column = 'mime')],
-                [ StringType, dict(name = 'Type', column = 'type')],
-                ]
-    index = [ 'type', ]
