@@ -50,6 +50,7 @@ from pyflag.aff4.aff4_attributes import *
 import pyflag.aff4.aff4 as aff4
 import pyflag.CacheManager as CacheManager
 import plugins.NetworkForensics.NetworkScanner as NetworkScanner
+import pyflag.FileSystem as FileSystem
 
 ## AFF4 attributes for MSN sessions
 MSN_SESSION_ID = PYFLAG_NS + "msn:session_id"
@@ -90,16 +91,6 @@ class MSNScanner(Scanner.GenScanFactory):
     group = 'NetworkScanners'
     depends = ['PCAPScanner']
 
-    session_id = -1
-    
-    def get_session_id(self):
-        if self.sense == "server":
-            client_urn = self.client_urn_from_server_stream()
-            if self.session_id == -1:
-                self.session_id = aff4.oracle.resolve(client_urn, MSN_SESSION_ID) or -1
-
-            return self.session_id
-
     session_urn = None
     session_id = -1
     def make_session_fd(self, fd, session_id=None):
@@ -130,8 +121,12 @@ class MSNScanner(Scanner.GenScanFactory):
     def scan(self, fd, factories, type, mime):
         if "MSN" in type and fd.urn.endswith("forward"):
             pyflaglog.log(pyflaglog.DEBUG,"Openning %s for MSN" % fd.inode_id)
-            
-            while fd.tell()<fd.size:
+            dbfs = FileSystem.DBFS(fd.case)
+            forward_fd = fd
+            reverse_fd = dbfs.open(urn = "%s/reverse" % os.path.dirname(fd.urn))
+
+            for fd in NetworkScanner.generate_streams_in_time_order(
+                forward_fd, reverse_fd):
                 try:
                     line = fd.readline()
                     items = line.split()
@@ -239,8 +234,8 @@ class MSNScanner(Scanner.GenScanFactory):
         ## We only care about text messages here
         if len(data)>0 and 'text/plain' in ct:
             ## Lets find out the timestamp of this point
-            packet = NetworkScanner.dissect_packet(self.case, fd.urn, fd.tell())
-            session_fd.write("%s %s %s: %s\n" % (packet.ts_sec, sender_name, sender, data))
+            session_fd.write("%s %s %s: %s\n" % (time.ctime(fd.current_packet.ts_sec),
+                                                 sender_name, sender, data))
 
     def insert_session_data(self, session_fd, sender, recipient, type, data=None):
         args =  dict(session_id = session_fd.session_id,

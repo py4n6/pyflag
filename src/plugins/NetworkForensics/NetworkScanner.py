@@ -220,35 +220,84 @@ class PCAPScanner(GenScanFactory):
 
         del processor
 
-def dissect_packet(case, stream_urn, offset):
-    """ Given an offset in a stream_urn we use the packet map to
-    locate this packet and return it.
+def dissect_packet(stream_fd):
+    """ Return a dissected packet in stream fd. Based on the current readptr.
     """
-    dbfs = FileSystem.DBFS(case)
-    target_urn = aff4.oracle.resolve(stream_urn, AFF4_TARGET)
-
+    dbfs = FileSystem.DBFS(stream_fd.case)
+    target_urn = aff4.oracle.resolve(stream_fd.urn, AFF4_TARGET)
+    fd = dbfs.open(urn = "%s.pkt" % stream_fd.urn)
+    if not fd or not target_urn:
+        raise RuntimeError("%s is not a stream" % stream_fd.urn)
+    
     ## Get the file from cache
     try:
         pcap_file = PCAP_FILE_CACHE.get(target_urn)
     except KeyError:
-        fd = dbfs.open(urn = target_urn)
-        pcap_file = pypcap.PyPCAP(fd)
-        PCAP_FILE_CACHE.add(fd.urn, pcap_file)
+        pcap_fd = dbfs.open(urn = target_urn)
+        pcap_file = pypcap.PyPCAP(pcap_fd)
+        PCAP_FILE_CACHE.add(target_urn, pcap_file)
 
-    fd = dbfs.open(urn = "%s.pkt" % stream_urn)
-    
     ## What is the current range?
-    (period_number, image_period_offset,
-     image_offset_at_point,
+    (image_offset_at_point,
      target_offset_at_point,
      available_to_read,
-     target_urn) =  fd.get_range(offset)
+     target_urn) =  fd.get_range(stream_fd.readptr)
 
-    ## Read the packet
-    pcap_file.seek(target_offset_at_point)
+    if available_to_read:
+        ## Go to the packet
+        pcap_file.seek(target_offset_at_point)
+        
+        ## Dissect it
+        return pcap_file.dissect()
 
-    return pcap_file.dissect()
-    
+def generate_streams_in_time_order(forward_fd, reverse_fd):
+    """ This generator will return the next fd who's readptr is the
+    earliest in time. This is useful for parsing forward/reverse
+    streams in order.
+
+    Callers are expected to consume data off the returned fd which
+    might allow the other fd to be returned next time.
+    """
+    ## This is how this works:
+    ## 1. we have two streams
+
+    ## 2. We dissect the packet the stream is on right now in
+    ## both streams to find the one that is earlier in time.
+
+    ## 3. We then yield this stream - hopefully the caller will
+    ## consume some data from this stream allowing us to make
+    ## progress.
+
+    ## Note that for efficiency we also attach the dissected packet to
+    ## the stream.
+    while 1:
+        forward_packet = dissect_packet(forward_fd)
+        reverse_packet = dissect_packet(reverse_fd)
+
+        ## Go for the earlier stream in time
+        try:
+            if forward_packet.ts_sec < reverse_packet.ts_sec:
+                fd = forward_fd
+                fd.current_packet = forward_packet
+            else:
+                fd = reverse_fd
+                fd.current_packet = reverse_packet
+
+        except AttributeError:
+            ## If one stream has no valid packet, we forget it
+            ## and concentrate on the other stream until its
+            ## done. If both streams are done we break
+            if not forward_packet:
+                if not reverse_packet: break
+                fd = reverse_fd
+                fd.current_packet = reverse_packet
+
+            elif not reverse_packet:
+                fd = forward_fd
+                fd.current_packet = forward_packet
+
+        yield fd
+
 class ViewDissectedPacket(Reports.report):
     """ View Dissected packet in a tree. """
     parameters = {'id':'numeric'}

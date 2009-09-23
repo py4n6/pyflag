@@ -1720,17 +1720,7 @@ class Map(FileLikeObject):
             #Raise("Map objects must have a %s attribute" % AFF4_TARGET)
 
             self.blocksize = parse_int(oracle.resolve(uri, AFF4_BLOCKSIZE)) or 1
-            self.size = parse_int(oracle.resolve(uri, AFF4_SIZE)) or 1
-
-            ## If a period is not specified we use the size of the
-            ## image for the period. This allows us to use the same
-            ## maths for both cases.
-            max_size = max(self.size, parse_int(oracle.resolve(self.target, AFF4_SIZE)))
-            self.image_period = self.blocksize * parse_int(
-                oracle.resolve(uri, AFF4_IMAGE_PERIOD)) or max_size
-            
-            self.target_period = self.blocksize * parse_int(
-                oracle.resolve(uri, AFF4_TARGET_PERIOD)) or max_size
+            self.size = parse_int(oracle.resolve(uri, AFF4_SIZE))
 
         ## Parse the map now:
         if uri and mode=='r':
@@ -1772,38 +1762,46 @@ class Map(FileLikeObject):
         Returns a triple -
         (map offset at start of range, target offset at start of range, length, target_urn) 
         """
-        ## This function actually does the mapping
-        period_number, image_period_offset = divmod(self.readptr, self.image_period)
+        ## Terminology:
+        ##  ^ target offset
+        ##  |        X
+        ##  |      /   <----- Mapping function
+        ##  |    x
+        ##  |----p---X-----n------ -> Image coords
+
+        ## X - readptr
+        ## p - previous point - image_offset_at_point
+        ## x - target offset at previous point - target_offset_at_point
+        ## n - next point available_to_read = n - X
 
         ## We try to find the previous point before the current readptr
-        l = bisect.bisect_right(self.image_offsets, image_period_offset) - 1
+        l = bisect.bisect_right(self.image_offsets, self.readptr) - 1
         image_offset_at_point = self.image_offsets[l]
         target_offset_at_point = self.target_offsets[image_offset_at_point]
         
-        if l < len(self.image_offsets)-1:
+        try:
             available_to_read = self.image_offsets[l+1] - \
-                                image_period_offset
-        else:
-            available_to_read = self.image_period - image_period_offset
+                                self.readptr
+        except IndexError:
+            available_to_read = self.size - self.readptr
 
         target_urn = self.target_urns[image_offset_at_point]
         
-        return period_number, image_period_offset, image_offset_at_point, target_offset_at_point, available_to_read, target_urn
+        return image_offset_at_point, target_offset_at_point, available_to_read, target_urn
                     
     def partial_read(self, length):
         """ Read from the current offset as much as possible - may
         return less than whats needed."""
 
-        (period_number, image_period_offset,
-         image_offset_at_point,
+        (image_offset_at_point,
          target_offset_at_point,
          available_to_read,
          target_urn) =  self.get_range()
 
         available_to_read = min(available_to_read, length)
+        
         target_offset = target_offset_at_point + \
-                        image_period_offset - image_offset_at_point + \
-                        period_number * self.target_period
+                        self.readptr - image_offset_at_point
         
         ## Now do the read:
         target = oracle.open(target_urn, 'r')

@@ -117,7 +117,7 @@ class PyFlagSegment(PyFlagMap):
         self.urn = segment_urn
         self.buffer = cStringIO.StringIO()
         self.buffer.write(data)
-        self.inode_id = aff4.oracle.get_id_by_urn(segment_urn)
+        self.inode_id = aff4.oracle.get_id_by_urn(segment_urn, create_new=True)
         self.case = case
         self.size = len(data)
         self.volume_urn = volume_urn
