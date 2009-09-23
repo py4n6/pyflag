@@ -562,14 +562,19 @@ except ImportError:
 
 class Store:
     """ This is a cache which expires objects in oldest first manner. """
-    def __init__(self, limit=50):
+    def __init__(self, limit=50, kill_cb=None):
         self.age = []
         self.hash = {}
         self.limit = limit
+        self.kill_cb = kill_cb
 
     def expire(self):
         while len(self.age) > self.limit:
             x = self.age.pop(0)
+            ## Kill the object if needed
+            if self.kill_cb:
+                self.kill_cb(self.hash[x])
+                
             del self.hash[x]
 
     def add(self, urn, obj):
@@ -577,11 +582,22 @@ class Store:
         self.age.append(urn)
         self.expire()
 
+    def get(self, urn):
+        return self.hash[urn]
+
     def __contains__(self, obj):
         return obj in self.hash
 
     def __getitem__(self, urn):
         return self.hash[urn]
+
+    def flush(self):
+        if self.kill_cb:
+            for x in self.hash.values():
+                self.kill_cb(x)
+                
+        self.hash = {}
+        self.age = []
     
 class URNObject:
     """ A URNObject is an object in AFF4 space with a set of properties """
@@ -1214,6 +1230,9 @@ class RAWVolume(AFFVolume):
             oracle.set(stored, AFF4_CONTAINS, self.urn)
             oracle.set(self.urn, AFF4_TYPE, self.type)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
+            ## We just created a new volume - set it to dirty to
+            ## ensure it gets closed off propertly
+            oracle.set(self.urn, AFF4_VOLATILE_DIRTY, "1")
         else:
             AFFObject.__init__(self, urn, mode)
                         
@@ -1668,6 +1687,8 @@ class Map(FileLikeObject):
         oracle.set(self.urn, AFF4_TYPE, AFF4_MAP)
         oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
         oracle.set(self.urn, AFF4_VOLATILE_DIRTY, 1)
+        oracle.set(self.urn, AFF4_SIZE, 0)
+        
         self.__init__(self.urn, self.mode)
 
     def __init__(self, uri=None, mode='r'):
@@ -1745,32 +1766,47 @@ class Map(FileLikeObject):
 
         FileLikeObject.__init__(self, uri, mode)
 
-                    
-    def partial_read(self, length):
-        """ Read from the current offset as much as possible - may
-        return less than whats needed."""
+    def get_range(self):
+        """ Calculates the range which encapsulates the current readptr
+
+        Returns a triple -
+        (map offset at start of range, target offset at start of range, length, target_urn) 
+        """
         ## This function actually does the mapping
         period_number, image_period_offset = divmod(self.readptr, self.image_period)
-        available_to_read = length
 
         ## We try to find the previous point before the current readptr
         l = bisect.bisect_right(self.image_offsets, image_period_offset) - 1
         image_offset_at_point = self.image_offsets[l]
         target_offset_at_point = self.target_offsets[image_offset_at_point]
         
-        target_offset = target_offset_at_point + \
-                        image_period_offset - image_offset_at_point + \
-                        period_number * self.target_period
-
         if l < len(self.image_offsets)-1:
             available_to_read = self.image_offsets[l+1] - \
                                 image_period_offset
         else:
-            available_to_read = min(available_to_read,
-                                    self.image_period - image_period_offset)
-                
+            available_to_read = self.image_period - image_period_offset
+
+        target_urn = self.target_urns[image_offset_at_point]
+        
+        return period_number, image_period_offset, image_offset_at_point, target_offset_at_point, available_to_read, target_urn
+                    
+    def partial_read(self, length):
+        """ Read from the current offset as much as possible - may
+        return less than whats needed."""
+
+        (period_number, image_period_offset,
+         image_offset_at_point,
+         target_offset_at_point,
+         available_to_read,
+         target_urn) =  self.get_range()
+
+        available_to_read = min(available_to_read, length)
+        target_offset = target_offset_at_point + \
+                        image_period_offset - image_offset_at_point + \
+                        period_number * self.target_period
+        
         ## Now do the read:
-        target = oracle.open(self.target_urns[image_offset_at_point], 'r')
+        target = oracle.open(target_urn, 'r')
         try:
             target.seek(target_offset)
             data = target.read(min(available_to_read, length))

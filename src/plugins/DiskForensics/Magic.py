@@ -7,6 +7,7 @@ import pyflag.DB as DB
 import pyflag.FlagFramework as FlagFramework
 
 class HTML(Magic.Magic):
+    """ Identify HTML documents """
     type = "HTML Document"
     mime = "text/html"
     default_score = 30
@@ -59,21 +60,6 @@ class LibMagic(Magic.Magic):
         return 20
 
     samples = [(20,'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00\xe6\x00\xe6\x00\x00')]
-
-#class FSStates(Magic.Magic):
-class FSStates:
-    """ A Magic handler to identify filesystem objects (like links and directories) """
-    def score(self, data, case, inode_id):
-        if case:
-            dbh = DB.DBO(case)
-            dbh.execute("select * from file where inode_id=%r", inode_id)
-            row = dbh.fetch()
-            
-            if row and row['mode']=='d/d':
-                self.type = "Directory"
-                return 100
-
-        return 0
     
 import unittest
 

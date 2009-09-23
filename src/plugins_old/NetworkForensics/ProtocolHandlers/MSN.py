@@ -1881,15 +1881,6 @@ class MSNTables(FlagFramework.EventHandler):
 
 import re
 
-class ChatMessages(Reports.PreCannedCaseTableReports):
-    args = { 'filter': ' "Type" = MESSAGE',
-             'order':0, 'direction':1,
-             '_hidden': [0,2]}
-    family = 'Network Forensics'
-    description = 'View MSN/Yahoo chat messages'
-    name = "/Network Forensics/Communications/Chats/MSN"
-    default_table = "MSNSessionTable"
-    columns = ['Packet', 'InodeTable.Modified', 'Type', "Sender", "Recipient", "Message", ]
 
 class MSNScanner(Scanner.GenScanFactory):
     """ Collect information about MSN Instant messanger traffic """
@@ -2288,86 +2279,12 @@ if __name__ == "__main__":
     data = fd.read()
     parse_msg(data)
 
-
-## MSN streams look a lot like RFC2822 sometimes:
-import pyflag.Magic as Magic
-class MSNStreamMagic(Magic.Magic):
-    """ Detect MSN Streams """
-    type = "MSN Stream"
-    mime = "protocol/x-msn-messanger"
-    default_score = 20
-
-    regex_rules = [
-        ( "USR \d+ OK [^@]+@[^@]+", (0,1000)),
-        ( "\nCAL \d+ RINGING \d+", (0,1000)),
-        ( "\nACK \d+", (0,1000)),
-        ( "\nTypingUser:", (0,1000)),
-        ( "\nMSG ", (0,1000)),
-        ( "\nUser-Agent: ", (0,1000)),
-        ( "VER \d+ MSN", (0,10)),
-        ( "\nCVR \d+", (0,100)),
-        ( "\nPNG", (0,100)),
-        ( "OUT OTH", (0,100)),
-        ]
-
-    samples = [
-        (100, \
-"""USR 1 OK foo004470@hotmail.com foobar
-CAL 2 RINGING 17528774
-JOI user022714@hotmail.com gumby
-ACK 3
-MSG user022714@hotmail.com gumby 95
-MIME-Version: 1.0
-Content-Type: text/x-msmsgscontrol
-TypingUser: user022714@hotmail.com
-""")]
-
-
 #class MSNMessages(Reports.PreCannedCaseTableReoports):
 #    """ View MSN chat messages """
 #    family = 'Network Forensics'
 #    description = 'View MSN Chat messages'
 #    name = "/Network Forensics/Communications/Chat/MSN"
 
-## UnitTests:
-import unittest
-import pyflag.pyflagsh as pyflagsh
-from pyflag.FileSystem import DBFS
-import pyflag.tests
-
-class MSNTests(pyflag.tests.ScannerTest):
-    """ Tests MSN Scanner (Ver 8) """
-    # We pick an obscure name on purpose
-    test_case = "PyFlagTestCase"
-    test_file = "/NetworkForensics/ProtocolHandlers/MSN/MSN_Cap1_Ver8_LoginWithMessages.pcap"
-
-    ## Test protocol version 8 handling...
-    def test01Scan(self):
-        """ Scan for MSN Messages """
-        env = pyflagsh.environment(case=self.test_case)
-        pyflagsh.shell_execv(env=env,
-                             command="scan",
-                             argv=["*",                   ## Inodes (All)
-                                   "MSNScanner"
-                                   ])                   ## List of Scanners
-
-        """ Test MSN Scanner Handling Basic Protocol Ver 8 Commands"""
-        ## What should we have found?
-        dbh = DB.DBO(self.test_case)
-        dbh.execute("""select * from `msn_session` where type=\"MESSAGE\"""")
-
-        ## Well we should find 10 messages
-        messages = 0
-        while dbh.fetch():
-            messages += 1        
-        assert messages == 10
-
-        ## We should also find user information  
-        ## For example, check we pulled out the user's OS.
-        dbh.execute("""select user_data from `msn_users` where """\
-                    """user_data_type=\"os\" and packet_id=19""")
-        row=dbh.fetch()
-        assert row["user_data"] == "winnt 5.1 i386"
 
 class MSNTests2(MSNTests):
     """ Tests MSN Scanner (Ver 9) """

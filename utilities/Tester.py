@@ -36,6 +36,7 @@ import unittest,re
 import pyflag.conf
 config = pyflag.conf.ConfObject()
 from optparse import OptionParser
+import pyflag.FlagFramework as FlagFramework
 
 config.set_usage(usage = """%prog [options]
 
@@ -127,6 +128,9 @@ for test_class in classes:
 
     ## Preform a collection:
     gc.collect()
+
+    ## Close off the volume so we can easily see what happened
+    FlagFramework.post_event("exit", None)
 
     print "Garbage is %s" % (gc.garbage,)
     

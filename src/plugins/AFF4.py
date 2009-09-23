@@ -135,6 +135,9 @@ class AFF4File(File):
 
 class AFF4ResolverTable(FlagFramework.EventHandler):
     """ Create tables for the AFF4 universal resolver. """
+    ## This must occur last to ensure we close the volume after all
+    ## the exit functions are called.
+    order = 1000
     
     def create(self, dbh, case):
         """ Create a new case AFF4 Result file """
@@ -143,6 +146,18 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
         volume.finish()
         aff4.oracle.cache_return(volume)
+
+    def exit(self, dbh, case):
+        """ Check for dirty volumes and closes them """
+        dbh.execute("select value from meta where property='flag_db'")
+        for row in dbh:
+            volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
+            if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
+                fd = aff4.oracle.open(volume_urn, 'w')
+                print "Closing volume %s" % volume_urn
+                if fd:
+                    fd.close()
+                    
 
 class AFF4VFS(FlagFramework.CaseTable):
     """ A VFS implementation using AFF4 volumes """
@@ -214,20 +229,3 @@ class AFF4LoaderTest(unittest.TestCase):
         #fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
         #fd.write("hello world")
         #fd.close()
-
-
-import atexit
-
-def close_off_volume():
-    """ Check for dirty volumes are closes them """
-    dbh = DB.DBO()
-    dbh.execute("select value from meta where property='flag_db'")
-    for row in dbh:
-        volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
-        if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
-            fd = aff4.oracle.open(volume_urn, 'w')
-            print "Closing volume %s" % volume_urn
-            if fd:
-                fd.close()
-
-atexit.register(close_off_volume)

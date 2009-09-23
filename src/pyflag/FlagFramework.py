@@ -1232,4 +1232,3 @@ def make_tld(host):
         except ValueError: pass
 
     return '.'.join(domains[-2:])
-

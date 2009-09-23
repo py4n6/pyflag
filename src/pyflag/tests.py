@@ -20,7 +20,7 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 """ This file defines a variety of things related to tests """
-import unittest
+import unittest, pdb
 from pyflag.FileSystem import DBFS
 import pyflag.pyflagsh as pyflagsh
 import pyflag.conf
@@ -86,18 +86,13 @@ class ScannerTest(unittest.TestCase):
 
     def setUp(self):
         """ Load test Case"""
-        try:
-            pyflagsh.shell_execv(command="execute",
-                                 argv=["Case Management.Remove case",'remove_case=%s' % self.test_case])
-        except: pass
-        
-        pyflagsh.shell_execv(command="execute",
-                             argv=["Case Management.Create new case",'create_case=%s' % self.test_case,
-                                   "TZ=%s" % self.TZ])
-
-        if not self.test_file: return
-        pyflagsh.shell_execv(command="execute",
-                             argv=["Load Data.Load AFF4 Volume",'case=%s' % self.test_case,
-                                   "filename=%s" % ( self.test_file),
-                                   "TZ=%s" % self.TZ
-                                   ])
+        env = pyflagsh.environment(case=self.test_case)
+        pyflagsh.shell_execv(command="delete_case", env=env,
+                             argv=[self.test_case])
+        pyflagsh.shell_execv(command="create_case", env=env,
+                             argv=[self.test_case])
+        if self.test_case:
+            pyflagsh.shell_execv(command='execute', env=env,
+                                 argv=['Load Data.Load AFF4 Volume',
+                                       'case=%s' % self.test_case, 
+                                       'filename=%s' % self.test_file])

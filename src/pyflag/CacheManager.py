@@ -113,21 +113,35 @@ class PyFlagImage(aff4.Image, PyFlagMap):
         self.inode_id = aff4.oracle.get_id_by_urn(self.urn)
 
 class PyFlagSegment(PyFlagMap):
-    def __init__(self, case, volume_urn, segment_urn, data):
+    def __init__(self, case, volume_urn, segment_urn, data=''):
         self.urn = segment_urn
-        volume = aff4.oracle.open(volume_urn, 'w')
-        try:
-            aff4.oracle.set(segment_urn, AFF4_STORED, volume_urn)
-            aff4.oracle.set(segment_urn, PYFLAG_CASE, case)
-            volume.writestr(segment_urn, data, compress_type=aff4.ZIP_DEFLATED)
-        finally:
-            aff4.oracle.cache_return(volume)
-            
+        self.buffer = cStringIO.StringIO()
+        self.buffer.write(data)
         self.inode_id = aff4.oracle.get_id_by_urn(segment_urn)
         self.case = case
         self.size = len(data)
+        self.volume_urn = volume_urn
+        
+    def write(self, data):
+        self.buffer.seek(0,2)
+        self.buffer.write(data)
+
+    def seek(self, offset, whence=0):
+        return self.buffer.seek(offset,whence)
+        
+    def tell(self):
+        return self.buffer.tell()
         
     def close(self):
+        volume = aff4.oracle.open(self.volume_urn, 'w')
+        try:
+            aff4.oracle.set(self.urn, AFF4_STORED, self.volume_urn)
+            aff4.oracle.set(self.urn, PYFLAG_CASE, self.case)
+            volume.writestr(self.urn, self.buffer.getvalue(),
+                            compress_type=aff4.ZIP_DEFLATED)
+        finally:
+            aff4.oracle.cache_return(volume)
+        
         self.update_tables()
 
 class AFF4Manager:
@@ -139,7 +153,7 @@ class AFF4Manager:
 
         return volume_urn
 
-    def create_cache_data(self, case, path, data, include_in_VFS=True,
+    def create_cache_data(self, case, path, data='', include_in_VFS=True,
                           inherited = None,**kwargs):
         """ Creates a new AFF4 segment. A segment is useful for 
         storing small amounts of data in a single compressed file.

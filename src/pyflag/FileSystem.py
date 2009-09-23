@@ -121,6 +121,15 @@ class File:
         """ returns the current read pointer"""
         return self.readptr
 
+    def get_range(self, offset):
+        fd = aff4.oracle.open(self.urn, 'r')
+        try:
+            fd.seek(offset)
+            return fd.get_range()
+        finally:
+            aff4.oracle.cache_return(fd)
+        
+
     def read(self, length=None):
         """ Reads length bytes from file, or less if there are less
         bytes in file. If length is None, returns the whole file"""

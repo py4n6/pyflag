@@ -42,6 +42,9 @@ import pdb
 from aff4.aff4_attributes import *
 from pyflag.ColumnTypes import AFF4URN, IntegerType, IPType, ShortIntegerType, TimestampType, StateType
 import pyflag.Reports as Reports
+import pyflag.FileSystem as FileSystem
+
+PCAP_FILE_CACHE = aff4.Store()
 
 class PCAPMagic(Magic.Magic):
     """ Identify PCAP files """
@@ -111,17 +114,34 @@ class PCAPScanner(GenScanFactory):
                         target = fd.urn)
                     connection['map'] = map_stream
 
-                    combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "combined", timestamp = packet.ts_sec,
+                    ## These streams are used to point at the start of
+                    ## each packet header - this helps us get back to
+                    ## the packet information for each bit of data
+                    map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "forward.pkt", timestamp = packet.ts_sec,
                         target = fd.urn, inherited = map_stream.urn)
+                    connection['map.pkt'] = map_stream_pkt
+
+                    #combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                    #    fd.case, base_urn + "combined", timestamp = packet.ts_sec,
+                    #    target = fd.urn, inherited = map_stream.urn)
                     
-                    connection['reverse']['combined'] = combined_stream
-                    connection['combined'] = combined_stream
+                    #connection['reverse']['combined'] = combined_stream
+                    #connection['combined'] = combined_stream
                     
                     r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
                         fd.case, base_urn + "reverse", timestamp = packet.ts_sec,
                         target = fd.urn, inherited = map_stream.urn)
                     connection['reverse']['map'] = r_map_stream
+
+                    ## These streams are used to point at the start of
+                    ## each packet header - this helps us get back to
+                    ## the packet information for each bit of data
+                    r_map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
+                        fd.case, base_urn + "reverse.pkt", timestamp = packet.ts_sec,
+                        target = fd.urn, inherited = r_map_stream.urn)
+                    connection['reverse']['map.pkt'] = r_map_stream_pkt
+
 
                     ## Add to connection table
                     map_stream.insert_to_table("connection_details",
@@ -142,32 +162,42 @@ class PCAPScanner(GenScanFactory):
 
                 length = len(tcp.data)
                 connection['map'].write_from("@", packet.offset + tcp.data_offset, length)
-                connection['combined'].write_from("@", packet.offset + tcp.data_offset,
-                                                  length)
+                connection['map.pkt'].write_from("@", packet.offset, length)
+                #connection['combined'].write_from("@", packet.offset + tcp.data_offset,
+                #                                  length)
 
             elif mode == 'destroy':
                 if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
+                    
                     map_stream = connection['map']
                     map_stream.close()
-
+                    
                     r_map_stream = connection['reverse']['map']
                     r_map_stream.close()
+                    
+                    map_stream_pkt = connection['map.pkt']
+                    Magic.set_magic(self.case, map_stream_pkt.inode_id,
+                                    "Packet Map")
+                    map_stream_pkt.close()
 
-                    combined_stream = connection['combined']
-                    combined_stream.close()
-                    Magic.set_magic(self.case, combined_stream.inode_id,
-                                    "Combined stream")
+                    r_map_stream_pkt = connection['reverse']['map.pkt']
+                    r_map_stream_pkt.close()
+                    Magic.set_magic(self.case, r_map_stream_pkt.inode_id,
+                                    "Packet Map")
 
-                    map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
+                    #combined_stream = connection['combined']
+                    #combined_stream.close()
+
                     r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
+                    map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
 
                     ## FIXME - this needs to be done out of process!!!
                     Scanner.scan_inode(self.case, map_stream.inode_id,
                                        factories)
                     Scanner.scan_inode(self.case, r_map_stream.inode_id,
                                        factories)
-                    Scanner.scan_inode(self.case, combined_stream.inode_id,
-                                       factories)
+                    #Scanner.scan_inode(self.case, combined_stream.inode_id,
+                    #                   factories)
                     
 
         ## Create a tcp reassembler if we need it
@@ -176,11 +206,12 @@ class PCAPScanner(GenScanFactory):
         ## Now process the file
         try:
             pcap_file = pypcap.PyPCAP(fd)
+            PCAP_FILE_CACHE.add(fd.urn, pcap_file)
         except IOError:
             pyflaglog.log(pyflaglog.WARNING,
                           DB.expand("%s does not appear to be a pcap file", fd.urn))
             return
-
+        
         while 1:
             try:
                 packet = pcap_file.dissect()
@@ -189,7 +220,35 @@ class PCAPScanner(GenScanFactory):
 
         del processor
 
+def dissect_packet(case, stream_urn, offset):
+    """ Given an offset in a stream_urn we use the packet map to
+    locate this packet and return it.
+    """
+    dbfs = FileSystem.DBFS(case)
+    target_urn = aff4.oracle.resolve(stream_urn, AFF4_TARGET)
 
+    ## Get the file from cache
+    try:
+        pcap_file = PCAP_FILE_CACHE.get(target_urn)
+    except KeyError:
+        fd = dbfs.open(urn = target_urn)
+        pcap_file = pypcap.PyPCAP(fd)
+        PCAP_FILE_CACHE.add(fd.urn, pcap_file)
+
+    fd = dbfs.open(urn = "%s.pkt" % stream_urn)
+    
+    ## What is the current range?
+    (period_number, image_period_offset,
+     image_offset_at_point,
+     target_offset_at_point,
+     available_to_read,
+     target_urn) =  fd.get_range(offset)
+
+    ## Read the packet
+    pcap_file.seek(target_offset_at_point)
+
+    return pcap_file.dissect()
+    
 class ViewDissectedPacket(Reports.report):
     """ View Dissected packet in a tree. """
     parameters = {'id':'numeric'}
