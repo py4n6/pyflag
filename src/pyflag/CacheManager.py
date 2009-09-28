@@ -38,7 +38,8 @@ PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
 class PyFlagMap(aff4.Map):
-    include_in_VFS = {}
+    include_in_VFS = None
+    
     def insert_to_table(self, table, props):
         """ This function adds the properties for this object as
         attributes in the urn:pyflag: namespace.

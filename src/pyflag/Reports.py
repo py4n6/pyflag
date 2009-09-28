@@ -267,6 +267,7 @@ class CaseTableReports(report):
         
         ## Search case tables for the elements:
         for t in columns:
+            print t
             try:
                 class_name , column_name = t.split(".")
             except:

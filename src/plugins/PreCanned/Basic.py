@@ -66,40 +66,31 @@ class ImFeelingLucky(Reports.report):
 
 class Images(Reports.PreCannedCaseTableReports):
     """ Display a preview of images """
-    args = {'filter':' "Thumbnail"  has_magic image and  "Size"  > 20000 ',
+    args = {'filter':' "Thumb"  has_magic image and  "Size"  > 20000 ',
             'order': 1, 'direction':0}
     family = "Disk Forensics"
     description = "View all images bigger than 20kb "
     name = "/Disk Forensics/Multimedia/Graphics"
-    default_table = "TypeCaseTable"
-    columns = ['Thumbnail', 'InodeTable.Size','FileTable.Filename']
+    default_table = "AFF4VFS"
+    columns = ['Thumb', 'Size','Filename']
 
-class Videos(Reports.PreCannedCaseTableReports):
+class Videos(Images):
     """ Display a preview of Videos """
-    args = {'filter':' "Thumbnail"  has_magic video',
+    args = {'filter':' "Thumb"  has_magic video',
             'order': 1, 'direction':0}
-    family = "Disk Forensics"
     description = "View all Videos "
     name = "/Disk Forensics/Multimedia/Videos"
-    default_table = "TypeCaseTable"
-    columns = ['Thumbnail', 'InodeTable.Size','FileTable.Filename']
 
-class OfficeFiles(Reports.PreCannedCaseTableReports):
+class OfficeFiles(Images):
     """ Display a preview of Office files """
-    args = {'filter':' "Thumbnail"  has_magic office ',
+    args = {'filter':' "Thumb"  has_magic office ',
             'order': 1, 'direction':0}
-    family = "Disk Forensics"
     description = "View all Office files "
     name = "/Disk Forensics/Multimedia/Office"
-    default_table = "TypeCaseTable"
-    columns = ['Thumbnail', 'InodeTable.Size','FileTable.Filename']
 
-
-class HTMLPages(Registry.PreCanned):
-    args = {'filter':' "Thumbnail"  has_magic HTML ',
+class HTMLPages(Images):
+    args = {'filter':' "Thumb"  has_magic HTML ',
             'order': 4, 'direction':1}
-    family = "Disk Forensics"
-    report = "Browse Types"
     description = "View all HTML Pages "
     name = "/Disk Forensics/Multimedia/HTML Pages"
 
@@ -117,19 +108,16 @@ class ImageURLs(Reports.PreCannedCaseTableReports):
     description = "Show larger images transferred over HTTP"
     name = [ "/Network Forensics/Communications/Web/Images"]
     family = 'Network Forensics'
-    args = {'filter':'Thumbnail has_magic image and Size > 20000',
+    args = {'filter':'Thumb has_magic image and Size > 20000',
             'order': 0, 'direction': 1 }
-    default_table = 'HTTPCaseTable'
-    columns = ['Timestamp','TypeCaseTable.Thumbnail','InodeTable.Size', 'URL']
+    default_table = 'AFF4VFS'
+    columns = ['Modified','Thumb','Size', 'HTTPCaseTable.URL']
 
-class VideoURLs(Reports.PreCannedCaseTableReports):
+class VideoURLs(ImageURLs):
     description = "Show videos downloaded over HTTP"
     name = [ "/Network Forensics/Communications/Web/Videos"]
-    family = 'Network Forensics'
-    args = {'filter':'Thumbnail has_magic video',
+    args = {'filter':'Thumb has_magic video',
             'order': 0, 'direction': 1 }
-    default_table = 'HTTPCaseTable'
-    columns = ['Timestamp','TypeCaseTable.Thumbnail','InodeTable.Size', 'URL']
 
 class GoogleSearches(Reports.PreCannedCaseTableReports):
     description = "Shows possible Google searches."
@@ -137,9 +125,9 @@ class GoogleSearches(Reports.PreCannedCaseTableReports):
     family = 'Network Forensics'
     args = {'filter': 'Parameter = q and "Content Type" contains html', '_hidden': 5}
     default_table = 'HTTPCaseTable'
-    columns = ['HTTPCaseTable.Timestamp',
-               'HTTPCaseTable.Inode',
+    columns = ['AFF4VFS.Modified',
+               'URN',
                'HTTPParameterCaseTable.Parameter',
                'HTTPParameterCaseTable.Value',
-               'HTTPCaseTable.URL',
-               'HTTPCaseTable.Content Type']
+               'URL',
+               'Content Type']

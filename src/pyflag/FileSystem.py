@@ -83,8 +83,15 @@ class File:
         else:
             self.urn = aff4.oracle.get_urn_by_id(inode_id)
             self.inode_id = inode_id
+
+        fd = aff4.oracle.open(self.urn, 'r')
+        if not fd:
+            raise IOError("URN %s not found")
+        try:
+            self.size = fd.size
+        finally:
+            aff4.oracle.cache_return(fd)
             
-        self.size = int(aff4.oracle.resolve(self.urn, AFF4_SIZE))
         self.readptr = 0
         
         # should reads return slack space or overread into the next block? 
@@ -937,6 +944,8 @@ class DBFS(FileSystem):
 
         The URN must already exist.
         """
+        #if timestamp and "HTTP" in path:
+        #    pdb.set_trace()
         ## Basically this is how this function works - if root_inode
         ## is provided we make the new inode inherit the root inodes
         ## path and inode string.

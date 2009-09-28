@@ -36,6 +36,7 @@ from pyflag.FlagFramework import make_tld, CaseTable
 import pyflag.FlagFramework as FlagFramework
 import zlib, gzip
 import pyflag.Reports as Reports
+import plugins.NetworkForensics.NetworkScanner as NetworkScanner
 
 class RelaxedGzip(gzip.GzipFile):
     """ A variant of gzip which is more relaxed about errors """
@@ -97,6 +98,7 @@ class HTTPScanner(Scanner.GenScanFactory):
 
         request['url']=m.group(2)
         request['method']=m.group(1)
+        
         self.read_headers(request, forward_fd)
 
         return True
@@ -121,7 +123,7 @@ class HTTPScanner(Scanner.GenScanFactory):
         
         return True
 
-    def skip_body(self, headers, fd):
+    def skip_body(self, headers, stream_fd):
         """ Reads the body of the HTTP object depending on the values
         in the headers. This function takes care of correctly parsing
         chunked encoding. We return a new map representing the HTTP
@@ -131,7 +133,9 @@ class HTTPScanner(Scanner.GenScanFactory):
         of the object. After this function we will be positioned at
         the end of this object.
         """
-        fd = self.handle_encoding(headers, fd)
+        fd = self.handle_encoding(headers, stream_fd)
+        print "timestamp %s" % (headers['timestamp'])
+
         try:
             ## Handle gzip encoded data
             if headers['content-encoding'] == 'gzip':
@@ -144,11 +148,12 @@ class HTTPScanner(Scanner.GenScanFactory):
                     data = gzip_fd.read(1024 * 1024)
                     http_object = CacheManager.AFF4_MANAGER.create_cache_data(
                         fd.case, '/'.join((fd.urn, "decompressed")),
-                        data,
+                        data, timestamp = headers['timestamp'],
                         target = fd.urn, inherited = fd.urn)
                 else:
                     http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
                         fd.case, '/'.join((fd.urn, "decompressed")),
+                        timestamp = headers['timestamp'],
                         target = fd.urn, inherited = fd.urn)
                 
                     while 1:
@@ -165,6 +170,7 @@ class HTTPScanner(Scanner.GenScanFactory):
     def handle_encoding(self, headers, fd):        
         http_object = CacheManager.AFF4_MANAGER.create_cache_map(
             fd.case, '/'.join((os.path.dirname(fd.urn), "HTTP","%s" % fd.tell())),
+            timestamp = headers['timestamp'],
             target = fd.urn, inherited = fd.urn)
 
         try:
@@ -279,12 +285,25 @@ class HTTPScanner(Scanner.GenScanFactory):
             request_body = response_body = None
             
             ## First parse both request and response
+            ## Get the current timestamp of the request
+            packet = NetworkScanner.dissect_packet(forward_fd)
             if self.read_request(request, forward_fd):
+                try:
+                    request['timestamp'] = packet.ts_sec
+                except AttributeError:
+                    request['timestamp'] = 0
+                
                 parse = True
                 request_body = self.skip_body(request, forward_fd)
                 request_body.dirty = 0
 
+            packet = NetworkScanner.dissect_packet(reverse_fd)
             if self.read_response(response, reverse_fd):
+                try:
+                    response['timestamp'] = packet.ts_sec
+                except AttributeError:
+                    response['timestamp'] = 0
+ 
                 parse = True
                 response_body = self.skip_body(response, reverse_fd)
 
@@ -319,7 +338,7 @@ class HTTPRequests(Reports.PreCannedCaseTableReports):
     description = 'View URLs requested'
     name = '/Network Forensics/URLs'
     default_table = 'HTTPCaseTable'
-    columns = ['Timestamp', 'URN', 'TLD', 'URL',]
+    columns = ['AFF4VFS.Accessed', 'URN', 'TLD', 'AFF4VFS.Size', 'URL',]
 
 class AttachmentColumnType(IntegerType):
     """ View file Attachment in HTTP parameters """

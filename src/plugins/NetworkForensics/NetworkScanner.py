@@ -186,7 +186,15 @@ def make_processor(case, factories, urn_dispatcher):
                 r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
                 map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
 
-                ## FIXME - this needs to be done out of process!!!
+                ## FIXME - this needs to be done out of process using
+                ## the distributed architecture!!!
+                
+                ## Open read only versions of these streams for
+                ## scanning
+                dbfs = FileSystem.DBFS(case)
+                map_stream = dbfs.open(inode_id = map_stream.inode_id)
+                r_map_stream = dbfs.open(inode_id = map_stream.inode_id)
+                
                 Scanner.scan_inode(case, map_stream.inode_id,
                                    factories)
                 Scanner.scan_inode(case, r_map_stream.inode_id,
@@ -241,18 +249,22 @@ def dissect_packet(stream_fd):
         pcap_file = pypcap.PyPCAP(pcap_fd)
         PCAP_FILE_CACHE.add(target_urn, pcap_file)
 
+    offset = stream_fd.readptr
+
     ## What is the current range?
     (image_offset_at_point,
      target_offset_at_point,
      available_to_read,
-     target_urn) =  fd.get_range(stream_fd.readptr)
+     target_urn) =  fd.get_range(offset)
 
     if available_to_read:
         ## Go to the packet
         pcap_file.seek(target_offset_at_point)
         
         ## Dissect it
-        return pcap_file.dissect()
+        try:
+            return pcap_file.dissect()
+        except: pass
 
 def generate_streams_in_time_order(forward_fd, reverse_fd):
     """ This generator will return the next fd who's readptr is the

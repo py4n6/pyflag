@@ -136,6 +136,9 @@ class AFF4File(File):
         
         return result
 
+config.add_option("CLOSE_VOLUME", default=False, action = 'store_true',
+                  help = "Close AFF4 volume at program exit (this could take some time)")
+
 class AFF4ResolverTable(FlagFramework.EventHandler):
     """ Create tables for the AFF4 universal resolver. """
     ## This must occur last to ensure we close the volume after all
@@ -152,17 +155,18 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
 
     def exit(self, dbh, case):
         """ Check for dirty volumes and closes them """
-        dbh.execute("select value from meta where property='flag_db'")
-        for row in dbh:
-            volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
-            if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
-                now = time.time()
-                fd = aff4.oracle.open(volume_urn, 'w')
-                print "Closing volume %s" % volume_urn
-                if fd:
-                    fd.close()
-                print "Done in %s sec" % (time.time() - now)
-                    
+        if config.CLOSE_VOLUME:
+            dbh.execute("select value from meta where property='flag_db'")
+            for row in dbh:
+                case = row['value']
+                volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(case)
+                if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
+                    print "Closing AFF4 volumes %s for case %s" % (volume_urn, case)
+                    now = time.time()
+                    fd = aff4.oracle.open(volume_urn, 'w')
+                    if fd:
+                        fd.close()
+                    print "Done in %s sec" % (time.time() - now)
 
 class AFF4VFS(FlagFramework.CaseTable):
     """ A VFS implementation using AFF4 volumes """

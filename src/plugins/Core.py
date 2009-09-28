@@ -45,6 +45,7 @@ import os, pdb
 import pyflag.FlagFramework as FlagFramework
 import pyflag.Registry as Registry
 from pyflag.ColumnTypes import AFF4URN, StringType, FilenameType, DeletedType, IntegerType, TimestampType, BigIntegerType
+import pyflag.Magic as Magic
 
 config.add_option("SCHEMA_VERSION", default=3, absolute=True,
                   help="Current schema version")
@@ -562,3 +563,58 @@ class PyFlagStatistics(Reports.report):
             result.text(FlagFramework.print_info(), font='typewriter')
             
         result.toolbar(cb=info_cb, icon="question.png")
+
+
+class ViewFile(Reports.report):
+    """ Report to browse the filesystem """
+    parameters = {'inode_id':'numeric'}
+    family = "Disk Forensics"
+    name = "View File Contents"
+    description = "Display the contents of a file"
+    
+    def display(self,query,result):
+        new_q = result.make_link(query, '')
+        if not query.has_key('limit'): query['limit']= 0
+        dbh = self.DBO(query['case'])
+
+        fsfd = FileSystem.DBFS(query["case"])
+        ## If this is a directory, only show the stats
+        fd = fsfd.open(inode_id=query['inode_id'])
+        if not fd: return
+
+        tmp = result.__class__(result)
+        tmp.text(fd.urn)
+        result.heading(tmp)
+        
+        try:
+            m = Magic.MagicResolver()
+            type, mime = m.find_inode_magic(query['case'],
+                                            fd.inode_id)
+            result.text("Classified as %s by magic" % type)
+        except IOError,e:
+            result.text("Unable to classify file, no blocks: %s" % e)
+        except Exception,e:
+            print e
+            pass
+
+        names, callbacks = fd.make_tabs()
+        
+        result.notebook(
+            names=names,
+            callbacks=callbacks,
+            context="mode"
+            )
+        
+        result.toolbar(text="Scan this File",icon="examine.png",
+                       link=FlagFramework.query_type(family="Load Data", report="ScanInode",
+                                                     inode_id = query['inode_id'],
+                                                     case=query['case']
+                                                     ),
+                       pane = 'pane'
+                       )
+
+    def form(self,query,result):
+        result.case_selector()
+        result.textfield('URN','urn')
+        return result
+

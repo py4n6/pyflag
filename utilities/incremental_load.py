@@ -147,7 +147,6 @@ volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(config.case)
 
 for f in files:
     file_urn = "%s/%s" % (volume_urn, f)
-    print file_urn
     if not aff4.oracle.resolve(file_urn, AFF4_TYPE):
         ## We need to add it in there
         fd = open(os.path.join(directory, f))

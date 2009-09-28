@@ -1862,7 +1862,7 @@ class Map(FileLikeObject):
                 for x in tmp:
                     del self.target_offsets[x]
                     del self.target_urns[x]
-            
+                    
             self.size = max(self.size, self.readptr)
         finally:
             oracle.cache_return(backing_fd)
@@ -1909,6 +1909,8 @@ class Map(FileLikeObject):
         return l
 
     def close(self):
+        if self.mode == 'r': return
+
         fd = StringIO.StringIO()
         oracle.set(self.urn, AFF4_SIZE, self.size)
 

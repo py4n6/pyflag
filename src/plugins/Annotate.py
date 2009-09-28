@@ -27,7 +27,7 @@ Users may annotate important things for later reference.
 """
 import pyflag.Reports as Reports
 import pyflag.FlagFramework as FlagFramework
-from pyflag.ColumnTypes import StringType,TimestampType,EditableStringType,AFF4URN, FilenameType, IntegerType, IPType, add_display_hook, clear_display_hook
+from pyflag.ColumnTypes import StringType,TimestampType,EditableStringType,AFF4URN, FilenameType, IntegerType, IPType, add_display_hook, clear_display_hook, ThumbnailType
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.TableObj as TableObj
@@ -199,7 +199,7 @@ class AnnotationObj(TableObj.TableObj):
 def render_annotate_inode_id(self, inode_id, row, result):
     inode = ''
     if not inode_id: return ''
-    
+
     link = FlagFramework.query_type(case=self.case,
                                     family='Disk Forensics',
                                     report='ViewFile',
@@ -349,6 +349,8 @@ def column_decorator(self, table, sql, query, result):
     return self.name
 
 add_display_hook(AFF4URN, "render_annotate_inode_id", render_annotate_inode_id)
+add_display_hook(ThumbnailType, "render_annotate_inode_id", render_annotate_inode_id)
+
 AFF4URN.operator_annotated = operator_annotated
 if AFF4URN.column_decorator != column_decorator:
     original_column_decorator = AFF4URN.column_decorator
