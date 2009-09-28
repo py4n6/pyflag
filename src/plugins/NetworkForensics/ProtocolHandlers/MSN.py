@@ -11,9 +11,7 @@ TODO: Further work to make this scanner compatible with the latest MSN
 version (I believe this is version 11 at 20060531).
 
 """
-# Michael Cohen <scudette@users.sourceforge.net>
-# Gavin Jackson <gavz@users.sourceforge.net>
-# Greg <gregsfdev@users.sourceforge.net>
+# Michael Cohen <scudette@gmail.com>
 #
 #
 # ******************************************************
@@ -63,16 +61,15 @@ class MSNSessionTable(FlagFramework.CaseTable):
     """ Store information about decoded MSN messages """
     name = 'msn_session'
     columns = [ [ AFF4URN, {} ],
-                [ PacketType, dict(name = 'Packet', column = 'packet_id') ],
+                [ IntegerType, dict(name = 'Offset', column='offset')],
+                [ AFF4URN, dict(name = 'Stream', column = 'stream_id') ],
+                [ IntegerType, dict(name = 'Stream Offset', column='stream_offset')],
                 [ BigIntegerType, dict(name = 'Session ID', column='session_id') ],
                 [ StringType, dict(name = 'Sender', column='sender')],
                 [ StringType, dict(name = 'Recipient', column='recipient')],
                 [ StringType, dict(name = 'Type', column='type')],
-                [ StringType, dict(name = 'Message', column='data', text=True) ],
                 [ IntegerType, dict(name = 'P2P File', column='p2p_file') ],
-                [ IntegerType, dict(name = 'Transaction ID', column='transaction_id') ]
                 ]
-    extras = [ [ PCAPTime, dict(name = "Timestamp", column='packet_id') ], ]
 
 class ChatMessages(Reports.PreCannedCaseTableReports):
     args = { 'filter': ' "Type" = MESSAGE',
@@ -205,7 +202,8 @@ class MSNScanner(Scanner.GenScanFactory):
         
         """
         length = int(items[-1])
-        end = fd.tell() + length
+        start = fd.tell()
+        end = start + length
 
         if "@" in items[1]:
             ## Its type 2 (see above)
@@ -234,12 +232,20 @@ class MSNScanner(Scanner.GenScanFactory):
         ## We only care about text messages here
         if len(data)>0 and 'text/plain' in ct:
             ## Lets find out the timestamp of this point
+            session_fd.insert_to_table("msn_session",
+                                       dict(session_id = session_fd.session_id,
+                                            offset = session_fd.tell(),
+                                            sender = sender,
+                                            type = 'MESSAGE',
+                                            stream_id = fd.inode_id,
+                                            stream_offset = start))
             session_fd.write("%s %s %s: %s\n" % (time.ctime(fd.current_packet.ts_sec),
                                                  sender_name, sender, data))
 
     def insert_session_data(self, session_fd, sender, recipient, type, data=None):
         args =  dict(session_id = session_fd.session_id,
                      sender = sender,
+                     offset = session_fd.tell(),
                      recipient = recipient,
                      type = type)
 
@@ -310,16 +316,15 @@ class MSNTests(pyflag.tests.ScannerTest):
                              argv=["*",                   ## Inodes (All)
                                    "MSNScanner"
                                    ])                   ## List of Scanners
-    
+
+        ## Flush the cache
+        MSN_SESSIONS.flush()
         ## What should we have found?
         dbh = DB.DBO(self.test_case)
-        dbh.execute("""select * from `msn_session` where type=\"MESSAGE\"""")
-
-        ## Well we should find 10 messages
-        messages = 0
-        while dbh.fetch():
-            messages += 1        
-        assert messages == 10
+        dbh.execute("""select count(*) as total from `msn_session` where type=\"MESSAGE\"""")
+        row = dbh.fetch()
+        print row
+        assert row['total'] == 10
 
         ## We should also find user information  
         ## For example, check we pulled out the user's OS.

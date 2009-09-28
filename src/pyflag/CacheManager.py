@@ -80,8 +80,9 @@ class PyFlagMap(aff4.Map):
                     args.update(cPickle.loads(data_urn.decode("string_escape")))
                     
                 dbh.insert(table, **args)
-                
-        self.add_to_VFS(**self.include_in_VFS)
+
+        if self.include_in_VFS:
+            self.add_to_VFS(**self.include_in_VFS)
 
     def add_to_VFS(self, path, **kwargs):
         import pyflag.FileSystem as FileSystem
@@ -188,15 +189,20 @@ class AFF4Manager:
         if path.startswith(FQN) and "/" in path:
             path = path[path.index("/"):]
 
-        fd = PyFlagImage(None, 'w', inherited)
+        fd = PyFlagImage(None, 'w')
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
+
+        if inherited:
+            fd.set_inheritence(inherited)
+
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
         aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
 
         kwargs['path'] = path
-        fd.case = case
+        fd.case = kwargs['case'] = case
+
         if include_in_VFS:
             fd.include_in_VFS = kwargs
 

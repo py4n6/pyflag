@@ -52,7 +52,14 @@ struct pcap_pkthdr {
   uint32_t len;	/* length this packet (off wire) */
   char *data;
 
+  // The offset in the pcap file where this packet is
   uint64_t offset;
+
+  // This is a unique ID which refers to the pcap file which this
+  // packet came from - helps us account for multiple files. This just
+  // gets copied from the PyPcap object.
+  uint32_t pcap_file_id;
+
   uint32_t id;
   // This holds the dissected tree
   Root root;

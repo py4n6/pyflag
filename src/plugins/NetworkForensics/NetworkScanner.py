@@ -85,6 +85,117 @@ class ViewConnections(Reports.PreCannedCaseTableReports):
     columns = ['Inode', "Timestamp", "Source IP", "Source Port", "Destination IP",
                "Destination Port", "Type"]
 
+def make_processor(case, factories, urn_dispatcher):
+    """ Creates a new processor and returns it - you will need to feed
+    it packets and it will create streams on the AFF4 case file.
+
+    urn_dispatcher is a dict with keys as ints and values as URNs of
+    source files. When a new pcap file is opened it can receive a
+    unique pcap_file_id. All packets from this file will carry this ID
+    and we use this urn_dispatcher dict to map them back to a URN.
+    """
+
+    def Callback(mode, packet, connection):
+        if mode == 'est':
+            if 'map' not in connection:
+                ## Lookup the urn this packet came from
+                urn = urn_dispatcher[packet.pcap_file_id]
+                ip = packet.find_type("IP")
+
+                ## We can only get tcp or udp packets here
+                try:
+                    tcp = packet.find_type("TCP")
+                except AttributeError:
+                    tcp = packet.find_type("UDP")
+
+                base_urn = "/%s-%s/%s-%s/" % (
+                    ip.source_addr, ip.dest_addr,
+                    tcp.source, tcp.dest)
+
+                map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                    case, base_urn + "forward", timestamp = packet.ts_sec,
+                    target = urn)
+                connection['map'] = map_stream
+
+                ## These streams are used to point at the start of
+                ## each packet header - this helps us get back to
+                ## the packet information for each bit of data
+                map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
+                    case, base_urn + "forward.pkt", timestamp = packet.ts_sec,
+                    target = urn, inherited = map_stream.urn)
+                connection['map.pkt'] = map_stream_pkt
+
+                r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
+                    case, base_urn + "reverse", timestamp = packet.ts_sec,
+                    target = urn, inherited = map_stream.urn)
+                connection['reverse']['map'] = r_map_stream
+
+                ## These streams are used to point at the start of
+                ## each packet header - this helps us get back to
+                ## the packet information for each bit of data
+                r_map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
+                    case, base_urn + "reverse.pkt", timestamp = packet.ts_sec,
+                    target = urn, inherited = r_map_stream.urn)
+                connection['reverse']['map.pkt'] = r_map_stream_pkt
+
+
+                ## Add to connection table
+                map_stream.insert_to_table("connection_details",
+                                           dict(reverse = r_map_stream.inode_id,
+                                                src_ip = ip.src,
+                                                src_port = tcp.source,
+                                                dest_ip = ip.dest,
+                                                dest_port = tcp.dest,
+                                                _ts_sec = "from_unixtime(%s)" % packet.ts_sec,
+                                                )
+                                           )
+
+        elif mode == 'data':
+            try:
+                tcp = packet.find_type("TCP")
+            except AttributeError:
+                tcp = packet.find_type("UDP")
+
+            length = len(tcp.data)
+            urn = urn_dispatcher[packet.pcap_file_id]
+
+            if packet.offset==0: pdb.set_trace()
+            
+            connection['map'].write_from(urn, packet.offset + tcp.data_offset, length)
+            connection['map.pkt'].write_from(urn, packet.offset, length)
+
+        elif mode == 'destroy':
+            if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
+
+                map_stream = connection['map']
+                map_stream.close()
+
+                r_map_stream = connection['reverse']['map']
+                r_map_stream.close()
+
+                map_stream_pkt = connection['map.pkt']
+                Magic.set_magic(case, map_stream_pkt.inode_id,
+                                "Packet Map")
+                map_stream_pkt.close()
+
+                r_map_stream_pkt = connection['reverse']['map.pkt']
+                r_map_stream_pkt.close()
+                Magic.set_magic(case, r_map_stream_pkt.inode_id,
+                                "Packet Map")
+
+                r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
+                map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
+
+                ## FIXME - this needs to be done out of process!!!
+                Scanner.scan_inode(case, map_stream.inode_id,
+                                   factories)
+                Scanner.scan_inode(case, r_map_stream.inode_id,
+                                   factories)
+                
+    ## Create a tcp reassembler if we need it
+    processor = reassembler.Reassembler(packet_callback = Callback)
+
+    return processor
 
 class PCAPScanner(GenScanFactory):
     """ A scanner for PCAP files. We reasemble streams and load them
@@ -93,119 +204,12 @@ class PCAPScanner(GenScanFactory):
     """
     def scan(self, fd, factories, type, mime):
         if "PCAP" not in type: return
-        
-        def Callback(mode, packet, connection):
-            if mode == 'est':
-                if 'map' not in connection:
-                    ip = packet.find_type("IP")
 
-                    ## We can only get tcp or udp packets here
-                    try:
-                        tcp = packet.find_type("TCP")
-                    except AttributeError:
-                        tcp = packet.find_type("UDP")
-
-                    base_urn = "/%s-%s/%s-%s/" % (
-                        ip.source_addr, ip.dest_addr,
-                        tcp.source, tcp.dest)
-
-                    map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "forward", timestamp = packet.ts_sec,
-                        target = fd.urn)
-                    connection['map'] = map_stream
-
-                    ## These streams are used to point at the start of
-                    ## each packet header - this helps us get back to
-                    ## the packet information for each bit of data
-                    map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "forward.pkt", timestamp = packet.ts_sec,
-                        target = fd.urn, inherited = map_stream.urn)
-                    connection['map.pkt'] = map_stream_pkt
-
-                    #combined_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                    #    fd.case, base_urn + "combined", timestamp = packet.ts_sec,
-                    #    target = fd.urn, inherited = map_stream.urn)
-                    
-                    #connection['reverse']['combined'] = combined_stream
-                    #connection['combined'] = combined_stream
-                    
-                    r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "reverse", timestamp = packet.ts_sec,
-                        target = fd.urn, inherited = map_stream.urn)
-                    connection['reverse']['map'] = r_map_stream
-
-                    ## These streams are used to point at the start of
-                    ## each packet header - this helps us get back to
-                    ## the packet information for each bit of data
-                    r_map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
-                        fd.case, base_urn + "reverse.pkt", timestamp = packet.ts_sec,
-                        target = fd.urn, inherited = r_map_stream.urn)
-                    connection['reverse']['map.pkt'] = r_map_stream_pkt
-
-
-                    ## Add to connection table
-                    map_stream.insert_to_table("connection_details",
-                                               dict(reverse = r_map_stream.inode_id,
-                                                    src_ip = ip.src,
-                                                    src_port = tcp.source,
-                                                    dest_ip = ip.dest,
-                                                    dest_port = tcp.dest,
-                                                    _ts_sec = "from_unixtime(%s)" % packet.ts_sec,
-                                                    )
-                                               )
-                    
-            elif mode == 'data':
-                try:
-                    tcp = packet.find_type("TCP")
-                except AttributeError:
-                    tcp = packet.find_type("UDP")
-
-                length = len(tcp.data)
-                connection['map'].write_from("@", packet.offset + tcp.data_offset, length)
-                connection['map.pkt'].write_from("@", packet.offset, length)
-                #connection['combined'].write_from("@", packet.offset + tcp.data_offset,
-                #                                  length)
-
-            elif mode == 'destroy':
-                if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
-                    
-                    map_stream = connection['map']
-                    map_stream.close()
-                    
-                    r_map_stream = connection['reverse']['map']
-                    r_map_stream.close()
-                    
-                    map_stream_pkt = connection['map.pkt']
-                    Magic.set_magic(self.case, map_stream_pkt.inode_id,
-                                    "Packet Map")
-                    map_stream_pkt.close()
-
-                    r_map_stream_pkt = connection['reverse']['map.pkt']
-                    r_map_stream_pkt.close()
-                    Magic.set_magic(self.case, r_map_stream_pkt.inode_id,
-                                    "Packet Map")
-
-                    #combined_stream = connection['combined']
-                    #combined_stream.close()
-
-                    r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
-                    map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
-
-                    ## FIXME - this needs to be done out of process!!!
-                    Scanner.scan_inode(self.case, map_stream.inode_id,
-                                       factories)
-                    Scanner.scan_inode(self.case, r_map_stream.inode_id,
-                                       factories)
-                    #Scanner.scan_inode(self.case, combined_stream.inode_id,
-                    #                   factories)
-                    
-
-        ## Create a tcp reassembler if we need it
-        processor = reassembler.Reassembler(packet_callback = Callback)
-
+        urn_dispatcher = {1: fd.urn}
+        processor = make_processor(fd.case, factories, urn_dispatcher)
         ## Now process the file
         try:
-            pcap_file = pypcap.PyPCAP(fd)
+            pcap_file = pypcap.PyPCAP(fd, file_id=1)
             PCAP_FILE_CACHE.add(fd.urn, pcap_file)
         except IOError:
             pyflaglog.log(pyflaglog.WARNING,

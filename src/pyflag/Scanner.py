@@ -409,16 +409,17 @@ def scan_inode(case, inode_id, factories, force=False):
     if force: scanners_run = []
     
     fd.inode_id = row['inode_id']
+#    if stat['inode_id'] == 2225:
+#        pdb.set_trace()
+        
 
     ## The new scanning framework is much simpler - we just call the
     ## scan() method on each factory.
     m = Magic.MagicResolver()
-    messages = DB.expand("Scanning file %s/%s (inode %s)",
-                         (stat['path'],stat['name'],stat['inode_id']))
+    type, mime = m.find_inode_magic(case, fd.inode_id)
 
     for c in factories:
         if c.__class__.__name__ not in scanners_run:
-            type, mime = m.find_inode_magic(case, fd.inode_id)
             fd.seek(0)
             try:
                 c.scan(fd, factories=factories, type=type, mime=mime)
@@ -428,8 +429,12 @@ def scan_inode(case, inode_id, factories, force=False):
     global MESSAGE_COUNT
     MESSAGE_COUNT += 1
     if not MESSAGE_COUNT % 50:
+        messages = DB.expand("Scanning file %s/%s (inode %s)",
+                             (stat['path'],stat['name'],stat['inode_id']))
         pyflaglog.log(pyflaglog.DEBUG, messages)
     else:
+        messages = DB.expand("Scanning file %s/%s (inode %s)",
+                             (stat['path'],stat['name'],stat['inode_id']))
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, messages)
 
 #     while 1:

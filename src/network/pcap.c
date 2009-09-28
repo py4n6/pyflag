@@ -82,6 +82,7 @@ VIRTUAL(PcapPacketHeader, Packet)
      NAME_ACCESS(header, len, len, FIELD_TYPE_INT32);
      NAME_ACCESS(header, offset, offset, FIELD_TYPE_INT_64);
      NAME_ACCESS(header, id, id, FIELD_TYPE_INT32);
+     NAME_ACCESS(header, pcap_file_id, pcap_file_id, FIELD_TYPE_INT32);
      NAME_ACCESS(header, root, root, FIELD_TYPE_PACKET);
      NAME_ACCESS_SIZE(header, data, data, FIELD_TYPE_STRING, len);
 

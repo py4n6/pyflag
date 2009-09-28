@@ -33,29 +33,29 @@ import pyflag.ScannerUtils as ScannerUtils
 import pyflag.Farm as Farm
 import pyflag.FlagFramework as FlagFramework
 import select
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
+import pyflag.CacheManager as CacheManager
+import plugins.NetworkForensics.NetworkScanner as NetworkScanner
+import pyflag.Scanner as Scanner
+import pyflag.FileSystem as FileSystem
+import pdb
 
 Registry.Init()
 
-config.set_usage(usage = """%prog [options] directory_to_monitor output_file
+config.set_usage(usage = """%prog [options] directory_to_monitor
 
 Monitors the directory for files periodically. When a pcap file
 appears in the directory it will be processed and scanned
-automatically, the pcap file will be also written (merged) to the
-output file. The pcap file will be unlinked (removed) afterwards.
+automatically, the pcap file will be also be added to the case AFF4
+file.
 
 NOTE: This loader does not start any workers, if you want to scan the
 data as well you will need to start seperate workers.
-
-if output_file is '-' we skip writing altogether. This is useful if
-you never want to examine packets and only want to see reassembled
-streams.
 """, version = "Version: %%prog PyFlag %s" % config.VERSION)
 
 config.add_option("case", default=None,
                   help="Case to load the files into (mandatory). Case must have been created already.")
-
-config.add_option("iosource", default="o",
-                  help="Iosource name to make for the output file")
 
 config.add_option("mountpoint", default='/',
                   help='Mount point for the VFS')
@@ -69,9 +69,6 @@ config.add_option("scanners", default='NetworkScanners,CompressedFile',
 config.add_option("timeout", default=120, type='int',
                   help="The maximum inactivity time after which the tcp reassembler will be flushed")
 
-config.add_option("log", default="log.txt", 
-                  help='This is a log file where we maintain a list of files that we already processed.')
-
 config.add_option("lock", default='.lock',
                   help="Do not operate on directory while lock file is present")
 
@@ -82,9 +79,8 @@ config.parse_options(True)
 
 try:
     directory = config.args[0]
-    output_file = config.args[1]
 except IndexError:
-    print "You must specify both a directory to monitor and an output file"
+    print "You must specify a directory to monitor"
     sys.exit(-1)
 
 if not config.case:
@@ -92,9 +88,93 @@ if not config.case:
     sys.exit(-1)
 
 scanners = config.scanners.split(',')
-scanners = ScannerUtils.fill_in_dependancies(scanners)
-print scanners
+factories = Scanner.get_factories(config.case, scanners)
+count = 0
+processed_length = 0
 
+print factories
+
+def load_file(urn, processor, pcap_dispatch):
+    """ Loads the urn into the processor """
+    ## Get a unique id for the urn
+    dbfs = FileSystem.DBFS(config.case)
+    fd = dbfs.open(urn=urn)
+
+    id = len(pcap_dispatch)+1
+    pcap_dispatch[id] = urn
+    
+    try:
+        input_file = pypcap.PyPCAP(fd, file_id = id)
+    except IOError,e:
+        pyflaglog.log(pyflaglog.INFO, "Error reading %s: %s" % (urn, e))
+        return
+    
+    ## Iterate over all the packets in the file:
+    global count, processed_length
+    
+    while 1:
+        try:
+            packet = input_file.dissect()
+            count += 1
+            processed_length += packet.caplen
+        except StopIteration:
+            break
+
+        ## Some progress reporting
+        if count % 1000 == 0:
+            pyflaglog.log(pyflaglog.DEBUG,
+                          "processed %s packets (%s)" % (count, processed_length))
+
+        processor.process(packet)
+
+## recreate case (only needed for testing)
+env = pyflagsh.environment(case=config.case)
+pyflagsh.shell_execv(command="delete_case", env=env,
+                     argv=[config.case])
+pyflagsh.shell_execv(command="create_case", env=env,
+                     argv=[config.case])
+
+files = os.listdir(directory)
+files.sort()
+files = files[-70:]
+
+baseurn = None
+pcap_dispatch = {}
+processor = NetworkScanner.make_processor(config.case, factories, pcap_dispatch)
+
+now = time.time()
+volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(config.case)
+
+for f in files:
+    file_urn = "%s/%s" % (volume_urn, f)
+    print file_urn
+    if not aff4.oracle.resolve(file_urn, AFF4_TYPE):
+        ## We need to add it in there
+        fd = open(os.path.join(directory, f))
+        outfd = CacheManager.AFF4_MANAGER.create_cache_fd(config.case, f,
+                                                          include_in_VFS = False,
+                                                          inherited = baseurn)
+        if not baseurn: baseurn = outfd.urn
+        while 1:
+            data = fd.read(1024000)
+            if not data: break
+
+            outfd.write(data)
+
+        fd.close()
+        outfd.close()
+
+        ## Now processes this file
+        load_file(outfd.urn, processor, pcap_dispatch)
+
+print "Finished loading - flushing"
+del processor
+
+print "Done processing in %s" % (time.time() - now)
+## Send off the exit message
+FlagFramework.post_event("exit", None)
+
+sys.exit(0)
 output_fd = None
 
 def create_output_file():

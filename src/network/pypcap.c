@@ -54,12 +54,13 @@ static int PyPCAP_fill_buffer(PyPCAP *self, PyObject *fd) {
 static int PyPCAP_init(PyPCAP *self, PyObject *args, PyObject *kwds) {
   PyObject *fd = NULL;
   int len;
-  static char *kwlist[] = {"fd", "output",NULL};
+  static char *kwlist[] = {"fd", "output", "file_id", NULL};
   int i;
   char *output=NULL;
 
-  if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|s", kwlist,
-				  &fd, &output))
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|sL", kwlist,
+				  &fd, &output, 
+				  &self->pcap_file_id))
     return -1;
 
   if(output) {
@@ -267,8 +268,9 @@ static PyObject *PyPCAP_next(PyPCAP *self) {
     return PyErr_Format(PyExc_StopIteration, "Done");
   };
 
-  // Make sure the new packet knows its offset:
+  // Make sure the new packet knows its offset and where it came from:
   self->packet_header->header.offset = self->pcap_offset;
+  self->packet_header->header.pcap_file_id = self->pcap_file_id;
 
   // Keep track of our own file offset:
   self->pcap_offset += self->buffer->readptr - packet_offset;

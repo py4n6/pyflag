@@ -267,7 +267,9 @@ try:
 
             #serializer.set_namespace(volume_urn, "VFS")
             for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):
-                serializer.serialize_urn(urn)
+                type = self.resolve(urn, AFF4_TYPE)
+                excluded_attributes = aff4.NON_SERIALIZABLE_OBJECTS.get(type, [])
+                serializer.serialize_urn(urn, exclude=excluded_attributes)
 
             serializer.close()
 

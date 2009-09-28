@@ -29,10 +29,13 @@ import pyflag.CacheManager as CacheManager
 import PIL, cStringIO, PIL.ImageFile
 import pyflag.Registry as Registry
 from pyflag.ColumnTypes import AFF4URN, StringType, FilenameType, DeletedType, IntegerType, TimestampType, BigIntegerType, StateType, ThumbnailType, SetType
+import time
 
 ## Some private AFF4 namespace objects
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
+
+## Ensure that it does not get exported.
 
 ## These are the supported streams
 SUPPORTED_STREAMS = [AFF4_IMAGE, AFF4_MAP, AFF4_AFF1_STREAM,
@@ -153,10 +156,12 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         for row in dbh:
             volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(row['value'])
             if volume_urn and aff4.oracle.resolve(volume_urn, AFF4_VOLATILE_DIRTY):
+                now = time.time()
                 fd = aff4.oracle.open(volume_urn, 'w')
                 print "Closing volume %s" % volume_urn
                 if fd:
                     fd.close()
+                print "Done in %s sec" % (time.time() - now)
                     
 
 class AFF4VFS(FlagFramework.CaseTable):

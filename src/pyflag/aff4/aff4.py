@@ -54,6 +54,17 @@ _DETAILED = 7
 _INFO = 5
 _WARNING = 1
 
+## This dict specifies objects and attributes which will not be
+## serialised into the properties file. These attributes are
+## automatically generated from other means (for example the zip file
+## headers).
+NON_SERIALIZABLE_OBJECTS = {
+    AFF4_SEGMENT : [ AFF4_TYPE, AFF4_SIZE,
+                     AFF4_INTERFACE, AFF4_INTERFACE,
+                     AFF4_STORED, AFF4_TIMESTAMP
+                     ],
+    }
+
 ## Bootstap DEBUG function (only add this after loading this module -
 ## see below)
 def DEBUG(verb, fmt, *args):

@@ -888,14 +888,73 @@ static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwd
   return -1;
 };
 
+/** Given an offet in the data_store export the entire list through
+    the serializer.
+*/
+static void export_list(RDFSerializer *self, TDB_DATA urn, 
+			TDB_DATA attribute, TDB_DATA offset) {
+  // Get the offset to the value and retrieve it from the data
+  // store:
+  TDB_DATA_LIST tmp;
+
+  tmp.offset = to_int(offset);
+  
+  // Iterate over all hits in the attribute list
+  while(tmp.offset) {
+    lseek(self->resolver->data_store_fd, tmp.offset, SEEK_SET);
+    if(read(self->resolver->data_store_fd, &tmp, sizeof(tmp))==sizeof(tmp) && 
+       tmp.length < 10000) {
+      char buff[tmp.length];
+
+      buff[tmp.length]=0;
+      read(self->resolver->data_store_fd, buff, tmp.length);
+
+      // Now export this statement:
+      {
+	raptor_statement triple;
+	char urn_buf[BUFF_SIZE];
+	char attribute_buf[BUFF_SIZE];
+	
+	urn.dsize = min(urn.dsize, BUFF_SIZE-1);
+	memcpy(urn_buf, urn.dptr, urn.dsize);
+	
+	attribute.dsize = min(attribute.dsize, BUFF_SIZE-1);
+	memcpy(attribute_buf, attribute.dptr, attribute.dsize);
+	
+	urn_buf[urn.dsize]=0;
+	attribute_buf[attribute.dsize]=0;
+	
+	triple.subject = (void*)raptor_new_uri((const unsigned char*)urn_buf);
+	triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+	
+	triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute_buf);
+	triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+	
+	triple.object = buff;
+	triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+	triple.object_literal_datatype = 0;
+	//triple.object_literal_language=(const unsigned
+	//char*)"en";
+	triple.object_literal_language=NULL;
+	
+	raptor_serialize_statement(self->rdf_serializer, &triple);
+	raptor_free_uri((raptor_uri*)triple.subject);
+	raptor_free_uri((raptor_uri*)triple.predicate);	      
+      };
+    } else return;
+  };
+};
+
+
 static PyObject *rdfserializer_serialize_urn(RDFSerializer *self, 
 					     PyObject *args, PyObject *kwds) {
-  static char *kwlist[] = {"urn", NULL};
+  static char *kwlist[] = {"urn", "exclude", NULL};
   TDB_DATA urn,id;
   int max_attr_id=1,i, urn_id;
+  PyObject *exclude=NULL;
 
-  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
-				  &urn.dptr, &urn.dsize))
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|O", kwlist, 
+				  &urn.dptr, &urn.dsize, &exclude))
     return NULL;
      
   // Find the URN id
@@ -947,56 +1006,17 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
       // Ignore volatile namespace attributes
       if(attribute.dptr && memcmp(attribute.dptr, VOLATILE_NS, 
 				  min(strlen(VOLATILE_NS), attribute.dsize))) {
-	// Get the offset to the value and retrieve it from the data
-	// store:
-	TDB_DATA_LIST tmp;
-	tmp.offset = to_int(offset);
-	
-	// Iterate over all hits in the attribute list
-	while(tmp.offset) {
-	  lseek(self->resolver->data_store_fd, tmp.offset, SEEK_SET);
-	  if(read(self->resolver->data_store_fd, &tmp, sizeof(tmp))==sizeof(tmp) && 
-	     tmp.length < 10000) {
-	    char buff[tmp.length];
+	// Check if the attribute should be ignored
+#if 1
+	PyObject *string = PyString_FromStringAndSize(attribute.dptr, attribute.dsize);
 
-	    buff[tmp.length]=0;
-	    read(self->resolver->data_store_fd, buff, tmp.length);
-
-	    // Now export this statement:
-	    {
-	      raptor_statement triple;
-	      char urn_buf[BUFF_SIZE];
-	      char attribute_buf[BUFF_SIZE];
-
-	      urn.dsize = min(urn.dsize, BUFF_SIZE-1);
-	      memcpy(urn_buf, urn.dptr, urn.dsize);
-
-	      attribute.dsize = min(attribute.dsize, BUFF_SIZE-1);
-	      memcpy(attribute_buf, attribute.dptr, attribute.dsize);
-
-	      urn_buf[urn.dsize]=0;
-	      attribute_buf[attribute.dsize]=0;
-
-	      triple.subject = (void*)raptor_new_uri((const unsigned char*)urn_buf);
-	      triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-
-	      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute_buf);
-	      triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-
-	      triple.object = buff;
-	      triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-	      triple.object_literal_datatype = 0;
-	      //triple.object_literal_language=(const unsigned
-	      //char*)"en";
-	      triple.object_literal_language=NULL;
-
-	      raptor_serialize_statement(self->rdf_serializer, &triple);
-	      raptor_free_uri((raptor_uri*)triple.subject);
-	      raptor_free_uri((raptor_uri*)triple.predicate);	      
-	    };
-	  } else break;
+	if(exclude && !PySequence_Contains(exclude, string)) {
+	  export_list(self, urn, attribute, offset);
 	};
-
+	Py_DECREF(string);
+#else
+	export_list(self, urn, attribute, offset);
+#endif
 	free(attribute.dptr);
       };
       free(offset.dptr);
