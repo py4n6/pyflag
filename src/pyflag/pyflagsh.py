@@ -22,7 +22,7 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 """ An interactive shell for examining file systems loaded into flag """
-import sys,os
+import sys,os, pdb
 
 sys.path.append(os.path.join(os.path.dirname(__file__),"pyflag"))
 sys.path.append(os.path.join(os.path.dirname(__file__),".."))
@@ -327,6 +327,7 @@ if __name__ == "__main__":
             except ParserException, e:
                 print "Problem parsing the previous line: %s" % e
             except Exception,e:
+                pdb.post_mortem()
                 print isinstance(e,ParserException)
                 print "Unknown error: %r %s" % (e,e)
                 print FlagFramework.get_bt_string(e)

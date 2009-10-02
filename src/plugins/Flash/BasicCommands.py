@@ -363,6 +363,8 @@ class iiless(iless):
         return """ Dump the value of an inode_id (inode ids are internal db ids for the inodes, this is probably not generally useful for anyone other than developers) """
     
     def execute(self):
+        if not self.environment._CASE:
+            raise RuntimeError("You must specify a case first (try load casename)")
         dbh = DB.DBO(self.environment._CASE)
         for inode_id in self.args:
             fd=self.environment._FS.open(inode_id=inode_id)
@@ -614,6 +616,18 @@ class file(ls):
         m = Magic.MagicResolver()
         for path in self.args:
             type, mime = m.find_inode_magic(case = self.environment._CASE, urn = path)
+
+            yield dict(type=type, mime = mime)
+
+class ifile(ls):
+    """ Returns the file magic of args """
+    def execute(self):
+        #Find the inode of the file:
+        import pyflag.Magic as Magic
+
+        m = Magic.MagicResolver()
+        for inode_id in self.args:
+            type, mime = m.find_inode_magic(case = self.environment._CASE, inode_id=inode_id)
 
             yield dict(type=type, mime = mime)
 

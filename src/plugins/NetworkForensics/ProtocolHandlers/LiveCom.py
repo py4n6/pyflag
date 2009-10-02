@@ -272,6 +272,56 @@ class HTMLStringType(StringType):
 
 	result.text(value, wrap='full', font='typewriter')
 
+class AttachmentColumn(AFF4URN):
+    """ Displays the attachments related to the webmail message """
+    def display(self, value, row, result):
+        dbh = DB.DBO(self.case)
+        dbfs=FileSystem.DBFS(self.case)
+        
+        dbh.execute("select * from webmail_attachments where inode_id = %r", value)
+        for row in dbh:
+            fd = dbfs.open(dbfs, urn=row['attachment'])
+            data = fd.read()
+            parser = HTML.HTMLParser(tag_class = \
+                                     FlagFramework.Curry(HTML.ResolvingHTMLTag,
+                                                         case = self.case,
+                                                         inode_id = value))
+            parser.feed(data)
+            parser.close()
+            
+            value = parser.root.innerHTML()
+            result.raw(value)
+        
+        return result
+
+        fsfd = FileSystem.DBFS(self.case)
+        dbh.execute("select file.inode_id as inode_id, name from file, webmail_attachments where webmail_attachments.inode_id = %r and file.inode_id = webmail_attachments.attachment", value)
+        for row in dbh:
+            tmp = result.__class__(result)
+
+            try:
+                fd = fsfd.open(inode_id=row['inode_id'])
+                image = Graph.Thumbnailer(fd,100)
+            except IOError:
+                pass
+            
+            if image.height>0:
+                tmp.image(image,width=image.width,height=image.height)
+            else:
+                tmp.image(image,width=image.width)
+
+            link = result.__class__(result)
+            name = row['name']
+            if len(name) > 20: name = name[:20]+" ..."
+            tmp.para(name)
+            link.link(tmp, tooltip = row['name'],
+                      pane = 'new',
+                      target= FlagFramework.query_type(family = "Disk Forensics",
+                                                       report = "ViewFile",
+                                                       case = self.case,
+                                                       mode = 'Summary',
+                                                       inode_id = row['inode_id']))
+            result.row(link)
 
 class WebMailTable(FlagFramework.CaseTable):
     """ Table to store Web mail related information """
@@ -290,13 +340,15 @@ class WebMailTable(FlagFramework.CaseTable):
         [ TimestampType, dict(name='Sent', column='sent')],
         ]
 
+    extras = [ [ AttachmentColumn, dict(name='Attachments') ] ]
+
 class WebMailAttachmentTable(FlagFramework.CaseTable):
-    """ Table to store web mail attachment references """
+    """ Table to store web mail attachments """
     name = "webmail_attachments"
     columns = [
-        [ AFF4URN, dict(name = "Message Inode") ],
-        [ AFF4URN, dict(name = "Attachment", column="attachment") ],
-        [ StringType, dict(name = "URL", column='url')],
+        [ AFF4URN, dict(name = "Message") ],
+        [ StringType, dict(name = "Attachment", column="attachment") ],
+        [ IntegerType, dict(name = "PartID", column='partid')],
         ]
 
 import fnmatch
@@ -473,14 +525,15 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return self.insert_message(fd, result)
 
-    def insert_message(self, fd, result, inode_template="l%s"):
+    def insert_message(self, fd, result, message_urn = None):
         try:
             assert(result['message'])
         except: return
         data = self.fixup_page(result, HTML.SanitizingTag)
+        message_urn = message_urn or "/".join((fd.urn, "Message"))
         
         live_obj = CacheManager.AFF4_MANAGER.create_cache_data(
-            fd.case, "/".join((fd.urn, "Message")),
+            fd.case, message_urn,
             data.encode("utf8"),
             inherited = fd.urn)
 
@@ -488,7 +541,7 @@ class HotmailScanner(Scanner.GenScanFactory):
         live_obj.insert_to_table('webmail_messages', result)
         live_obj.close()
 
-        return live_obj.inode_id
+        return live_obj
 
 import pyflag.Magic as Magic
 
@@ -699,40 +752,6 @@ class LiveAttachements(FlagFramework.EventHandler):
                                         inode_id = row3['inode_id'],
                                         attachment = attachment)
         
-
-class AttachmentColumn(AFF4URN):
-    """ Displays the attachments related to the webmail message """
-    def display(self, value, row, result):
-        dbh = DB.DBO(self.case)
-        fsfd = FileSystem.DBFS(self.case)
-        dbh.execute("select file.inode_id as inode_id, name from file, webmail_attachments where webmail_attachments.inode_id = %r and file.inode_id = webmail_attachments.attachment", value)
-        for row in dbh:
-            tmp = result.__class__(result)
-
-            try:
-                fd = fsfd.open(inode_id=row['inode_id'])
-                image = Graph.Thumbnailer(fd,100)
-            except IOError:
-                pass
-            
-            if image.height>0:
-                tmp.image(image,width=image.width,height=image.height)
-            else:
-                tmp.image(image,width=image.width)
-
-            link = result.__class__(result)
-            name = row['name']
-            if len(name) > 20: name = name[:20]+" ..."
-            tmp.para(name)
-            link.link(tmp, tooltip = row['name'],
-                      pane = 'new',
-                      target= FlagFramework.query_type(family = "Disk Forensics",
-                                                       report = "ViewFile",
-                                                       case = self.case,
-                                                       mode = 'Summary',
-                                                       inode_id = row['inode_id']))
-            result.row(link)
-
 class WebMailMessages(Reports.CaseTableReports):
     """
     Browse WebMail messages.
@@ -956,7 +975,7 @@ class AllWebMail(Reports.PreCannedCaseTableReports):
     default_table = 'WebMailTable'
     description = "View all Webmail messages"
     name = "/Network Forensics/Web Applications/Webmail"
-    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type' ]
+    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type', "Attachments"]
     
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh

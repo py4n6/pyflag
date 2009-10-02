@@ -134,8 +134,6 @@ class HTTPScanner(Scanner.GenScanFactory):
         the end of this object.
         """
         fd = self.handle_encoding(headers, stream_fd)
-        print "timestamp %s" % (headers['timestamp'])
-
         try:
             ## Handle gzip encoded data
             if headers['content-encoding'] == 'gzip':
@@ -169,7 +167,7 @@ class HTTPScanner(Scanner.GenScanFactory):
 
     def handle_encoding(self, headers, fd):        
         http_object = CacheManager.AFF4_MANAGER.create_cache_map(
-            fd.case, '/'.join((os.path.dirname(fd.urn), "HTTP","%s" % fd.tell())),
+            fd.case, '/'.join((fd.urn, "HTTP","%s" % fd.tell())),
             timestamp = headers['timestamp'],
             target = fd.urn, inherited = fd.urn)
 
@@ -260,6 +258,7 @@ class HTTPScanner(Scanner.GenScanFactory):
         env = dict(REQUEST_METHOD=request['method'],
                    CONTENT_TYPE=request.get('content-type',''),
                    CONTENT_LENGTH=request_body.size,
+                   REQUEST_BODY=request_body.urn,
                    QUERY_STRING=query)
         
         result =cgi.FieldStorage(environ = env, fp = request_body)
@@ -317,9 +316,10 @@ class HTTPScanner(Scanner.GenScanFactory):
                 
             if response_body and response_body.size > 0:
                 ## Store information about the object in the http table:
+                url = request.get('url','')
                 response_body.insert_to_table("http",
                                               dict(method = request.get('method'),
-                                                   url = request.get('url'),
+                                                   url = HTML.url_unquote(url),
                                                    status = response.get('HTTP_code'),
                                                    content_type = response.get('content-type'),
                                                    useragent = request.get('user-agent'),

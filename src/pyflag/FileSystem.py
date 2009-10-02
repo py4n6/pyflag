@@ -84,6 +84,9 @@ class File:
             self.urn = aff4.oracle.get_urn_by_id(inode_id)
             self.inode_id = inode_id
 
+            if not self.urn:
+                raise IOError("Unable to find urn for inode_id %s" % inode_id)
+
         fd = aff4.oracle.open(self.urn, 'r')
         if not fd:
             raise IOError("URN %s not found")

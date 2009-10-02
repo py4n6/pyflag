@@ -676,7 +676,7 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
   char buff[BUFF_SIZE];
   TDB_DATA attribute;
   TDB_DATA_LIST i;
-  int follow_inheritence=0;
+  int follow_inheritence=1;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#|L", kwlist, 
 				  &urn.dptr, &urn.dsize, 
@@ -707,6 +707,43 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
   return PyList_New(0);
 };
 
+static PyObject *export_dict(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", NULL};
+  TDB_DATA urn;
+  char buff[BUFF_SIZE];
+  TDB_DATA attribute, next;
+  TDB_DATA_LIST data_list;
+  PyObject *result;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
+				  &urn.dptr, &urn.dsize))
+    return NULL;
+  
+  result = PyDict_New();
+  if(!result) return NULL;
+
+  // Iterate over all the attribute and check if they are set
+  attribute = tdb_firstkey(self->attribute_db);
+  while(attribute.dptr) {
+
+    // See if we have this attribute set
+    if(get_data_head(self, urn, attribute, &data_list)) {
+      PyObject *list = retrieve_attribute_list(self, &data_list);
+      PyObject *key = PyString_FromStringAndSize((char *)attribute.dptr, attribute.dsize);
+
+      PyDict_SetItem(result, key, list);
+      Py_DECREF(list);
+      Py_DECREF(key);
+    };
+
+    next = tdb_nextkey(self->attribute_db, attribute);
+    free(attribute.dptr);
+    attribute = next;
+  };
+
+  return result;
+};
+
 static PyMethodDef PyTDBResolver_methods[] = {
   {"get_urn_by_id",(PyCFunction)get_urn_by_id, METH_VARARGS|METH_KEYWORDS,
    "Resolves a URN by an id"},
@@ -720,6 +757,8 @@ static PyMethodDef PyTDBResolver_methods[] = {
    "deletes all attributes for a URN"},
   {"resolve_list",(PyCFunction)resolve_list, METH_VARARGS|METH_KEYWORDS,
    "Returns a list of attribute values for a URN"},
+  {"export_dict", (PyCFunction)export_dict, METH_VARARGS|METH_KEYWORDS,
+   "return all the attributes of the given URN"},
   {NULL}  /* Sentinel */
 };
 

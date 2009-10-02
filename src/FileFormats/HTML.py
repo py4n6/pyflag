@@ -509,8 +509,10 @@ class ResolvingHTMLTag(SanitizingTag):
     def resolve_reference(self, reference, hint='', build_reference=True):
         original_reference = reference
 
+        pdb.set_trace()
+
         ## Make reference into relative reference
-        host, url = self.parse_url(reference)
+        host, url = self.parse_url(url_unquote(decode(reference)))
 
         ## Maybe its in the filesystem
         if not host:

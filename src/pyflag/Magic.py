@@ -111,7 +111,9 @@ class MagicResolver:
             import pyflag.aff4.aff4 as aff4
             
             inode_id = aff4.oracle.get_id_by_urn(urn)
-
+            if not inode_id:
+                raise IOError("Unknown URN %s" % urn)
+            
         ## Is it already in the type table?
         try:
             dbh.execute("select mime,type from type where inode_id=%r limit 1",inode_id)

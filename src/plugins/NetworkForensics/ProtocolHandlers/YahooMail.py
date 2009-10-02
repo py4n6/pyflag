@@ -23,7 +23,7 @@
 # ******************************************************
 """ This module will retrieve the email messages from Yahoo mail """
 import pyflag.DB as DB
-import LiveCom
+import LiveCom, pdb
 import pyflag.pyflaglog as pyflaglog
 import pyflag.Scanner as Scanner
 import re
@@ -33,7 +33,35 @@ import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
 import pyflag.ColumnTypes as ColumnTypes
 import pyflag.Time as Time
+import pyflag.aff4.aff4 as aff4
+import pyflag.Magic as Magic
+import pyflag.CacheManager as CacheManager
 
+class YahooMagic(Magic.Magic):
+    """ Identify Yahoo Classic Mail Messages """
+    type = "Yahoo Mail Classic"
+    mime = "protocol/x-yahoomail-classic"
+    default_score = 100
+
+    regex_rules = [
+        ( "Yahoo! Mail", (0,200)),
+        ]
+    
+
+class YahooMagic(Magic.Magic):
+    """ Identify Yahoo Mail AJAX Edition """
+    type = "Yahoo Mail AJAX"
+    mime = "protocol/x-yahoomail-ajax"
+    default_score = 100
+
+    regex_rules = [
+        ( "<GetDisplayMessageResponse", (0,200)),
+        ( "<SendMessageResponse", (0,200)),
+        ( "<ListMessagesResponse", (0,200)),
+        ( "<SetMetaDataResponse", (0,200)),
+        ( "<GetAttachmentSettingsResponse", (0,200)),
+        ]
+    
 class YahooMailScan(LiveCom.HotmailScanner):
     """ Detect YahooMail Sessions """
 
@@ -256,131 +284,182 @@ class YahooMailScan(LiveCom.HotmailScanner):
                 return self.insert_message(result, inode_template = "y%s")
 
 class YahooMail20Scan(YahooMailScan):
-        """ A Scanner for Yahoo Mail 2.0 (AJAX) """
-        class Scan(YahooMailScan.Scan):
-            types = ( 'xml', 'text/html' )
-        
-            def boring(self, data=''):
-                ## Yahoo web 2.0 is very nice to work with- All
-                ## responses are in nice XML
-                if not Scanner.StoreAndScanType.boring(self, data=''):
-                    m=re.search("<(GetDisplayMessageResponse|ListMessagesResponse|SendMessageResponse)", data)
-                    if m:
-                        self.context = m.group(1)
-                        ## Make a new parser:
-                        if not self.parser:
-                            self.parser =  HTML.HTMLParser(verbose=0)
-                        return False
+    """ A Scanner for Yahoo Mail 2.0 (AJAX) """
+    service = "YahooMail AJAX"
 
-                return True
-  
-            def external_process(self, fd):
-                pyflaglog.log(pyflaglog.DEBUG,"Opening %s for YahooMail2.0 processing" % self.fd.inode)
+    def fixup_page(self, result, tag_class):
+        """ Its not really possible to represent AJAX communications
+        properly, so we just write the message here.
 
-                if self.context=='GetDisplayMessageResponse':
-                    self.process_readmessage()
-                elif self.context=='ListMessagesResponse':
-                    self.process_mail_listing()
-                elif self.context=='SendMessageResponse':
-                    self.process_send_message()
+        FIXME - It may be possible to render the page by inserting the
+        message into a template created by other pages.
+        """
+        message = result.get('message','')
+        return message
 
-            def process_send_message(self):
-                dbh = DB.DBO(self.case)
-                dbh.execute("select `key`,`value`,`indirect` from http_parameters where `key`='body' and inode_id = %r limit 1", self.fd.inode_id)
-                row = dbh.fetch()
-                if not row: return
-                
-                inode_id = row['indirect']
-                if not inode_id: return
-                
-                ## Need to parse the sent message
-                fsfd = FileSystem.DBFS(self.case)
-                fd = fsfd.open(inode_id = inode_id)
-                self.parser =  HTML.HTMLParser(verbose=0)
-                self.parser.feed(fd.read())
-                self.parser.close()
-                root = self.parser.root
+    def scan(self, fd, factories, type, mime):
+        if "Yahoo Mail AJAX" in type:        
+            self.parser =  HTML.HTMLParser(verbose=0)
+            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for YahooMail2.0 processing" %
+                          fd.inode_id)
 
-                result = {'type':'Edit Sent'}
-                result['From'] = self.parse_email_address(root, 'from')
-                result['To'] = self.parse_email_address(root, 'to')
-                try:
-                    result['message'] = root.find("text").innerHTML()
-                except: pass
+            ## Read all the data into the parser
+            self.context = None
+            while 1:
+                data = fd.read(1024*1024)
+                if not data: break
 
-                ## Sometimes they also give us the html version
-                #try:
-                #    result['message'] = root.find("html").innerHTML()
-                #except: pass
+                if not self.context: self.context = data
+                self.parser.feed(data)
 
-                try:
-                    result['subject'] = root.find("subject").innerHTML()
-                except: pass
+            self.parser.close()
 
-                self.insert_message(result, "webmail")
+            if 'GetDisplayMessageResponse' in self.context:
+                self.process_readmessage(fd)
+            #elif self.context=='ListMessagesResponse':
+            #    self.process_mail_listing(fd)
+            #elif self.context=='SendMessageResponse':
+            #    self.process_send_message(fd)
 
-            def parse_email_address(self, message, tag):
-                from_tag = message.find(tag)
-                if from_tag:
-                    try:
-                        name = from_tag.find("name").innerHTML()
-                    except: name = ''
+    def process_send_message(self, fd):
+        dbh = DB.DBO(self.case)
+        dbh.execute("select `key`,`value`,`indirect` from http_parameters where `key`='body' and inode_id = %r limit 1", self.fd.inode_id)
+        row = dbh.fetch()
+        if not row: return
 
-                    email = from_tag.find("email").innerHTML()
-                    return "%s &lt;%s&gt;" % (name, email)                    
+        inode_id = row['indirect']
+        if not inode_id: return
 
-            def process_mail_listing(self):
-                result = {'type': 'Listed', 'message': ''}
-                root = self.parser.root
-                folder = root.find("folderinfo")
-                if not folder: return
-                result['from'] = folder.innerHTML()
-                
-                listing = "<table><tr><th>From</th><th>To</th><th>Subject</th><th>Received</th></tr>"
-                for message in root.search("messageinfo"):
-                    from_tag = message.find("from")
+        ## Need to parse the sent message
+        fsfd = FileSystem.DBFS(self.case)
+        fd = fsfd.open(inode_id = inode_id)
+        self.parser =  HTML.HTMLParser(verbose=0)
+        self.parser.feed(fd.read())
+        self.parser.close()
+        root = self.parser.root
+
+        result = {'type':'Edit Sent'}
+        result['From'] = self.parse_email_address(root, 'from')
+        result['To'] = self.parse_email_address(root, 'to')
+        try:
+            result['message'] = root.find("text").innerHTML()
+        except: pass
+
+        ## Sometimes they also give us the html version
+        #try:
+        #    result['message'] = root.find("html").innerHTML()
+        #except: pass
+
+        try:
+            result['subject'] = root.find("subject").innerHTML()
+        except: pass
+
+        self.insert_message(result, "webmail")
+
+    def parse_email_address(self, message, tag):
+        from_tag = message.find(tag)
+        if from_tag:
+            try:
+                name = from_tag.find("name").innerHTML()
+            except: name = ''
+
+            email = from_tag.find("email").innerHTML()
+            return "%s &lt;%s&gt;" % (name, email)                    
+
+    def process_mail_listing(self):
+        result = {'type': 'Listed', 'message': ''}
+        root = self.parser.root
+        folder = root.find("folderinfo")
+        if not folder: return
+        result['from'] = folder.innerHTML()
+
+        listing = "<table><tr><th>From</th><th>To</th><th>Subject</th><th>Received</th></tr>"
+        for message in root.search("messageinfo"):
+            from_tag = message.find("from")
+
+            listing += "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n" % (
+                self.parse_email_address(message, 'from'),
+                message.attributes.get("toemail"),
+                message.attributes.get("subject"),
+                Time.parse(message.attributes.get("receiveddate")),
+                )
+
+        listing += "<table>"
+
+        result['message'] = listing
+
+        self.insert_message(result, "webmail")
+
+    def process_readmessage(self,fd):
+        ## This is what the message tree looks like (XML):
+        ## <GetDisplayMessageResponse>
+        ##   <message>
+        ##     <header>
+        ##     <part>
+        ##     <part>
+        ##   <message>
+        ##   <message>
+
+        ## Each message is a seperate message - therefore the same
+        ## HTTP object might relay several messages.
+        root = self.parser.root
+        for message in root.search('message'):
+            result = {'type': 'Read', 'message':'' }
+            result['message_id'] = message.find("mid").innerHTML()
+
+            message_urn = "/".join((fd.urn, result['message_id']))
+            
+            ## Make sure we dont have duplicates of the same message
+            if aff4.oracle.get_id_by_urn(message_urn):
+                continue
+            
+            try:
+                result['sent'] = Time.parse(message.find("receiveddate").innerHTML())
+            except: pass
+
+            result['subject'] = message.find("subject").innerHTML()
+            for tag,field in [('from','From'),
+                              ('to','To')]:
+                result[field] = self.parse_email_address(message, tag)
+
+            ## now iterate over all the parts:
+            message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                fd.case, message_urn,
+                inherited = fd.urn)
+            
+            message_fd.insert_to_table("webmail_messages",
+                                       result)
+            
+            for part in message.search("part"):
+                #pdb.set_trace()
+                ## Parts basically message attachments.
+                ct = part.attributes['type']
+                part_number = part.attributes['partid']
+                part_urn = "/".join((message_urn, part_number))
+
+                ## Usually text/html are the main body
+                data = None
+                if "text" in ct:
+                    text = part.find("text")
+                    data = HTML.unquote(HTML.decode_entity(text.innerHTML()))
+                elif "image" in ct:
+                    data = DB.expand("<b>%s</b><br><img src='%s'/>",(
+                        HTML.url_unquote(part.attributes.get('filename','')),
+                        HTML.url_unquote(part.attributes['thumbnailurl'])))
                     
-                    listing += "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n" % (
-                        self.parse_email_address(message, 'from'),
-                        message.attributes.get("toemail"),
-                        message.attributes.get("subject"),
-                        Time.parse(message.attributes.get("receiveddate")),
-                        )
+                if data:
+                    part_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                        fd.case, part_urn,
+                        inherited = message_urn,
+                        data = data)
                     
-                listing += "<table>"
+                    message_fd.insert_to_table("webmail_attachments",
+                                               dict(attachment = part_urn,
+                                                    partid = part_fd.inode_id))
+                    part_fd.close()
 
-                result['message'] = listing
+            message_fd.close()
 
-                self.insert_message(result, "webmail")
-                
-            def process_readmessage(self):
-                result = {'type': 'Read', 'message':'' }
-
-                ## We could get several messages in the same response:
-                root = self.parser.root
-                for message in root.search('message'):
-                    result['message_id'] = message.find("mid").innerHTML()
-                    try:
-                        result['sent'] = Time.parse(message.find("receiveddate").innerHTML())
-                    except: pass
-
-                    result['subject'] = message.find("subject").innerHTML()
-                    for tag,field in [('from','From'),
-                                      ('to','To')]:
-                        result[field] = self.parse_email_address(message, tag)
-
-                    ## now iterate over all the parts:
-                    for part in message.search("part"):
-                        ## Usually text/html are the main body
-                        try:
-                            if not result['message'] and part.attributes['type'] == 'text':
-                                text = part.find("text")
-                                result['message'] = HTML.unquote(HTML.decode_entity(text.innerHTML()))
-                        except KeyError: pass
-                        
-
-                self.insert_message(result, "webmail")
-        
 class YahooMailViewer(LiveCom.LiveMailViewer):
     """ This implements some fixups for Yahoo webmail messages """
     specifier = 'y'
@@ -417,28 +496,10 @@ class YahooMailViewer(LiveCom.LiveMailViewer):
 import pyflag.tests as tests
 import pyflag.pyflagsh as pyflagsh
 
-class YahooMailTests(tests.ScannerTest):
-    """ Test YahooMail Scanner """
-    test_case = "PyFlagTestCase"
-    test_file = "yahoomail_simple.pcap.E01"
-    subsystem = "EWF"
-    fstype = "PCAP Filesystem"
-
-    def test01YahooMailScanner(self):
-        """ Test HTTP Scanner """
-        env = pyflagsh.environment(case=self.test_case)
-        pyflagsh.shell_execv(env=env,
-                             command="scan",
-                             argv=["*",                   ## Inodes (All)
-                                   "YahooMailScan",
-                                   ])                   ## List of Scanners
-
 class YahooMail20Tests(tests.ScannerTest):
     """ Test YahooMail20 Scanner """
     test_case = "PyFlagTestCase"
-    test_file = "yahoo_test.pcap"
-    subsystem = "Standard"
-    fstype = "PCAP Filesystem"
+    test_file = "yahoomail_simple_2.pcap"
 
     def test01YahooMailScanner(self):
         """ Test Scanner """
@@ -446,5 +507,5 @@ class YahooMail20Tests(tests.ScannerTest):
         pyflagsh.shell_execv(env=env,
                              command="scan",
                              argv=["*",                   ## Inodes (All)
-                                   "YahooMail20Scan",
+                                   "YahooMail20Scan", "YahooMailScan",
                                    ])                   ## List of Scanners

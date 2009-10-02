@@ -123,6 +123,9 @@ class PyFlagSegment(PyFlagMap):
         self.case = case
         self.size = len(data)
         self.volume_urn = volume_urn
+
+    def finish(self):
+        self.inode_id = aff4.oracle.get_id_by_urn(self.urn)
         
     def write(self, data):
         self.buffer.seek(0,2)
@@ -171,6 +174,11 @@ class AFF4Manager:
         urn = aff4.fully_qualified_name(path, volume_urn)
         fd = PyFlagSegment(case, volume_urn, urn, data)
         
+        if inherited:
+            fd.set_inheritence(inherited)
+
+        fd.finish()
+
         kwargs['path'] = path
         if include_in_VFS:
             fd.include_in_VFS = kwargs

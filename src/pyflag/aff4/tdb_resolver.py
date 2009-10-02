@@ -250,6 +250,54 @@ class BASETDBResolver:
         serializer = RDF.Serializer("turtle")
         return serializer.serialize_model_to_string(model)
 
+
+    def export_dict(self, uri):
+        """ Return a dict of all keys/values """
+        result = {}
+        for attr in self.attribute_db.list_keys():
+            if attr.startswith("__"): continue
+
+            values = [ v for v in self.resolve_list(uri, attr, follow_inheritence=False) ]
+            if values:
+                result[attr] = values
+        return result
+
+    def export_model(self, uri, model):
+        for attr in self.attribute_db.list_keys():
+            if attr.startswith("__"): continue
+            if attr.startswith(VOLATILE_NS): continue
+            
+            values = self.resolve_list(uri, attr, follow_inheritence=False)
+            for v in values:
+                statement=RDF.Statement(RDF.Uri(uri),
+                    RDF.Uri(attr),
+                    RDF.Node(v))
+
+                model.add_statement(statement)
+    
+    def export(self, uri, prefix=''):
+        """ Export all the properties of uri into the model """
+        result = ''
+        try:
+            urn_id = self.get_id(self.urn_db, uri)
+        except ValueError: return ''
+        
+        for attr in self.attribute_db.list_keys():
+            values = self.resolve_list(uri, attr, follow_inheritence=False)
+            for v in values:
+                result += "%s%s=%s\n" % (prefix,attr, v)
+
+        return result
+
+    def export_all(self):
+        result = ''
+        for urn in self.urn_db.list_keys():
+            data = self.export(urn)
+            if data:
+                result += "\n************** %s **********\n%s" % (urn, data)
+
+        return result
+
 ## Use the fast C binding if its available
 try:
     import pytdb
@@ -316,53 +364,6 @@ class TDBResolver(BASETDBResolver, aff4.Resolver):
 
         return NoneObject("No attribute %s found on %s" % (attribute, uri))
 
-    def export_dict(self, uri):
-        """ Return a dict of all keys/values """
-        result = {}
-        for attr in self.attribute_db.list_keys():
-            if attr.startswith("__"): continue
-
-            values = [ v for v in self.resolve_list(uri, attr, follow_inheritence=False) ]
-            if values:
-                result[attr] = values
-        return result
-
-    def export_model(self, uri, model):
-        for attr in self.attribute_db.list_keys():
-            if attr.startswith("__"): continue
-            if attr.startswith(VOLATILE_NS): continue
-            
-            values = self.resolve_list(uri, attr, follow_inheritence=False)
-            for v in values:
-                statement=RDF.Statement(RDF.Uri(uri),
-                    RDF.Uri(attr),
-                    RDF.Node(v))
-
-                model.add_statement(statement)
-    
-    def export(self, uri, prefix=''):
-        """ Export all the properties of uri into the model """
-        result = ''
-        try:
-            urn_id = self.get_id(self.urn_db, uri)
-        except ValueError: return ''
-        
-        for attr in self.attribute_db.list_keys():
-            values = self.resolve_list(uri, attr, follow_inheritence=False)
-            for v in values:
-                result += "%s%s=%s\n" % (prefix,attr, v)
-
-        return result
-
-    def export_all(self):
-        result = ''
-        for urn in self.urn_db.list_keys():
-            data = self.export(urn)
-            if data:
-                result += "\n************** %s **********\n%s" % (urn, data)
-
-        return result
-
     def __str__(self):
         return ''
 
@@ -377,8 +378,7 @@ NoneObject = aff4.NoneObject
 
 if __name__=="__main__":
     oracle = TDBResolver()
-    oracle.add("hello","cruel","world")
-    oracle.add("hello","cruel","world2")
-    oracle.add("hello","cruel","world3")
-    for x in oracle.resolve_list("hello","cruel"):
+    oracle.set("hello","cruel","world")
+    oracle.set("globe",AFF4_INHERIT,"hello")
+    for x in oracle.resolve_list("globe","cruel"):
         print x

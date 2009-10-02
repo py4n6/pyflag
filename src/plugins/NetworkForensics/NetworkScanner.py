@@ -1,10 +1,6 @@
 """ This module contains functions which are shared among many plugins """
 # ******************************************************
-# Copyright 2004: Commonwealth of Australia.
-#
-# Developed by the Computer Network Vulnerability Team,
-# Information Security Group.
-# Department of Defence.
+# Copyright 2009: Commonwealth of Australia.
 #
 # Michael Cohen <scudette@users.sourceforge.net>
 #
@@ -156,7 +152,10 @@ def make_processor(case, factories, urn_dispatcher):
             except AttributeError:
                 tcp = packet.find_type("UDP")
 
-            length = len(tcp.data)
+            try:
+                length = len(tcp.data)
+            except: return
+            
             urn = urn_dispatcher[packet.pcap_file_id]
 
             if packet.offset==0: pdb.set_trace()
