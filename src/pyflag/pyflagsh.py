@@ -207,8 +207,6 @@ def process_line(line):
         raise
     except IOError,e:
         print "IOError: %s" % e
-    except ValueError,e:
-        print "ValueError: %s" %e
     except Exception,e:
         raise
 

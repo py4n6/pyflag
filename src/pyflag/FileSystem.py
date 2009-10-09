@@ -73,11 +73,21 @@ class File:
     ignore = False
     overread = False
     
-    def __init__(self, case, inode_id=None, urn=None):
+    def __init__(self, case, inode_id=None, urn=None, path=None):
         self.case = case
-        dbh = DB.DBO()
+        dbh = DB.DBO(case)
 
-        if urn:
+        if path:
+            dir, base = os.path.split(path)
+            dbh.execute("select inode_id from vfs where path = %r "
+                        "and name = %r and not isnull(inode_id) limit 1",
+                        (dir, base))
+            row = dbh.fetch()
+            if not row: raise IOError("File not found: %s" % path)
+            self.inode_id = row['inode_id']
+            self.urn = aff4.oracle.get_urn_by_id(self.inode_id)
+            
+        elif urn:
             self.urn = urn
             self.inode_id = aff4.oracle.get_id_by_urn(urn)
         else:
@@ -458,12 +468,13 @@ class FileSystem:
         """return the inode number for the given path, or else the path for the given inode number. """
         pass
 
-    def open(self, inode_id=None, urn=None):
+    def open(self, inode_id=None, urn=None, path = None):
         """ Opens the specified path or Inode providing a file like object.
 
         This object can then be used to read data from the specified file.
         @note: Only files may be opened, not directories."""
-        return File(self.case, inode_id, urn)
+        return File(self.case, inode_id=inode_id,
+                    urn=urn, path = path)
 
     def istat(self, inode_id):
         """ return a dict with information (istat) for the given inode or path. """
@@ -908,35 +919,28 @@ class DBFS(FileSystem):
             if dir == '/':
                 dir = ''
 
-            dbh.execute("select inode_id, urn from vfs join "
-                        "pyflag.AFF4_urn on "
-                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
-                        "where path=%r and (name=%r or "
-                        "name=concat(%r,'/')) limit 1", (dir+'/',name,name))
+            dbh.execute("select inode_id from vfs "
+                        "where path=%r and name=%r and "
+                        "not isnull(inode_id) limit 1", (dir,name,name))
             res = dbh.fetch()
             if not res:
                 raise RuntimeError("VFS path not found %s/%s" % (dir,name))
-            return path, res["urn"], res['inode_id']
+            return res['inode_id']
         
         elif inode_id:
-            dbh.execute("select urn_id, urn, concat(path,name) as path from vfs join "
-                        "pyflag.AFF4_urn on "
-                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
+            dbh.execute("select inode_id, concat(path,'/',name) as path from vfs  "
                         "where vfs.inode_id=%r limit 1", inode_id)
             res = dbh.fetch()
             if not res: raise IOError("Inode ID %s not found" % inode_id)
-            self.mtime = res['mtime']
-            return res['path'],res['inode'], inode_id
+            return res['path']
 
         else:
-            dbh.execute("select vfs.inode_id, concat(path,name) as path from vfs join"
-                        "pyflag.AFF4_urn on "
-                        "pyflag.AFF4_urn.urn_id=vfs.inode_id "
+            dbh.execute("select vfs.inode_id, concat(path,'/',name) as path from vfs "
                         "where urn=%r limit 1", inode)
             res = dbh.fetch()
             if not res:
                 raise RuntimeError("VFS Inode %s not known" % inode)
-            return res["path"], inode, res['inode_id']
+            return res["path"], res['inode_id']
 
         
     def VFSCreate(self,urn, path, directory=False,
@@ -1020,6 +1024,12 @@ class DBFS(FileSystem):
             where = DB.expand(" path=%r and name=%r", (
                 FlagFramework.normpath(posixpath.dirname(path)),
                 posixpath.basename(path)))
+
+        ## Only list directories
+        if dirs:
+            where += " and isnull(inode_id) "
+        else:
+            where += " and not isnull(inode_id) "
                    
         dbh.execute("select * from vfs where %s group by inode_id,path,name", (where))
         result = [dent for dent in dbh]
@@ -1220,9 +1230,9 @@ def glob_sql(pattern):
         name_sql = DB.expand("name=%r", name)
     
     if name and path:
-        sql = "select concat(path,name) as path from vfs where %s and %s group by vfs.path,name" % (path_sql,name_sql)
+        sql = "select concat(path,'/',name) as path from vfs where %s and %s group by vfs.path,name" % (path_sql,name_sql)
     elif name:
-        sql = "select concat(path,name) as path from vfs where %s group by vfs.path,name" % name_sql
+        sql = "select concat(path,'/',name) as path from vfs where %s group by vfs.path,name" % name_sql
     elif path:
         #sql = "%s and name=''" % path_sql
         sql = "select path from vfs where %s group by path" % path_sql

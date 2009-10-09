@@ -363,8 +363,8 @@ class YahooMail20Scan(YahooMailScan):
                 name = from_tag.find("name").innerHTML()
             except: name = ''
 
-            email = from_tag.find("email").innerHTML()
-            return "%s &lt;%s&gt;" % (name, email)                    
+            email = HTML.unquote(HTML.decode_entity(from_tag.find("email").innerHTML()))
+            return "%s <%s>" % (name, email)                    
 
     def process_mail_listing(self):
         result = {'type': 'Listed', 'message': ''}
@@ -404,31 +404,44 @@ class YahooMail20Scan(YahooMailScan):
         ## HTTP object might relay several messages.
         root = self.parser.root
         for message in root.search('message'):
-            result = {'type': 'Read', 'message':'' }
+            result = {'type': 'Read', 'service':self.service }
             result['message_id'] = message.find("mid").innerHTML()
 
-            message_urn = "/".join((fd.urn, result['message_id']))
-            
-            ## Make sure we dont have duplicates of the same message
-            if aff4.oracle.get_id_by_urn(message_urn):
-                continue
+            ## Messages are made unique using the message_id. This
+            ## ensures that even if the same message was seen multiple
+            ## times in the traffic, we only retain one copy of it.
+            message_urn = "/Webmail/%s/%s" % (self.service,
+                                              result['message_id'].replace("/","_"))
+
+            ## Make sure we dont have duplicates of the same message -
+            ## duplicates may occur in other connections, so we check
+            ## the webmail table for the same yahoo message id
+            fsfd = FileSystem.DBFS(self.case)
+            try:
+                if fsfd.lookup(path = message_urn):
+                    continue
+            except RuntimeError:
+                pass
             
             try:
                 result['sent'] = Time.parse(message.find("receiveddate").innerHTML())
             except: pass
 
-            result['subject'] = message.find("subject").innerHTML()
+            result['subject'] = HTML.unquote(HTML.decode_entity(
+                message.find("subject").innerHTML()))
             for tag,field in [('from','From'),
                               ('to','To')]:
                 result[field] = self.parse_email_address(message, tag)
 
             ## now iterate over all the parts:
             message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
-                fd.case, message_urn,
+                fd.case, message_urn, 
                 inherited = fd.urn)
             
             message_fd.insert_to_table("webmail_messages",
                                        result)
+
+            message_fd.close()
             
             for part in message.search("part"):
                 #pdb.set_trace()
@@ -448,17 +461,18 @@ class YahooMail20Scan(YahooMailScan):
                         HTML.url_unquote(part.attributes['thumbnailurl'])))
                     
                 if data:
+                    ## Put the data in its own part - the part
+                    ## inherits from the message which in turn
+                    ## inherits from the HTTP stream. This way we
+                    ## implicitly have the URL attached to this
+                    ## URN. This is needed when rendering the part (in
+                    ## case its html).
                     part_fd = CacheManager.AFF4_MANAGER.create_cache_data(
                         fd.case, part_urn,
-                        inherited = message_urn,
+                        inherited = message_fd.urn,
                         data = data)
                     
-                    message_fd.insert_to_table("webmail_attachments",
-                                               dict(attachment = part_urn,
-                                                    partid = part_fd.inode_id))
                     part_fd.close()
-
-            message_fd.close()
 
 class YahooMailViewer(LiveCom.LiveMailViewer):
     """ This implements some fixups for Yahoo webmail messages """

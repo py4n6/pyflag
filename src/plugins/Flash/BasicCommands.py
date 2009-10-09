@@ -21,7 +21,7 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************
 import pyflag.pyflagsh as pyflagsh
-import sys,os,posixpath
+import sys,os,posixpath, pdb
 import pyflag.FlagFramework as FlagFramework
 import pyflag.DB as DB
 import pyflag.IO as IO
@@ -93,7 +93,7 @@ class ls(pyflagsh.command):
                     if dir['name']:
                         yield "%s\t%s\t%8d\t%s" % (dir['mode'],
                                                   dir.get('size','-'),
-                                                  dir['inode_id'],
+                                                  dir['inode_id'] or 0,
                                                   dir['name'])
 
             else:
@@ -108,7 +108,7 @@ class ls(pyflagsh.command):
 
                 for dent in self.environment._FS.longls(path=path,dirs=0):
                     if dent:
-                        yield " %s%s " % (dent['path'],dent['name'])
+                        yield " %s/%s " % (dent['path'],dent['name'])
 
             ## Do we need to recurse?
             if self.opts.has_key('-R'):
@@ -127,8 +127,6 @@ class ls(pyflagsh.command):
         if len(args)==1: args.append('.')
         path,name=posixpath.split(args[-1])
         path=posixpath.abspath(posixpath.join(self.environment.CWD,path))
-        if not path.endswith('/'):
-            path=path+'/'
 
         ## This does an ls of the current directory
         files=[ file for file in self.environment._FS.ls(path=path,dirs=1)]
@@ -167,8 +165,6 @@ class cd(ls):
         if len(args)==1: args.append('.')
         path,name=posixpath.split(args[-1])
         path=posixpath.abspath(posixpath.join(self.environment.CWD,path))
-        if not path.endswith('/'):
-            path=path+'/'
 
         ## This does an ls of the current directory only for directories.
         files=[ file for file in self.environment._FS.ls(path=path,dirs=1)]
@@ -201,10 +197,7 @@ class less(ls):
                 yield "Error: No such file"
                 
             for arg in glob_files:
-                if arg.startswith(FQN):
-                    fd = aff4.oracle.open(arg)
-                else:
-                    fd=self.environment._FS.open(arg)
+                fd=self.environment._FS.open(path=arg)
                     
                 pipe=os.popen("less","w")
                 while 1:

@@ -272,15 +272,18 @@ class HTMLStringType(StringType):
 
 	result.text(value, wrap='full', font='typewriter')
 
-class AttachmentColumn(AFF4URN):
+class MessageColumn(AFF4URN):
     """ Displays the attachments related to the webmail message """
     def display(self, value, row, result):
-        dbh = DB.DBO(self.case)
+        dbh = DB.DBO(self.case)        
         dbfs=FileSystem.DBFS(self.case)
-        
-        dbh.execute("select * from webmail_attachments where inode_id = %r", value)
+        path = dbfs.lookup(inode_id = value)
+
+        ## Parts have a URN which is in the VFS under the message's
+        ## URN - this is equivalent to doing an ls of the message URN
+        dbh.execute("select * from vfs where path = %r", path)
         for row in dbh:
-            fd = dbfs.open(dbfs, urn=row['attachment'])
+            fd = dbfs.open(inode_id=row['inode_id'])
             data = fd.read()
             parser = HTML.HTMLParser(tag_class = \
                                      FlagFramework.Curry(HTML.ResolvingHTMLTag,
@@ -294,35 +297,6 @@ class AttachmentColumn(AFF4URN):
         
         return result
 
-        fsfd = FileSystem.DBFS(self.case)
-        dbh.execute("select file.inode_id as inode_id, name from file, webmail_attachments where webmail_attachments.inode_id = %r and file.inode_id = webmail_attachments.attachment", value)
-        for row in dbh:
-            tmp = result.__class__(result)
-
-            try:
-                fd = fsfd.open(inode_id=row['inode_id'])
-                image = Graph.Thumbnailer(fd,100)
-            except IOError:
-                pass
-            
-            if image.height>0:
-                tmp.image(image,width=image.width,height=image.height)
-            else:
-                tmp.image(image,width=image.width)
-
-            link = result.__class__(result)
-            name = row['name']
-            if len(name) > 20: name = name[:20]+" ..."
-            tmp.para(name)
-            link.link(tmp, tooltip = row['name'],
-                      pane = 'new',
-                      target= FlagFramework.query_type(family = "Disk Forensics",
-                                                       report = "ViewFile",
-                                                       case = self.case,
-                                                       mode = 'Summary',
-                                                       inode_id = row['inode_id']))
-            result.row(link)
-
 class WebMailTable(FlagFramework.CaseTable):
     """ Table to store Web mail related information """
     name = 'webmail_messages'
@@ -335,12 +309,11 @@ class WebMailTable(FlagFramework.CaseTable):
         [ StringType, dict(name='CC', column='CC')],
         [ StringType, dict(name='BCC', column='BCC')],
         [ StringType, dict(name='Subject', column='subject')],
-        [ HTMLStringType, dict(name='Message', column='message', text=True)],
         [ StringType, dict(name='Identifier', column='message_id')],
         [ TimestampType, dict(name='Sent', column='sent')],
         ]
 
-    extras = [ [ AttachmentColumn, dict(name='Attachments') ] ]
+    extras = [ [ MessageColumn, dict(name='Message') ] ]
 
 class WebMailAttachmentTable(FlagFramework.CaseTable):
     """ Table to store web mail attachments """
@@ -975,7 +948,7 @@ class AllWebMail(Reports.PreCannedCaseTableReports):
     default_table = 'WebMailTable'
     description = "View all Webmail messages"
     name = "/Network Forensics/Web Applications/Webmail"
-    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type', "Attachments"]
+    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type']
     
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh
