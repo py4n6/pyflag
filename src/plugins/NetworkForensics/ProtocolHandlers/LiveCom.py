@@ -334,19 +334,19 @@ class HotmailScanner(Scanner.GenScanFactory):
     service = 'Hotmail Classic'
     message = ''
 
-    def fixup_page(self, result, tag_class):
+    def fixup_page(self, result, message, tag_class):
         """ Given the parse tree in root, fix up the page so it looks
         as close as possible to the way it should. We write the new
         page on outfd.
         """
-        if not result.get('message'): return
+        if not message: return
         ## We have to inject the message into the edit area:
         edit_area = self.parser.root.find("div", {"class":"EditArea"}) or \
                     self.parser.root.find("div",{"id":"MsgContainer"}) or \
                     self.parser.root.find("textarea",{"id":"fMessageBody"})
         if edit_area:
             parser = HTML.HTMLParser(tag_class = tag_class)
-            parser.feed(HTML.decode(result['message']))
+            parser.feed(HTML.decode(message))
             parser.close()
             result = parser.root.__str__()
             result = textwrap.fill(result)
@@ -383,7 +383,7 @@ class HotmailScanner(Scanner.GenScanFactory):
         table = self.parser.root.find("table",{"class":"ItemListContentTable InboxTable"})
         if not table: return False
 
-        result = {'type': 'Listed', 'message': table}
+        result = {'type': 'Listed'}
 
         mail_box = self.parser.root.find("li", {"class":"FolderItemSelected"})
         if mail_box:
@@ -396,7 +396,6 @@ class HotmailScanner(Scanner.GenScanFactory):
             result['To'] = title.innerHTML()
 
         return self.insert_message(fd, result, inode_template = "l%s")
-
 
     def process_send_message(self,fd):
         ## Check to see if this is a POST request (i.e. mail is
@@ -498,7 +497,7 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return self.insert_message(fd, result)
 
-    def insert_message(self, fd, result, message_urn = None):
+    def XXXinsert_message(self, fd, result, message_urn = None):
         try:
             assert(result['message'])
         except: return
@@ -564,7 +563,7 @@ class Live20Scanner(HotmailScanner):
         self.process_listing(fd, parser)
 
     def process_listing(self, fd, parser):
-        result = {'type':'Listing'}
+        result = dict(type='Listed', service=self.service)
 
         ## Find the currently highlighted mailbox
         mb = parser.root.find('li', {"class":"FolderItemSelected"})
@@ -573,10 +572,16 @@ class Live20Scanner(HotmailScanner):
 
         lst = parser.root.find("div", {"class":"MessageListItems"})
         if lst:
-            result['message'] = lst.innerHTML()
-
-        return self.insert_message(fd, result)        
-
+            message_urn = "%s/MessageListing" % fd.urn
+            fsfd = FileSystem.DBFS(fd.case)
+            message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                fd.case, message_urn,
+                inherited = fd.urn)
+            
+            message_fd.write(lst.innerHTML().encode("utf8"))
+            message_fd.insert_to_table("webmail_messages", result)
+            message_fd.close()
+            
     def fixup_page(self, result, tag_class):
         """ Its not really possible to represent AJAX communications
         properly, so we just write the message here.
@@ -589,7 +594,7 @@ class Live20Scanner(HotmailScanner):
             Live20Style,message)
 
     def process_readmessage(self, fd, parser):
-        result = {'type': 'Read'}
+        result = {'type': 'Read', 'service':self.service}
 
         ## Find the subject
         sbj = parser.root.find('div', {'class':'ReadMsgSubject'})
@@ -610,20 +615,34 @@ class Live20Scanner(HotmailScanner):
                 context = 'Sent'
 
         msg = parser.root.find('div', {'class':'ReadMsgContainer'})
-        if msg:
-            result['message'] = msg.innerHTML()
-
 
         ## Try to detect the message ID
         tag = parser.root.find('div', {'mid':'.'})
         if tag:
             result['message_id'] = tag['mid']
+        else:
+            result['message_id'] = fd.inode_id
 
         try:
             result['Sent'] = Time.parse(result['Sent'])
         except: pass
 
-        return self.insert_message(fd, result)
+        if msg:
+            message_urn = "/WebMail/%s/%s" % (self.service,
+                                              result['message_id'].replace("/","_"))
+            fsfd = FileSystem.DBFS(fd.case)
+            try:
+                if fsfd.lookup(path = message_urn):
+                    return
+            except RuntimeError: pass
+            
+            message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                fd.case, message_urn,
+                inherited = fd.urn)
+            
+            message_fd.write(msg.innerHTML().encode("utf8"))
+            message_fd.insert_to_table("webmail_messages", result)
+            message_fd.close()
 
 import os.path
 
@@ -737,209 +756,7 @@ class WebMailMessages(Reports.CaseTableReports):
     family = "Network Forensics"
     columns = ['URN', 'AFF4VFS.Modified', 'From','To', 'Subject','Message','Type','Service']
     default_table = 'WebMailTable'
-    
-import textwrap
-
-## A VFS File driver which formats a row in the db nicely:
-class TableViewer(FileSystem.StringIOFile):
-    """ A VFS driver to read rows from an SQL table.
-
-    Format is 't%s:%s:%s:%s' % (table_name, column_name, value, column_to_retrieve (optional))
-
-    e.g. twebmail_messages:id:2
-    """
-    specifier = 't'
-
-    def __init__(self, case, fd, inode):
-        parts = inode.split('|')
-        ourinode = parts[-1][1:]
-        self.size = 0
-        self.inode =inode
-        self.case = case
-        self.column_to_retrieve = None
-                
-        try:
-            self.table, self.id = ourinode.split(':')
-            self.value = self.lookup_id()
-        except ValueError:
-            try:
-                self.table, self.id, self.value = ourinode.split(':')
-            except ValueError:
-                self.table, self.id, self.value, self.column_to_retrieve = ourinode.split(':')
-
-        FileSystem.StringIOFile.__init__(self, case, fd, inode)
-        self.force_cache()
-
-    def read(self, length = None):
-        try:
-            return FileSystem.StringIOFile.read(self, length)
-        except IOError: pass
-
-        dbh = DB.DBO(self.case)
-        dbh.execute("select * from %s where `%s`=%r", (self.table, self.id, self.value))
-
-        result = '<html><body>'
-        dbh = DB.DBO(self.case)
-        dbh.execute("select * from %s where `%s`=%r", (self.table, self.id, self.value))
-        for row in dbh:
-            if self.column_to_retrieve:
-                return row[self.column_to_retrieve]
-
-            result += ("<table border=1>\n")
-            for k,v in row.items():
-                result += "<tr><td>%s</td>" % k
-                result += "<td>%s</td></tr>\n" % textwrap.fill(
-                    cgi.escape("%s" % v) or "&nbsp;",
-                    subsequent_indent = "<br>")
-                
-            result += "</table></body></html>"
-        return result
-
-class LiveMailViewer(FileSystem.StringIOFile):
-    """ A VFS Driver to render a realistic view of a Yahoo mail
-    message without allowing scripts to run.
-    """
-    specifier = 'l'
-
-    def __init__(self, case, fd, inode):
-        parts = inode.split('|')
-        self.id = parts[-1][1:]
-        self.case = case
-        self.inode = inode
-        self.inode_id = self.lookup_id()
-        dbh = DB.DBO(self.case)
-        dbh.execute("select * from webmail_messages where inode_id=%r", (self.inode_id))
-        row = dbh.fetch()
-        if not row: raise RuntimeError("No such message %s" % self.id)
-
-        self.parent_inode_id = row['parent_inode_id']
-        self.message = row['message'] or ""
-        self.size = len(self.message)
-        
-        FileSystem.StringIOFile.__init__(self, case, fd, inode)
-        self.force_cache()
-        
-    def read(self, length = None):
-        try:
-            return FileSystem.StringIOFile.read(self, length)
-        except IOError: pass
-
-        ## We must always return a byte string for reads (files are
-        ## always bytestreams)
-        return self.message.encode("utf8")
-
-    def fixup_page(self, root, tag_class):
-        ## We have to inject the message into the edit area:
-        edit_area = root.find("div", {"class":"EditArea"}) or \
-                    root.find("div",{"id":"MsgContainer"}) or \
-                    root.find("textarea",{"id":"fMessageBody"})
-        if edit_area:
-            parser = HTML.HTMLParser(tag_class = tag_class)
-            parser.feed(HTML.decode(self.message))
-            #parser.feed(self.message)
-            parser.close()
-            result = parser.root.__str__()
-            result = textwrap.fill(result)
-            edit_area.prune()
-            edit_area.add_child(result)
-            edit_area.name = 'div'
-
-    def stats(self, query,result):
-        result.start_table(**{'class':'GeneralTable'})
-        dbh = DB.DBO(self.case)
-        columns = ["service","type","From","To","CC","BCC","sent","subject","message"]
-        dbh.execute("select * from webmail_messages where `inode_id`=%r", self.lookup_id())
-        row = dbh.fetch()
-        
-        dbh2 = DB.DBO(self.case)
-        dbh2.execute("select * from inode where inode_id = %r", row['inode_id'])
-        row2 = dbh2.fetch()
-        result.row("Timestamp", row2['mtime'])
-
-        for c in columns:
-            if c=='message':
-                ## Filter the message out here:
-                parser = HTML.HTMLParser(tag_class = \
-                                         FlagFramework.Curry(HTML.ResolvingHTMLTag,
-                                                             case = self.case,
-                                                             inode_id = row['parent_inode_id']))
-                #parser = HTML.HTMLParser(tag_class = HTML.TextTag)
-                parser.feed(HTML.decode(row[c] or ""))
-                parser.close()
-                #tmp = result.__class__(result)
-                #tmp.text(parser.root.innerHTML(), font='typewriter', wrap='full')
-                #row[c] = tmp
-                r = parser.root.__str__()
-                r = textwrap.fill(r)
-                row[c] = r
-                
-            result.row(c, row[c])
-
-        dbh.execute("select url from http where inode_id = %r", row['parent_inode_id'])
-        row = dbh.fetch()
-        if row:
-            tmp = result.__class__(result)
-            tmp.text(row['url'], font='typewriter', wrap='full')
-            result.row("URL", tmp)
-
-    def sanitize_page(self, tag_class):
-        """ This produces a rendered version of the underlying page """
-        ## Get the original HTML File:
-        fsfd = FileSystem.DBFS(self.case)
-        fd = fsfd.open(inode_id = self.parent_inode_id)
-        #data = HTML.decode(fd.read())
-        data = fd.read()
-        ## FIXME - This is a hack which works because we always send a
-        ## curried class down:
-        try:
-            tag_class.kwargs['inode_id'] = self.parent_inode_id
-        except AttributeError: pass
-        
-        ## Make a parser:
-        p = HTML.HTMLParser(tag_class = tag_class)
-        p.feed(data)
-        p.close()
-
-        ## Allow us to fix the html page
-        root = p.root
-        self.fixup_page(root, tag_class)
-
-        ## Add the timestamp to the title of the page - so when you
-        ## print it out we can identify it:
-        s = fsfd.istat(inode_id = self.parent_inode_id)
-        title_tag = root.find("title")
-        if title_tag:
-            title_tag.children = [ "%s %s %s" % (title_tag.innerHTML(),
-                                                 s['mtime'], s['inode']) ,]
-        
-        return root.innerHTML()        
-
-    def html_export(self, tag_class):
-        return self.sanitize_page(tag_class)
-
-    def summary(self, query, result):
-        page = self.sanitize_page(tag_class = \
-                                  FlagFramework.Curry(HTML.ResolvingHTMLTag,
-                                                      case = self.case,
-                                                      inode_id = self.parent_inode_id))
-        def frame_cb(query, result):
-            def generator():
-                yield page
-
-            result.generator.content_type = 'text/html'
-            result.generator.generator = generator()
-
-        def print_cb(query, result):
-            def generator():
-                yield page
-                #yield page.replace("</html","<script>window.print()</script></html")
-
-            result.generator.content_type = 'text/html'
-            result.generator.generator = generator()
-
-        result.iframe(callback = frame_cb)
-        result.toolbar(cb = print_cb, text="Print", icon="printer.png", pane='new')
-        
+            
 ## PreCanned reports
 class AllWebMail(Reports.PreCannedCaseTableReports):
     report="Browse WebMail Messages"

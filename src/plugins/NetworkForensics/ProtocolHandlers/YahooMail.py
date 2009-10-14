@@ -474,39 +474,6 @@ class YahooMail20Scan(YahooMailScan):
                     
                     part_fd.close()
 
-class YahooMailViewer(LiveCom.LiveMailViewer):
-    """ This implements some fixups for Yahoo webmail messages """
-    specifier = 'y'
-
-    def fixup_page(self, root, tag_class):
-        ## Put in some script to turn on visibility (this emulates
-        ## what yahoo does).
-        tag = root.find("body")
-
-        ## This will not be filtered out because the parser thinks its
-        ## just a string - so it will be executed in the browser after
-        ## page loads.
-        
-        tag.add_child("""<script>
-        document.write('<style>* { visibility: visible; }</style>');
-        </script>""")
-
-        ## This stylesheet is stuck in a comment?? WTF??
-        tag = root.find("head")
-        new_tag = HTML.ResolvingHTMLTag(name="link", case = tag.case,
-                                        inode_id = tag.inode_id,
-                                        attributes = {
-            'type':'text/css','rel':'stylesheet',
-            'href': "http://us.js2.yimg.com/us.js.yimg.com/lib/hdr/uhbt1_v27_1.8.css"
-            })
-
-        ## There are various visibility:hiddens all through the place:
-        for style in root.search("style"):
-            try:
-                style.children[0] = style.children[0].replace("visibility:hidden","")
-            except: pass
-        tag.add_child(new_tag)
-
 import pyflag.tests as tests
 import pyflag.pyflagsh as pyflagsh
 

@@ -102,7 +102,7 @@ class HTMLURLs(Reports.PreCannedCaseTableReports):
     description = 'View all HTML URLs'
     name = [ "/Network Forensics/Web Applications/HTML URLs" ]
     default_table = 'HTTPCaseTable'
-    columns = ['Timestamp', 'Inode', 'Method', 'URL', 'Content Type', 'InodeTable.Size', 'Status']
+    columns = ['Timestamp', 'Inode', 'Method', 'TLD', 'URL', 'Content Type', 'InodeTable.Size', 'Status']
 
 class ImageURLs(Reports.PreCannedCaseTableReports):
     description = "Show larger images transferred over HTTP"
@@ -111,7 +111,7 @@ class ImageURLs(Reports.PreCannedCaseTableReports):
     args = {'filter':'Thumb has_magic image and Size > 20000',
             'order': 0, 'direction': 1 }
     default_table = 'AFF4VFS'
-    columns = ['Modified','Thumb','Size', 'HTTPCaseTable.URL']
+    columns = ['Modified','Thumb','Size', 'HTTPCaseTable.TLD', 'HTTPCaseTable.URL']
 
 class VideoURLs(ImageURLs):
     description = "Show videos downloaded over HTTP"

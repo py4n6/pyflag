@@ -1310,7 +1310,10 @@ class PacketType(IntegerType):
     """ A Column type which links directly to the packet browser """
     LogCompatible = False
 
-    def __init__(self, name="Packet", column='packet_id', case=None, **args):
+    def __init__(self, name="Packet", column='stream_offset',
+                 stream_column = 'stream_id',
+                 case=None, **args):
+        self.stream_column = stream_column
         IntegerType.__init__(self, name=name, column=column,
                              link = query_type(family='Network Forensics',
                                                report="View Packet",

@@ -49,6 +49,7 @@ import pyflag.aff4.aff4 as aff4
 import pyflag.CacheManager as CacheManager
 import plugins.NetworkForensics.NetworkScanner as NetworkScanner
 import pyflag.FileSystem as FileSystem
+import FileFormats.HTML as HTML
 
 ## AFF4 attributes for MSN sessions
 MSN_SESSION_ID = PYFLAG_NS + "msn:session_id"
@@ -57,6 +58,16 @@ MSN_CLIENT_ID = PYFLAG_NS + "msn:client_id"
 ## Current sessions are kept alive here
 MSN_SESSIONS = aff4.Store(kill_cb = lambda x: x.close())
 
+class MessageType(AFF4URN):
+    def display(self, value, row, result):
+        fsfd = FileSystem.DBFS(self.case)
+        fd = fsfd.open(inode_id = value)
+        fd.seek(row['Offset'])
+        data = fd.readline()
+        data = data.split(":",3)[3]
+        result.text(data)
+        fd.close()
+        
 class MSNSessionTable(FlagFramework.CaseTable):
     """ Store information about decoded MSN messages """
     name = 'msn_session'
@@ -70,16 +81,20 @@ class MSNSessionTable(FlagFramework.CaseTable):
                 [ StringType, dict(name = 'Type', column='type')],
                 [ IntegerType, dict(name = 'P2P File', column='p2p_file') ],
                 ]
+    extras = [ [ PacketType, dict(name = 'Packet', column='stream_offset',
+                                  stream_column = 'stream_id') ],
+               [ MessageType, dict(name = 'Message') ],
+               ]
 
 class ChatMessages(Reports.PreCannedCaseTableReports):
     args = { 'filter': ' "Type" = MESSAGE',
              'order':0, 'direction':1,
-             '_hidden': [0,2]}
+             '_hidden': [6]}
     family = 'Network Forensics'
     description = 'View MSN/Yahoo chat messages'
     name = "/Network Forensics/Communications/Chats/MSN"
     default_table = "MSNSessionTable"
-    columns = ['Packet', 'InodeTable.Modified', 'Type', "Sender", "Recipient", "Message", ]
+    columns = ['Packet', 'URN', 'Type', "Sender", "Recipient", "Message", "Offset"]
 
 
 class MSNScanner(Scanner.GenScanFactory):
@@ -207,7 +222,7 @@ class MSNScanner(Scanner.GenScanFactory):
 
         if "@" in items[1]:
             ## Its type 2 (see above)
-            sender_name = "(%s)" % items[2]
+            sender_name = "(%s)" % HTML.url_unquote(items[2])
         else:
             ## Its type 1
             sender_name = ''
@@ -239,8 +254,8 @@ class MSNScanner(Scanner.GenScanFactory):
                                             type = 'MESSAGE',
                                             stream_id = fd.inode_id,
                                             stream_offset = start))
-            session_fd.write("%s %s %s: %s\n" % (time.ctime(fd.current_packet.ts_sec),
-                                                 sender_name, sender, data))
+            session_fd.write(DB.expand("%s %s %s: %s\n", (time.ctime(fd.current_packet.ts_sec),
+                                                          sender_name, sender, data)).encode("utf8"))
 
     def insert_session_data(self, session_fd, sender, recipient, type, data=None):
         args =  dict(session_id = session_fd.session_id,

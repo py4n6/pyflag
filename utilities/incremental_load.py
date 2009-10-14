@@ -92,8 +92,6 @@ factories = Scanner.get_factories(config.case, scanners)
 count = 0
 processed_length = 0
 
-print factories
-
 def load_file(urn, processor, pcap_dispatch):
     """ Loads the urn into the processor """
     ## Get a unique id for the urn

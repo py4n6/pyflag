@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <tdb.h>
 #include <raptor.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 #undef min
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
@@ -16,9 +18,20 @@
 #define MAX_KEY "__MAX"
 #define VOLATILE_NS "aff4volatile:"
 
+/** Some constants */
 static TDB_DATA INHERIT = {
-  .dptr = "aff4:inherit",
+  .dptr = (unsigned char *)"aff4:inherit",
   .dsize = 12
+};
+
+static TDB_DATA WLOCK = {
+  .dptr = (unsigned char *)"__WLOCK",
+  .dsize = 8
+};
+
+static TDB_DATA RLOCK = {
+  .dptr = (unsigned char *)"__RLOCK",
+  .dsize = 8
 };
 
 typedef struct {
@@ -389,9 +402,10 @@ static int calculate_key(BaseTDBResolver *self, TDB_DATA uri,
 };
 
 /** returns the list head in the data file for the uri and attribute
-    specified. Return 1 if found, 0 if not found. */
-static int get_data_head(BaseTDBResolver *self, TDB_DATA uri, TDB_DATA attribute, 
-			 TDB_DATA_LIST *result ) {
+    specified. Return 1 if found, 0 if not found. 
+*/
+static uint32_t get_data_head(BaseTDBResolver *self, TDB_DATA uri, TDB_DATA attribute, 
+			 TDB_DATA_LIST *result) {
   char buff[BUFF_SIZE];
   TDB_DATA data_key;
 
@@ -458,12 +472,12 @@ static int is_value_present(BaseTDBResolver *self,TDB_DATA urn, TDB_DATA attribu
     if(!follow_inheritence) break;
 
     // Follow inheritence
-    tmp.dptr = buff;
+    tmp.dptr = (unsigned char *)buff;
     tmp.dsize = BUFF_SIZE;
     // Substitute our urn with a possible inherited URN
     if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
       // Copy the urn
-      urn.dptr = buff;
+      urn.dptr = (unsigned char *)buff;
       urn.dsize = tmp.dsize;
     } else {
       break;
@@ -500,7 +514,8 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   value_str = PyObject_Str(value_obj);
   if(!value_str) return NULL;
 
-  PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
+  PyString_AsStringAndSize(value_str, (char **)&value.dptr, 
+			   (int *)&value.dsize);
 
   /** If the value is already in the list, we just ignore this
       request.
@@ -538,18 +553,41 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   Py_RETURN_NONE;
 };
 
-static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+static int set_new_value(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, 
+			 TDB_DATA value) {
+  TDB_DATA key,offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
+  uint32_t new_offset;
+  TDB_DATA_LIST i;
+
+  // Update the value in the db and replace with new value
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
+
+  // Go to the end and write the new record
+  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  // The offset to the next item in the list
+  i.offset = 0;
+  i.length = value.dsize;
+
+  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, value.dptr, value.dsize);
+
+  offset.dptr = (unsigned char *)buff2;
+  offset.dsize = from_int(new_offset, buff2, BUFF_SIZE);
+
+  tdb_store(self->data_db, key, offset, TDB_REPLACE);
+
+  return 1;
+};
+
+static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"urn", "attribute", "value", NULL};
   TDB_DATA urn;
   TDB_DATA attribute;
-  TDB_DATA key;
   PyObject *value_obj, *value_str;
   TDB_DATA value;
-  TDB_DATA offset;
-  TDB_DATA_LIST i;
-  uint32_t new_offset;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O", kwlist, 
 				  &urn.dptr, &urn.dsize, 
@@ -561,7 +599,7 @@ static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   value_str = PyObject_Str(value_obj);
   if(!value_str) return NULL;
 
-  PyString_AsStringAndSize(value_str, (char **)&value.dptr, &value.dsize);
+  PyString_AsStringAndSize(value_str, (char **)&value.dptr, (int *)&value.dsize);
 
   /** If the value is already in the list, we just ignore this
       request.
@@ -570,22 +608,7 @@ static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
     goto exit;
   };
 
-  // Update the value in the db and replace with new value
-  key.dptr = (unsigned char *)buff;
-  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
-
-  // Go to the end and write the new record
-  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
-  i.offset = 0;
-  i.length = value.dsize;
-
-  write(self->data_store_fd, &i, sizeof(i));
-  write(self->data_store_fd, value.dptr, value.dsize);
-
-  offset.dptr = (unsigned char *)buff2;
-  offset.dsize = from_int(new_offset, buff2, BUFF_SIZE);
-
-  tdb_store(self->data_db, key, offset, TDB_REPLACE);
+  set_new_value(self, urn, attribute, value);
 
  exit:
   Py_DECREF(value_str);
@@ -684,7 +707,7 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
 				  &follow_inheritence))
     return NULL;
 
-  tmp.dptr = buff;
+  tmp.dptr = (unsigned char *)buff;
 
   while(1) {
     if(get_data_head(self, urn, attribute, &i) && i.length < 100000) {
@@ -697,7 +720,7 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
     // Substitute our urn with a possible inherited URN
     if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
       // Copy the urn
-      urn.dptr = buff;
+      urn.dptr = (unsigned char *)buff;
       urn.dsize = tmp.dsize;
     } else {
       break;
@@ -707,10 +730,34 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
   return PyList_New(0);
 };
 
+static PyObject *export_all_urns(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  PyObject *result = PyList_New(0);
+  TDB_DATA first = tdb_firstkey(self->urn_db);
+  TDB_DATA next;
+  PyObject *tmp;
+
+  while(first.dptr) {
+    // Ignore keys which start with _ - they are hidden
+    if(*first.dptr != '_') {
+      tmp = PyString_FromStringAndSize((char *)first.dptr, first.dsize);
+      if(!tmp) return NULL;
+
+      PyList_Append(result, tmp);
+      Py_DECREF(tmp);
+    };
+    
+    next = tdb_nextkey(self->urn_db, first);
+    free(first.dptr);
+    first = next;
+  };
+  
+  return result;
+};
+
+
 static PyObject *export_dict(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"urn", NULL};
   TDB_DATA urn;
-  char buff[BUFF_SIZE];
   TDB_DATA attribute, next;
   TDB_DATA_LIST data_list;
   PyObject *result;
@@ -744,6 +791,83 @@ static PyObject *export_dict(BaseTDBResolver *self, PyObject *args, PyObject *kw
   return result;
 };
 
+static PyObject *lock(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "mode", NULL};
+  char *mode;
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA_LIST data_list;
+  uint32_t offset;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s", kwlist, 
+				  &urn.dptr, &urn.dsize, &mode))
+    return NULL;
+
+  if(*mode == 'r') attribute = RLOCK;
+  else if(*mode == 'w') attribute = WLOCK;
+  else return PyErr_Format(PyExc_IOError, "Invalid mode %c", *mode);
+
+  offset = get_data_head(self, urn, attribute, &data_list);
+  if(!offset){
+    // The attribute is not set - make it now:
+    set_new_value(self,urn, attribute, attribute);
+    offset = get_data_head(self, urn, attribute, &data_list);
+    if(!offset) {
+      return PyErr_Format(PyExc_IOError, "Unable to set lock attribute");
+    };
+  };
+
+  // If we get here data_list should be valid:
+  lseek(self->data_store_fd, offset, SEEK_SET);
+  /*
+    printf("locking %s %lu:%u\n", urn.dptr, offset, data_list.length);
+    fflush(stdout);
+  */
+  if(lockf(self->data_store_fd, F_LOCK, data_list.length)==-1){
+    return PyErr_Format(PyExc_IOError, "Unable to lock: %s", strerror(errno));
+  };
+
+  Py_RETURN_NONE;
+}
+
+static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"urn", "mode", NULL};
+  char *mode;
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA_LIST data_list;
+  uint32_t offset;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s", kwlist, 
+				  &urn.dptr, &urn.dsize, &mode))
+    return NULL;
+
+  if(*mode == 'r') attribute = RLOCK;
+  else if(*mode == 'w') attribute = WLOCK;
+  else return PyErr_Format(PyExc_IOError, "Invalid mode %c", *mode);
+
+  offset = get_data_head(self, urn, attribute, &data_list);
+  if(!offset) {
+    return PyErr_Format(PyExc_IOError, "URN does not appear to be locked?");
+  };
+
+  // If we get here data_list should be valid - just unlock the byte range
+  lseek(self->data_store_fd, offset, SEEK_SET);
+  while(1) {
+    int i = lockf(self->data_store_fd, F_ULOCK, data_list.length);
+    if(i==-1)
+      return PyErr_Format(PyExc_IOError, "Unable to unlock: %s", strerror(errno));
+    if(i==0) break;
+  };
+
+  /*
+    printf("unlocking %s\n", urn.dptr);
+    fflush(stdout);
+  */
+
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef PyTDBResolver_methods[] = {
   {"get_urn_by_id",(PyCFunction)get_urn_by_id, METH_VARARGS|METH_KEYWORDS,
    "Resolves a URN by an id"},
@@ -759,6 +883,12 @@ static PyMethodDef PyTDBResolver_methods[] = {
    "Returns a list of attribute values for a URN"},
   {"export_dict", (PyCFunction)export_dict, METH_VARARGS|METH_KEYWORDS,
    "return all the attributes of the given URN"},
+  {"export_all_urns", (PyCFunction)export_all_urns, METH_VARARGS|METH_KEYWORDS,
+   "return all the urns in the tdb resolver"},
+  {"lock", (PyCFunction)lock, METH_VARARGS|METH_KEYWORDS,
+   "locks a given URN - all other lock requests will block until this thread unlocks it. There are 2 types of lock held by each URN a 'r' and 'w' lock."},
+  {"release", (PyCFunction)release, METH_VARARGS|METH_KEYWORDS,
+   "release 'r' or 'w' locks of the given URN"},
   {NULL}  /* Sentinel */
 };
 
@@ -1000,7 +1130,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
   {
     id = tdb_fetch(self->resolver->urn_db, urn);
     if(!id.dptr)
-      return PyErr_Format(PyExc_RuntimeError, "Urn %s not found", urn.dptr);
+      return PyErr_Format(PyExc_RuntimeError, "Urn '%s' not found", urn.dptr);
     
     urn_id = to_int(id);
     free(id.dptr);
@@ -1028,7 +1158,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
     char buff[BUFF_SIZE];
 
     // Make up the key to the data table
-    key.dptr = buff;
+    key.dptr = (unsigned char*)buff;
     key.dsize = snprintf(buff, BUFF_SIZE, "%d:%d", urn_id, i);
     
     offset = tdb_fetch(self->resolver->data_db, key);
@@ -1038,7 +1168,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
       char buff[BUFF_SIZE];
 
       // Resolve the attribute_id back to a named attribute
-      attribute.dptr = buff;
+      attribute.dptr = (unsigned char*)buff;
       attribute.dsize = from_int(i, buff, BUFF_SIZE);
 
       attribute = tdb_fetch(self->resolver->attribute_db, attribute);
@@ -1047,7 +1177,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
 				  min(strlen(VOLATILE_NS), attribute.dsize))) {
 	// Check if the attribute should be ignored
 #if 1
-	PyObject *string = PyString_FromStringAndSize(attribute.dptr, attribute.dsize);
+	PyObject *string = PyString_FromStringAndSize((char *)attribute.dptr, attribute.dsize);
 
 	if(exclude && !PySequence_Contains(exclude, string)) {
 	  export_list(self, urn, attribute, offset);
@@ -1075,7 +1205,8 @@ static PyObject *rdfserializer_close(RDFSerializer *self,
 static PyObject *rdfserializer_set_namespace(RDFSerializer *self,
 					     PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"urn", "namespace", NULL};
-  char *urn, *namespace;
+  char *urn;
+  unsigned char *namespace;
   raptor_uri *uri;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss", kwlist, 

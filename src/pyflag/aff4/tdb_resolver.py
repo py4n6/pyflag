@@ -304,6 +304,12 @@ try:
 
     Tdb = pytdb.PyTDB
     class BaseTDBResolver(pytdb.BaseTDBResolver):
+        def export_all(self):
+            for urn in self.export_all_urns():
+                print "\n************** %s **********" % (urn)
+                for k,v in self.export_dict(urn).items():
+                    print k,v
+
         def export_volume(self, volume_urn):
             result = cStringIO.StringIO()
             
@@ -366,13 +372,6 @@ class TDBResolver(BASETDBResolver, aff4.Resolver):
 
     def __str__(self):
         return ''
-
-    def lock(self, uri, mode='r'):
-        ## Not implemented
-        pass
-
-    def unlock(self, uri):
-        pass
     
 NoneObject = aff4.NoneObject
 
