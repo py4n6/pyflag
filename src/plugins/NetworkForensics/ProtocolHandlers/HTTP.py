@@ -59,15 +59,16 @@ class HTTPScanner(Scanner.GenScanFactory):
     group = 'NetworkScanners'
     depends = [ 'PCAPScanner' ]
 
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie):
         if "HTTP Request stream" in type:
             forward_fd = fd
             reverse_urn = fd[PYFLAG_REVERSE_STREAM]
+            self.cookie = cookie
             dbfs = FileSystem.DBFS(fd.case)
             reverse_fd = dbfs.open(urn = reverse_urn)
             pyflaglog.log(pyflaglog.DEBUG,"Openning %s for HTTP" % fd.inode_id)
 
-            self.parse(forward_fd, reverse_fd, factories)
+            self.parse(forward_fd, reverse_fd, scanners)
 
     request_re = re.compile("(GET|POST|PUT|OPTIONS|PROPFIND) +([^ ]+) +HTTP/1\..",
                                      re.IGNORECASE)
@@ -275,7 +276,7 @@ class HTTPScanner(Scanner.GenScanFactory):
 
             self.process_parameter("request_urn", request_body.urn, target)
                 
-    def parse(self, forward_fd, reverse_fd, factories):
+    def parse(self, forward_fd, reverse_fd, scanners):
         while True:
             request = { 'url':'/unknown_request_%s' % forward_fd.inode_id,
                         'method': 'GET' }
@@ -328,8 +329,8 @@ class HTTPScanner(Scanner.GenScanFactory):
                                                    )
                                               )
                 response_body.close()
-                Scanner.scan_inode(self.case, response_body.inode_id,
-                                   factories)
+                Scanner.scan_inode_distributed(forward_fd.case, response_body.inode_id,
+                                               scanners, self.cookie)
 
             if not parse: break
 

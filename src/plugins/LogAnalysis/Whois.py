@@ -491,9 +491,8 @@ class LookupWhoisID(LookupIP):
         self.display_whois(query,result,int(query['id']))
 
 class WhoisInit(FlagFramework.EventHandler):
-    def startup(self):
+    def startup(self, dbh, case):
         try:
-            dbh = DB.DBO()
             dbh.check_index("whois_routes","netmask")
             dbh.check_index("whois_routes","network")
         except:

@@ -81,7 +81,7 @@ class ViewConnections(Reports.PreCannedCaseTableReports):
     columns = ['Inode', "Timestamp", "Source IP", "Source Port", "Destination IP",
                "Destination Port", "Type"]
 
-def make_processor(case, factories, urn_dispatcher):
+def make_processor(case, scanners, urn_dispatcher, cookie):
     """ Creates a new processor and returns it - you will need to feed
     it packets and it will create streams on the AFF4 case file.
 
@@ -90,7 +90,6 @@ def make_processor(case, factories, urn_dispatcher):
     unique pcap_file_id. All packets from this file will carry this ID
     and we use this urn_dispatcher dict to map them back to a URN.
     """
-
     def Callback(mode, packet, connection):
         if mode == 'est':
             if 'map' not in connection:
@@ -175,15 +174,15 @@ def make_processor(case, factories, urn_dispatcher):
                 map_stream_pkt = connection['map.pkt']
                 Magic.set_magic(case, map_stream_pkt.inode_id,
                                 "Packet Map")
-                map_stream_pkt.close()
 
                 r_map_stream_pkt = connection['reverse']['map.pkt']
-                r_map_stream_pkt.close()
                 Magic.set_magic(case, r_map_stream_pkt.inode_id,
                                 "Packet Map")
 
                 r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
                 map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
+                r_map_stream_pkt.close()
+                map_stream_pkt.close()
 
                 ## FIXME - this needs to be done out of process using
                 ## the distributed architecture!!!
@@ -192,12 +191,12 @@ def make_processor(case, factories, urn_dispatcher):
                 ## scanning
                 dbfs = FileSystem.DBFS(case)
                 map_stream = dbfs.open(inode_id = map_stream.inode_id)
-                r_map_stream = dbfs.open(inode_id = map_stream.inode_id)
-                
-                Scanner.scan_inode(case, map_stream.inode_id,
-                                   factories)
-                Scanner.scan_inode(case, r_map_stream.inode_id,
-                                   factories)
+                r_map_stream = dbfs.open(inode_id = r_map_stream.inode_id)
+
+                Scanner.scan_inode_distributed(case, map_stream.inode_id,
+                                               scanners, cookie)
+                Scanner.scan_inode_distributed(case, r_map_stream.inode_id,
+                                               scanners, cookie)
                 
     ## Create a tcp reassembler if we need it
     processor = reassembler.Reassembler(packet_callback = Callback)
@@ -209,11 +208,11 @@ class PCAPScanner(GenScanFactory):
     automatically. Note that this code creates map streams for
     forward, reverse and combined streams.
     """
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie):
         if "PCAP" not in type: return
 
         urn_dispatcher = {1: fd.urn}
-        processor = make_processor(fd.case, factories, urn_dispatcher)
+        processor = make_processor(fd.case, scanners, urn_dispatcher, cookie)
         ## Now process the file
         try:
             pcap_file = pypcap.PyPCAP(fd, file_id=1)

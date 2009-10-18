@@ -99,7 +99,8 @@ class File:
 
         fd = aff4.oracle.open(self.urn, 'r')
         if not fd:
-            raise IOError("URN %s not found")
+            print self.urn
+            raise IOError("URN %s not found" % self.urn)
         try:
             self.size = fd.size
         finally:

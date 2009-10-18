@@ -505,7 +505,6 @@ FILESYSTEMS = None
 THEMES = None
 FILEFORMATS = None
 TASKS = None
-CARVERS = None
 EVENT_HANDLERS = None
 IMAGES = None
 FILE_HANDLERS = None
@@ -575,11 +574,7 @@ def Init():
     global TASKS
     TASKS = OrderedRegistry(Farm.Task)
 
-    ## Register carvers:
-    global CARVERS
-    CARVERS = OrderedRegistry(Scanner.Carver)
-
-    ## Register SQL handlers
+    ## Register Event handlers
     import pyflag.FlagFramework as FlagFramework
     global EVENT_HANDLERS
     EVENT_HANDLERS = OrderedRegistry(FlagFramework.EventHandler)

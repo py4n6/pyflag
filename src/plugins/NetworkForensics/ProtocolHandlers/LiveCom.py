@@ -356,7 +356,7 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return self.parser.root.innerHTML()
 
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie):
         if "HTML" in type:
             data = fd.read(1024)
             if not re.search("<title>\s+Windows Live", data): return
@@ -400,7 +400,7 @@ class HotmailScanner(Scanner.GenScanFactory):
     def process_send_message(self,fd):
         ## Check to see if this is a POST request (i.e. mail is
         ## sent to the server):
-        dbh = DB.DBO(self.case)
+        dbh = DB.DBO(fd.case)
         dbh.execute("select `key`,`value` from http_parameters where inode_id = %r", fd.inode_id)
         query = dict([(r['key'].lower(),r['value']) for r in dbh])
         result = {'type':'Edit Sent' }
@@ -535,7 +535,7 @@ class Live20Scanner(HotmailScanner):
     """ Parse Hotmail Web 2.0 Session """
     service = "Hotmail 2.0 AJAX"
 
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie):
         if "Hotmail 2.0 AJAX" in type:
             pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail AJAX processing" % fd.inode_id)
             js_parser = Javascript.JSParser()

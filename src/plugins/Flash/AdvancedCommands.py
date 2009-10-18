@@ -41,7 +41,6 @@ class scan_path(pyflagsh.command):
         pdbh.check_index('jobs','cookie')
         
         ## Often this process owns a worker as well. In that case we can wake it up:
-        import pyflag.Farm as Farm
         Farm.wake_workers()
         
         ## Wait until there are no more jobs left.
@@ -162,53 +161,45 @@ class scan(pyflagsh.command):
         pdbh.mass_insert_start('jobs')
         ## This is a cookie used to identify our requests so that we
         ## can check they have been done later.
-        cookie = int(time.time())
+        cookie = time.time()
         scanners = []
         for i in range(1,len(self.args)):
             scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
 
         scanners = ScannerUtils.fill_in_dependancies(scanners)
-
         for row in dbh:
-            inode_id = row['inode_id']
-            case = self.environment._CASE
+            Scanner.scan_inode_distributed(dbh.case, row['inode_id'], scanners,
+                                           cookie=cookie)
 
-            if 1:
-                factories = Scanner.get_factories(case, scanners)
-                Scanner.scan_inode(case, inode_id, factories)
-            else:
-                pdbh.mass_insert(
-                    command = 'Scan',
-                    arg1 = case,
-                    arg2 = inode_id,
-                    arg3 = ','.join(scanners),
-                    cookie=cookie,
-                    )
-
-        pdbh.mass_insert_commit()
-
-        ## Wait for the scanners to finish:
-        if self.environment.interactive:
-            self.wait_for_scan(cookie)
             
+        self.wait_for_scan(cookie)
         yield "Scanning complete"
 
     def wait_for_scan(self, cookie):
         """ Waits for scanners to complete """
+        import pyflag.Farm as Farm
+
+        while Farm.get_cookie_reference(cookie)>0:
+            time.sleep(0.5)
+        
+        return
+    
+        print "Waiting for cookie %s" % cookie
         pdbh = DB.DBO()
+
         ## Often this process owns a worker as well. In that case we can wake it up:
         import pyflag.Farm as Farm
-        Farm.wake_workers()
+        
+        #Farm.wake_workers()
         
         ## Wait until there are no more jobs left.
         while 1:
-            pdbh.execute("select count(*) as total from jobs where cookie=%r and arg1=%r", (cookie,
-                         self.environment._CASE))
+            pdbh.execute("select * from jobs where cookie=%r limit 1", (cookie))
             row = pdbh.fetch()
-            if row and row['total']==0: break
-
+            if not row: break
+            
             time.sleep(1)
-
+            
 class scan_inode(scan):
     """ Scan an inode id with the specified scanners """
     def execute(self):
@@ -222,9 +213,7 @@ class scan_inode(scan):
             scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
             
         scanners = ScannerUtils.fill_in_dependancies(scanners)
-        factories = Scanner.get_factories(case, scanners)
-        
-        Scanner.scan_inode(case, self.args[0], factories, force = True)
+        Scanner.scan_inode(case, self.args[0], scanners, force = True)
 
 class scan_file(scan,BasicCommands.ls):
     """ Scan a file in the VFS by name """
@@ -279,53 +268,6 @@ class scan_file(scan,BasicCommands.ls):
 ##
 ## This allows people to reset based on the VFS path
 ##
-            
-class scanner_reset_path(scan):
-    """ Reset all files under a specified path """
-    def help(self):
-        return "scanner_reset_path path [list of scanners]: Resets the inodes under the path given with the scanners specified"
-
-    def execute(self):
-        if len(self.args)<2:
-            yield self.help()
-            return
-
-        scanners = []
-        
-        if type(self.args[1]) == types.ListType:
-            scanners = self.args[1]
-        else:
-            for i in range(1,len(self.args)):
-                scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
-        print "GETTING FACTORIES"
-        factories = Scanner.get_factories(self.environment._CASE, scanners)
-        print "OK NOW RESETING EM"
-        for f in factories:
-                    f.reset_entire_path(self.args[0])
-        print "HOKAY"
-        yield "Reset Complete"
-
-## There is little point in distributing this because its very quick anyway.
-class scanner_reset(scan):
-    """ Reset multiple inodes as specified by a glob """
-    def help(self):
-        return "reset inode [list of scanners]: Resets the inodes with the scanners specified"
-    
-    def execute(self):
-        if len(self.args)<2:
-            yield self.help()
-            return
-
-        scanners = []
-        for i in range(1,len(self.args)):
-            scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
-
-        factories = Scanner.get_factories(self.environment._CASE, scanners)
-
-        for f in factories:
-            f.multiple_inode_reset(self.args[0])
-            
-        yield "Resetting complete"
     
 class load_and_scan(scan):
     """ Load a filesystem and scan it at the same time """

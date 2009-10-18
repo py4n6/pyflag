@@ -38,39 +38,6 @@ from pyflag.ColumnTypes import StringType, TimestampType,AFF4URN, FilenameType, 
 import fnmatch
 import pyflag.Magic as Magic
 
-class TypeScan(Scanner.GenScanFactory):
-    """ Detect File Type (magic). """
-    order=5
-    default=True
-    group = "FileScanners"
-
-    def multiple_inode_reset(self,inode_id):
-        Scanner.GenScanFactory.multiple_inode_reset(self, inode_id)
-        dbh=DB.DBO(self.case)
-        dbh.execute("delete from `type` where inode_id = %r )", inode_id)
-
-    def reset(self,inode_id):
-        Scanner.GenScanFactory.reset(self, inode_id)
-        dbh=DB.DBO(self.case)
-        dbh.execute("delete from `type` where inode_id = %r limit 1)" , inode)
-
-    def reset_entire_path(self, path_glob):
-        path = path_glob
-        if not path.endswith("*"): path = path + "*"  
-        db = DB.DBO(self.case)
-        db.execute("delete from type where inode_id in (select inode_id from vfs where path rlike %r)", fnmatch.translate(path))
-        Scanner.GenScanFactory.reset_entire_path(self, path_glob)
-        
-    def destroy(self):
-        pass
-
-    class Scan(Scanner.BaseScanner):
-        type_str = None
-        
-        def process(self, data):
-            if self.type_str==None:
-                m = Magic.MagicResolver()
-                self.type_str, self.type_mime = m.cache_type(self.case, self.fd.inode_id, data[:1024])
 ## A report to examine the Types of different files:
 class ViewFileTypes(Reports.CaseTableReports):
     """ Browse the file types discovered.

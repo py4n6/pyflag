@@ -888,8 +888,11 @@ class EventHandler:
 
     This base class should be extended when plugins needs to respond to some events.
     """
-    def startup(self):
+    def startup(self, dbh, case):
         """ This will be called when pyflag starts up """
+
+    def worker_startup(self, dbh, case):
+        """ This will be called when a worker starts """
         
     def create(self,dbh,case):
         """ This method will be called when a new case is created """
@@ -913,7 +916,7 @@ class EventHandler:
         modules to delete local caches etc.
         """
 
-def post_event(event, case):
+def post_event(event, case=None):
     """ A function to post the specifed event to all event handlers """
     try:
         dbh = DB.DBO(case)

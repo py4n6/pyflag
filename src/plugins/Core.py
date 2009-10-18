@@ -50,157 +50,6 @@ import pyflag.Magic as Magic
 config.add_option("SCHEMA_VERSION", default=3, absolute=True,
                   help="Current schema version")
 
-class NullFile(FileSystem.File):
-    """ A VFS Driver to represent a non-existent file, used with orphaned
-    directory entries """
-    specifier = "0"
-
-    def read(self, length=None):
-        return ""
-
-class CachedFile(FileSystem.File):
-    """ A VFS Driver to open cached files """
-    specifier = "x"
-
-class IO_File(FileSystem.File):
-    """ A VFS Driver to make the io source available.
-
-    Basically we proxy the IO source driver in here.
-    """
-    specifier = "I"
-
-    def __init__(self, case, fd, inode):
-        FileSystem.File.__init__(self, case, fd, inode)
-
-        ## The format of the inode is Iname .Where name is the name of
-        ## the IO source.
-        self.name = inode[1:]
-        self.io = IO.open(case, self.name)
-        self.size = self.io.size
-
-        ## This source should not be scanned directly.
-        self.ignore = True
-
-    def read(self, length=None):
-        if length==None:
-            return self.io.read()
-        
-        return self.io.read(length)
-
-    def seek(self, offset, rel=0):
-        if rel==0:
-            return self.io.seek(offset)
-        elif rel==1:
-            return self.io.seek(offset + self.tell())
-        elif rel==2:
-            return self.io.seek(offset + self.size)
-
-    def tell(self):
-        return self.io.tell()
-        
-    def explain(self, query, result):
-        tmp = result.__class__(result)
-        try:
-            self.io.explain(tmp)
-        except AttributeError:
-            dbh = DB.DBO(self.case)
-            dbh.execute("select parameters from iosources where name=%r" , self.name)
-            row = dbh.fetch()
-            q = FlagFramework.query_type(string = row['parameters'])
-            q.clear('report')
-            q.clear('family')
-            for k,v in q.items():
-                if k == 'filename' and v.startswith(config.UPLOADDIR):
-                    v = v[len(config.UPLOADDIR):]
-                    
-                tmp.row(k,v, **{'class': 'explain'})
-            
-        result.row("IO Subsys %s:" % self.name, tmp, **{'class': 'explainrow'})
-
-import sys
-
-class OffsetFile(FileSystem.File):
-    """ A simple offset:length file driver.
-
-    The inode name specifies an offset and a length into our parent Inode.
-    The format is offset:length
-    """
-    specifier = 'o'
-    def __init__(self, case, fd, inode):
-        FileSystem.File.__init__(self, case, fd, inode)
-
-        ## By default we want to overread if possible
-        try:
-            fd.overread = fd.block_size
-            fd.slack = True
-        except AttributeError: pass
-        
-        ## We parse out the offset and length from the inode string
-        tmp = inode.split('|')[-1]
-        tmp = tmp[1:].split(":")
-        self.offset = int(tmp[0])
-        self.readptr=0
-
-        ## Seek our parent file to its initial position
-        self.fd.seek(self.offset)
-
-        try:
-            self.size=int(tmp[1])
-            if self.size == 0: self.size=sys.maxint
-        except IndexError:
-            self.size=sys.maxint
-
-        # crop size if it overflows IOsource
-        # some iosources report size as 0 though, we must check or size will
-        # always be zero
-        if fd.size != 0 and self.size + self.offset > fd.size:
-            self.size = fd.size - self.offset
-
-    def read(self,length=None):
-        #try:
-        #    return FileSystem.File.read(self,length)
-        #except IOError:
-        #    pass
-
-        available = self.size - self.readptr
-        if length==None:
-            length=available
-        elif not self.overread:
-            if length > available:
-                length = available
-
-        if(length<0): return ''
-
-        result=self.fd.read(length)
-        
-        self.readptr+=len(result)
-        return result
-    
-    def seek(self,offset,whence=0):
-        if whence==2:
-            self.readptr=self.size+offset
-        elif whence==1:
-            self.readptr+=offset
-        else:
-            self.readptr = offset
-
-        self.fd.seek(self.offset + self.readptr)
-        
-    def tell(self):
-        return self.readptr
-                                                    
-    def explain(self, query, result):
-        self.fd.explain(query,result)
-
-        if self.size > 0:
-            extract = "Extract %s bytes starting at byte %s" % (self.size,
-                                                                self.offset)
-        else:
-            extract = 'Extract %s bytes after end of file'\
-                      % (self.offset - self.fd.size)
-
-        result.row("Offset",extract)
-
 class Help(Reports.report):
     """ This facility displays helpful messages """
     hidden = True
@@ -222,36 +71,6 @@ import random,time
 from hashlib import md5
 import pyflag.tests as tests
 from pyflag.FileSystem import DBFS
-
-class IOSubsysTests(tests.FDTest):
-    """ Testing IO Subsystem handling """
-    def setUp(self):
-        self.fd = IO_File('PyFlagNTFSTestCase', None, 'Itest')
-
-class OffsetFileTests(tests.FDTest):
-    """ Testing OffsetFile handling """
-    test_case = "PyFlagNTFSTestCase"
-    test_inode = "Itest|o1000:1000"
-    
-    def testMisc(self):
-        """ Test OffsetFile specific features """
-        ## Make sure we are the right size
-        self.assertEqual(self.fd.size, 1000)
-        
-        fd2 = IO_File('PyFlagNTFSTestCase', None, 'Itest')
-        fd2.seek(1000)
-        self.assertEqual(fd2.tell(), 1000)
-        data=fd2.read(1000)
-        self.assertEqual(fd2.tell(), 2000)
-        
-        self.fd.seek(0)
-        data2 = self.fd.read()
-        self.assertEqual(self.fd.tell(),1000)
-
-        ## Make sure that we are reading the same data with and
-        ## without the offset:
-        self.assertEqual(data2, data)
-        self.assertEqual(fd2.tell(), 2000)
 
 config.add_option("PERIOD", default=60, type='int',
                   help="Run house keeping every this many seconds")
@@ -279,7 +98,7 @@ class Periodic(Farm.Task):
         finally:
             dbh.execute("unlock tables")
 
-    def run(self, *args):
+    def run(self, *args, **kwargs):
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, "Running Housekeeping tasks on %s" % time.ctime())
         try:
             FlagFramework.post_event('periodic', None)
@@ -288,23 +107,21 @@ class Periodic(Farm.Task):
 
 class Exit(Farm.Task):
     """ A task to force the worker to exit """
-    def run(self, case, *args):
+    def run(self, *args, **kwargs):
         pyflaglog.log(pyflaglog.INFO, "Exiting Worker due to broadcast")
         os._exit(0)
         
 class Scan(Farm.Task):
     """ A task to distribute scanning among all workers """
-    def run(self,case, inode_id, scanners, *args):
-        factories = Scanner.get_factories(case, scanners.split(","))
-
-        if factories:
-            Scanner.scan_inode(case, inode_id, factories)
+    def run(self,case=None, inode_id=0, scanners=None, cookie=1, *args, **kwargs):
+        if scanners:
+            Scanner.scan_inode(case, inode_id, scanners, cookie)
             
 class DropCase(Farm.Task):
     """ This class is responsible for cleaning up cached data
     structures related to the case
     """
-    def run(self, case, *args):
+    def run(self, case=None, **kwargs):
         ## Expire any caches we have relating to this case:
         pyflaglog.log(pyflaglog.INFO, "Resetting case %s in worker" % case)
         FlagFramework.post_event('reset', case)
@@ -429,10 +246,9 @@ class CaseDBInit(FlagFramework.EventHandler):
         ## Update the schema version.
         dbh.set_meta('schema_version',config.SCHEMA_VERSION)
 
-    def startup(self):
+    def startup(self, dbh, case):
         print "Checking schema for compliance"
         ## Make sure that the schema conforms
-        dbh = DB.DBO()
         dbh.execute("select value from meta where property='flag_db'")
         DB.check_column_in_table(None, 'sql_cache', 'status',
                                  'enum("progress","dirty","cached")')

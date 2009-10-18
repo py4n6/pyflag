@@ -1747,7 +1747,7 @@ class Map(FileLikeObject):
             if map_data:
                 map_data = map_data.decode("string_escape")
             else:
-                fd = oracle.open("%s/map" % uri)
+                fd = oracle.open("%s/map" % uri) or Raise("Map not found")
                 try:
                     fd.seek(0)
                     map_data= fd.get_data()

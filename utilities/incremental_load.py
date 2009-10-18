@@ -140,6 +140,10 @@ baseurn = None
 pcap_dispatch = {}
 processor = NetworkScanner.make_processor(config.case, factories, pcap_dispatch)
 
+## Start any workers
+Farm.start_workers()
+
+
 now = time.time()
 volume_urn = CacheManager.AFF4_MANAGER.make_volume_urn(config.case)
 

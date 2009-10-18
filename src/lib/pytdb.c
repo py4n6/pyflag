@@ -26,12 +26,12 @@ static TDB_DATA INHERIT = {
 
 static TDB_DATA WLOCK = {
   .dptr = (unsigned char *)"__WLOCK",
-  .dsize = 8
+  .dsize = 7
 };
 
 static TDB_DATA RLOCK = {
   .dptr = (unsigned char *)"__RLOCK",
-  .dsize = 8
+  .dsize = 7
 };
 
 typedef struct {
@@ -133,8 +133,22 @@ static PyObject *pytdb_list_keys(PyTDB *self, PyObject *args, PyObject *kwds) {
   return result;
 }
 
+
+static PyObject *pytdb_lock(PyTDB *self, PyObject *args, PyObject *kwds) {
+  tdb_lockall(self->context);
+  Py_RETURN_NONE;
+}
+
+static PyObject *pytdb_unlock(PyTDB *self, PyObject *args, PyObject *kwds) {
+  tdb_unlockall(self->context);
+  Py_RETURN_NONE;
+}
+
+
 static int pytdb_dealloc(PyTDB *self) {
-  tdb_close(self->context);
+  if(self->context)
+    tdb_close(self->context);
+
   return 1;
 };
 
@@ -147,6 +161,11 @@ static PyMethodDef PyTDB_methods[] = {
      "Get a value associated with a key" },
     {"list_keys", (PyCFunction)pytdb_list_keys, METH_VARARGS|METH_KEYWORDS,
      "Return a list of keys" },
+    {"lock", (PyCFunction)pytdb_lock, METH_VARARGS|METH_KEYWORDS,
+     "Lock the tdb" },
+    {"unlock", (PyCFunction)pytdb_unlock, METH_VARARGS|METH_KEYWORDS,
+     "Unlocks the tdb" },
+
     {NULL}  /* Sentinel */
 };
 
@@ -241,6 +260,7 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
   static char *kwlist[] = {"path", "hashsize", NULL};
   char buff[BUFF_SIZE];
   char *path = ".";
+  int flags = O_RDWR | O_CREAT;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "|sL", kwlist, 
 				  &path, &self->hashsize))
@@ -252,6 +272,8 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
   self->urn_db = tdb_open(buff, self->hashsize,
 			  0,
 			  O_RDWR | O_CREAT, 0644);
+  if(!self->urn_db) 
+    goto error;
 
   if(snprintf(buff, BUFF_SIZE, "%s/attribute.tdb", path) >= BUFF_SIZE)
     goto error1;
@@ -260,6 +282,9 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
 				0,
 				O_RDWR | O_CREAT, 0644);
 
+  if(!self->attribute_db) 
+    goto error1;
+
   if(snprintf(buff, BUFF_SIZE, "%s/data.tdb", path) >= BUFF_SIZE)
     goto error2;
 
@@ -267,6 +292,9 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
 			   0,
 			   O_RDWR | O_CREAT, 0644);
   
+  if(!self->data_db)
+    goto error2;
+
   if(snprintf(buff, BUFF_SIZE, "%s/data_store.tdb", path) >= BUFF_SIZE)
     goto error3;
 
@@ -276,9 +304,12 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
 
   // This ensures that the data store never has an offset of 0 (This
   // indicates an error)
+  // Access to the tdb_store is managed via locks on the data.tdb
+  tdb_lockall(self->data_db);
   if(lseek(self->data_store_fd, 0, SEEK_END)==0) {
     (void)write(self->data_store_fd, "data",4);
   };
+  tdb_unlockall(self->data_db);
 
   return 0;
 
@@ -338,12 +369,14 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
   uint32_t result=0;
   
   /* We get given an ID and we retrieve the URN it belongs to */
+  tdb_lockall(tdb);
   urn_id = tdb_fetch(tdb, key);
 
   if(urn_id.dptr) {
     result = to_int(urn_id);
     free(urn_id.dptr);
 
+    tdb_unlockall(tdb);
     return result;
   } else if(create_new) {
     TDB_DATA max_key;
@@ -366,9 +399,11 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
     tdb_store(tdb, max_key, urn_id, TDB_REPLACE);
     tdb_store(tdb, urn_id, key, TDB_REPLACE);
 
+    tdb_unlockall(tdb);
     return max_id;
   };
 
+  tdb_unlockall(tdb);
   // This should never happen
   return 0;
 };
@@ -528,6 +563,9 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   key.dptr = (unsigned char *)buff;
   key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
 
+  // Lock the data_db to synchronise access to the store:
+  tdb_lockall(self->data_db);
+
   offset = tdb_fetch(self->data_db, key);
   if(offset.dptr) {
     previous_offset = to_int(offset);
@@ -548,6 +586,9 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 
   tdb_store(self->data_db, key, value, TDB_REPLACE);
 
+  // Done
+  tdb_unlockall(self->data_db);
+
   exit:
   Py_DECREF(value_str);
   Py_RETURN_NONE;
@@ -565,6 +606,9 @@ static int set_new_value(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute
   key.dptr = (unsigned char *)buff;
   key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
 
+  // Lock the database
+  tdb_lockall(self->data_db);
+
   // Go to the end and write the new record
   new_offset = lseek(self->data_store_fd, 0, SEEK_END);
   // The offset to the next item in the list
@@ -578,6 +622,9 @@ static int set_new_value(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute
   offset.dsize = from_int(new_offset, buff2, BUFF_SIZE);
 
   tdb_store(self->data_db, key, offset, TDB_REPLACE);
+
+  //Done
+  tdb_unlockall(self->data_db);
 
   return 1;
 };
@@ -848,6 +895,7 @@ static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) 
 
   offset = get_data_head(self, urn, attribute, &data_list);
   if(!offset) {
+    goto exit;
     return PyErr_Format(PyExc_IOError, "URN does not appear to be locked?");
   };
 
@@ -864,7 +912,7 @@ static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) 
     printf("unlocking %s\n", urn.dptr);
     fflush(stdout);
   */
-
+ exit:
   Py_RETURN_NONE;
 }
 

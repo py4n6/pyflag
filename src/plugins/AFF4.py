@@ -43,10 +43,6 @@ SUPPORTED_STREAMS = [AFF4_IMAGE, AFF4_MAP, AFF4_AFF1_STREAM,
 
 ## Move towards using the tdb resolver for AFF4
 import pyflag.aff4.tdb_resolver as tdb_resolver
-aff4.oracle = tdb_resolver.TDBResolver()
-
-#aff4.oracle.set(aff4.GLOBAL, aff4.CONFIG_VERBOSE, 20)
-aff4.oracle.set(aff4.GLOBAL, CONFIG_PROPERTIES_STYLE, 'combined')
 
 class LoadAFF4Volume(Reports.report):
     """
@@ -152,6 +148,15 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
         volume.finish()
         aff4.oracle.cache_return(volume)
+
+    def startup(self, dbh, case):
+        print "%s: Getting TDB Resolver" % os.getpid()
+        aff4.oracle = tdb_resolver.TDBResolver()        
+
+    def worker_startup(self, dbh, case):
+        ## Make sure we have our own unique resolver
+        print "%s: Getting TDB Resolver" % os.getpid()
+        aff4.oracle = tdb_resolver.TDBResolver()
 
     def exit(self, dbh, case):
         """ Check for dirty volumes and closes them """

@@ -119,7 +119,7 @@ class MSNScanner(Scanner.GenScanFactory):
             session_fd = MSN_SESSIONS[self.session_urn]
         except:
             session_fd = CacheManager.AFF4_MANAGER.create_cache_data(
-                self.case, self.session_urn,
+                fd.case, self.session_urn,
                 target = fd.urn,
                 inherited = fd.urn)
             ## Fill in some defaults
@@ -130,7 +130,7 @@ class MSNScanner(Scanner.GenScanFactory):
 
         return session_fd
         
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime):
         if "MSN" in type and fd.urn.endswith("forward"):
             pyflaglog.log(pyflaglog.DEBUG,"Openning %s for MSN" % fd.inode_id)
             dbfs = FileSystem.DBFS(fd.case)
@@ -152,9 +152,9 @@ class MSNScanner(Scanner.GenScanFactory):
                     #print "Command %s not handled" % command
                     continue
 
-                handler(items, fd, factories)
+                handler(items, fd, scanners)
 
-    def ANS(self, items, fd, factories):
+    def ANS(self, items, fd, scanners):
         """ Logs into the Switchboard session.
 
         We use this to store the current session ID and client_id (target username) for this entire TCP stream.
@@ -180,7 +180,7 @@ class MSNScanner(Scanner.GenScanFactory):
                                      "TARGET JOINING_SESSION")
 
 
-    def MSG(self, items, fd, factories):
+    def MSG(self, items, fd, scanners):
         """ Sends message to members of the current session
 
         There are two types of messages that may be sent:
