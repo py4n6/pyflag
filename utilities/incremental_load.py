@@ -87,8 +87,7 @@ if not config.case:
     print "You must specify a case to load into"
     sys.exit(-1)
 
-scanners = config.scanners.split(',')
-factories = Scanner.get_factories(config.case, scanners)
+scanners = ScannerUtils.fill_in_dependancies(config.scanners.split(','))
 count = 0
 processed_length = 0
 
@@ -125,6 +124,9 @@ def load_file(urn, processor, pcap_dispatch):
 
         processor.process(packet)
 
+## Start any workers
+Farm.start_workers()
+
 ## recreate case (only needed for testing)
 env = pyflagsh.environment(case=config.case)
 pyflagsh.shell_execv(command="delete_case", env=env,
@@ -134,14 +136,12 @@ pyflagsh.shell_execv(command="create_case", env=env,
 
 files = os.listdir(directory)
 files.sort()
-files = files[-70:]
+#files = files[-70:]
 
 baseurn = None
 pcap_dispatch = {}
-processor = NetworkScanner.make_processor(config.case, factories, pcap_dispatch)
-
-## Start any workers
-Farm.start_workers()
+cookie = time.time()
+processor = NetworkScanner.make_processor(config.case, scanners, pcap_dispatch, cookie)
 
 
 now = time.time()
@@ -174,6 +174,9 @@ del processor
 print "Done processing in %s" % (time.time() - now)
 ## Send off the exit message
 FlagFramework.post_event("exit", None)
+
+## This is optional here
+#CacheManager.AFF4_MANAGER.close(config.CASE)
 
 sys.exit(0)
 output_fd = None
@@ -311,7 +314,7 @@ def run(keepalive=None):
 
     pcap_dbh.execute("select max(id) as m from pcap")
     pcap_id = pcap_dbh.fetch()['m'] or 0
-    cookie, processor = pcapfs.make_processor(config.iosource, scanners)
+    processor = pcapfs.make_processor(config.iosource, scanners)
 
     last_time = 0
 
