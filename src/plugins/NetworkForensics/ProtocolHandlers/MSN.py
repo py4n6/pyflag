@@ -51,20 +51,12 @@ import plugins.NetworkForensics.NetworkScanner as NetworkScanner
 import pyflag.FileSystem as FileSystem
 import FileFormats.HTML as HTML
 
-## AFF4 attributes for MSN sessions
-MSN_SESSION_ID = PYFLAG_NS + "msn:session_id"
-MSN_CLIENT_ID = PYFLAG_NS + "msn:client_id"
-
-## Current sessions are kept alive here
-MSN_SESSIONS = aff4.Store(kill_cb = lambda x: x.close())
-
 class MessageType(AFF4URN):
     def display(self, value, row, result):
         fsfd = FileSystem.DBFS(self.case)
         fd = fsfd.open(inode_id = value)
         fd.seek(row['Offset'])
-        data = fd.readline()
-        data = data.split(":",3)[3]
+        data = fd.read(row['Length'])
         result.text(data)
         fd.close()
         
@@ -72,29 +64,35 @@ class MSNSessionTable(FlagFramework.CaseTable):
     """ Store information about decoded MSN messages """
     name = 'msn_session'
     columns = [ [ AFF4URN, {} ],
+                [ TimestampType, dict(name='Timestamp', column='time')],
+                
+                ## These are used to store the message in the stream
                 [ IntegerType, dict(name = 'Offset', column='offset')],
-                [ AFF4URN, dict(name = 'Stream', column = 'stream_id') ],
-                [ IntegerType, dict(name = 'Stream Offset', column='stream_offset')],
+                [ IntegerType, dict(name = 'Length', column='length')],
+                
                 [ BigIntegerType, dict(name = 'Session ID', column='session_id') ],
                 [ StringType, dict(name = 'Sender', column='sender')],
                 [ StringType, dict(name = 'Recipient', column='recipient')],
                 [ StringType, dict(name = 'Type', column='type')],
-                [ IntegerType, dict(name = 'P2P File', column='p2p_file') ],
+                #[ IntegerType, dict(name = 'P2P File', column='p2p_file') ],
                 ]
     extras = [ [ PacketType, dict(name = 'Packet', column='stream_offset',
                                   stream_column = 'stream_id') ],
+
+               ## Use the Stream offset and length to reconstruct the
+               ## message
                [ MessageType, dict(name = 'Message') ],
                ]
 
 class ChatMessages(Reports.PreCannedCaseTableReports):
     args = { 'filter': ' "Type" = MESSAGE',
              'order':0, 'direction':1,
-             '_hidden': [6]}
+             '_hidden': [5,6]}
     family = 'Network Forensics'
     description = 'View MSN/Yahoo chat messages'
     name = "/Network Forensics/Communications/Chats/MSN"
     default_table = "MSNSessionTable"
-    columns = ['Packet', 'URN', 'Type', "Sender", "Recipient", "Message", "Offset"]
+    columns = ['Timestamp', 'Message', 'Type', "Sender", "Recipient", "Offset","Length"]
 
 
 class MSNScanner(Scanner.GenScanFactory):
@@ -102,43 +100,26 @@ class MSNScanner(Scanner.GenScanFactory):
     default = True
     group = 'NetworkScanners'
     depends = ['PCAPScanner']
-
-    session_urn = None
-    session_id = -1
-    def make_session_fd(self, fd, session_id=None):
-        ## Make a new URN for this session
-        if not session_id:
-            session_id = self.session_id
-        else:
-            self.session_id = session_id
-            
-        self.session_urn = self.session_urn or \
-                           "%s/MSN_Session_%s" % (os.path.dirname(fd.urn), session_id)
-        
-        try:
-            session_fd = MSN_SESSIONS[self.session_urn]
-        except:
-            session_fd = CacheManager.AFF4_MANAGER.create_cache_data(
-                fd.case, self.session_urn,
-                target = fd.urn,
-                inherited = fd.urn)
-            ## Fill in some defaults
-            session_fd.client_id = None
-            session_fd.session_id = session_id
-            
-            MSN_SESSIONS.add(self.session_urn, session_fd)
-
-        return session_fd
         
     def scan(self, fd, scanners, type, mime, cookie):
         if "MSN" in type and fd.urn.endswith("forward"):
             pyflaglog.log(pyflaglog.DEBUG,"Openning %s for MSN" % fd.inode_id)
             dbfs = FileSystem.DBFS(fd.case)
-            forward_fd = fd
-            reverse_fd = dbfs.open(urn = "%s/reverse" % os.path.dirname(fd.urn))
+            self.forward_fd = fd
+            self.reverse_fd = dbfs.open(urn = "%s/reverse" % os.path.dirname(fd.urn))
+
+            ## Make back references to each other
+            self.forward_fd.reverse = self.reverse_fd
+            self.reverse_fd.reverse = self.forward_fd
+
+            ## Install defaults
+            self.forward_fd.client_id =  self.reverse_fd.client_id = ''
+            self.forward_fd.dest_id = self.reverse_fd.dest_id = ''
+            
+            self.session_id = -1
 
             for fd in NetworkScanner.generate_streams_in_time_order(
-                forward_fd, reverse_fd):
+                self.forward_fd, self.reverse_fd):
                 try:
                     line = fd.readline()
                     items = line.split()
@@ -153,6 +134,16 @@ class MSNScanner(Scanner.GenScanFactory):
                     continue
 
                 handler(items, fd, scanners)
+
+            CacheManager.update_table_from_urn(fd.case, self.forward_fd.urn)
+            CacheManager.update_table_from_urn(fd.case, self.reverse_fd.urn)
+
+    def IRO(self, items, fd, scanners):
+        """ List of current participants.
+        
+        IRO <transaction id> <number of this IRO> <total number of IRO that will be sent> <username> <display name>
+        """
+        self.forward_fd.dest_id = self.reverse_fd.client_id = items[4]
 
     def ANS(self, items, fd, scanners):
         """ Logs into the Switchboard session.
@@ -169,12 +160,10 @@ class MSNScanner(Scanner.GenScanFactory):
         """
         ## We are in the client -> server stream
         if len(items)==5:
-            session_id = items[-1]
-            fd = self.make_session_fd(fd, session_id)
-            
+            self.session_id = items[-1]
             ## Fill in some information
-            fd.client_id = items[2]
-            
+            fd.reverse.dest_id = fd.client_id = items[2]
+
             self.insert_session_data(fd, fd.client_id,
                                      "SWITCHBOARD SERVER",
                                      "TARGET JOINING_SESSION")
@@ -227,8 +216,7 @@ class MSNScanner(Scanner.GenScanFactory):
             ## Its type 1
             sender_name = ''
 
-        session_fd = self.make_session_fd(fd)
-        sender = session_fd.client_id
+        sender = fd.client_id
         ct = ''
         while 1:
             line = fd.readline().strip()
@@ -238,37 +226,35 @@ class MSNScanner(Scanner.GenScanFactory):
             header = header.lower()
             
             if header == 'typinguser':
-                sender = value
+                fd.client_id = fd.reverse.dest_id = value.strip()
             elif header == 'content-type':
                 ct = value
-                    
-        data = fd.read(end - fd.tell())
-        
-        ## We only care about text messages here
-        if len(data)>0 and 'text/plain' in ct:
-            ## Lets find out the timestamp of this point
-            session_fd.insert_to_table("msn_session",
-                                       dict(session_id = session_fd.session_id,
-                                            offset = session_fd.tell(),
-                                            sender = sender,
-                                            type = 'MESSAGE',
-                                            stream_id = fd.inode_id,
-                                            stream_offset = start))
-            session_fd.write(DB.expand("%s %s %s: %s\n", (time.ctime(fd.current_packet.ts_sec),
-                                                          sender_name, sender, data)).encode("utf8"))
 
-    def insert_session_data(self, session_fd, sender, recipient, type, data=None):
-        args =  dict(session_id = session_fd.session_id,
+        ## Update the start to be start start of this line
+        start = fd.tell()
+        fd.seek(end - start, 1)
+        ## We only care about text messages here
+        if end > start and 'text/plain' in ct:
+            ## Lets find out the timestamp of this point
+            CacheManager.urn_insert_to_table(fd.urn, "msn_session",
+                      dict(session_id = self.session_id,
+                           _time = "from_unixtime(%s)" % fd.current_packet.ts_sec,
+                           offset = start,
+                           length = end - start,
+                           sender = fd.client_id,
+                           recipient = fd.dest_id,
+                           type = 'MESSAGE',
+                           ))
+
+    def insert_session_data(self, fd, sender, recipient, type, data=None):
+        args =  dict(session_id = self.session_id,
+                     _time = "from_unixtime(%s)" % fd.current_packet.ts_sec,
                      sender = sender,
-                     offset = session_fd.tell(),
+                     offset = fd.tell(),
                      recipient = recipient,
                      type = type)
-
-        if data:
-            args['Message'] = data
-            fd.write(data)
             
-        session_fd.insert_to_table("msn_session", args)
+        CacheManager.urn_insert_to_table(fd.urn, "msn_session", args)
         
 ## MSN streams look a lot like RFC2822 sometimes:
 import pyflag.Magic as Magic
@@ -306,9 +292,9 @@ TypingUser: user022714@hotmail.com
 
 
 ## Ensure we flush the MSN cache when needed
-class MSNEvents(FlagFramework.EventHandler):
-    def exit(self, dbh, case):
-        MSN_SESSIONS.flush()
+#class MSNEvents(FlagFramework.EventHandler):
+#    def exit(self, dbh, case):
+#        MSN_SESSIONS.flush()
 
 ## UnitTests:
 import unittest
@@ -332,8 +318,6 @@ class MSNTests(pyflag.tests.ScannerTest):
                                    "MSNScanner"
                                    ])                   ## List of Scanners
 
-        ## Flush the cache
-        MSN_SESSIONS.flush()
         ## What should we have found?
         dbh = DB.DBO(self.test_case)
         dbh.execute("""select count(*) as total from `msn_session` where type=\"MESSAGE\"""")

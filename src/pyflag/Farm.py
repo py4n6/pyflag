@@ -199,7 +199,11 @@ def start_workers():
     signal.signal(signal.SIGCHLD, handler)
 
 def handler(signal, frame):
-    pid, status = os.waitpid(-1, 0)
+    try:
+        pid, status = os.waitpid(-1, 0)
+    except:
+        return
+    
     print "Child %s Died - starting" % pid
     global keepalive, write_keepalive
     

@@ -37,6 +37,29 @@ import cPickle
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
+def update_table_from_urn(case, urn):
+    ## We need to do this explicitely because we might end up
+    ## inserting to tables our inherited object specifies. This
+    ## essentially maintains a copy of all the attribute in our
+    ## inherited object in the same table.
+    dbh = DB.DBO(case)
+    inode_id = aff4.oracle.get_id_by_urn(urn)
+    
+    for table, columns in Registry.CASE_TABLES.case_tables.items():
+        for data_urn in aff4.oracle.resolve_list(urn, "%s%s" % (PYFLAG_NS, table)):
+            args = {'inode_id': inode_id}
+            args.update(cPickle.loads(data_urn.decode("string_escape")))
+            dbh.insert(table, _fast=True, **args)
+
+def urn_insert_to_table(urn, table, props):
+    ## Make sure we dont have inode id
+    try:
+        del props['inode_id']
+    except: pass
+
+    aff4.oracle.add(urn, "%s%s" % (PYFLAG_NS, table),
+                    cPickle.dumps(props,protocol=2).encode("string_escape"))
+
 class PyFlagMap(aff4.Map):
     include_in_VFS = None
     
@@ -44,44 +67,10 @@ class PyFlagMap(aff4.Map):
         """ This function adds the properties for this object as
         attributes in the urn:pyflag: namespace.
         """
-        ## Make sure we dont have inode id
-        try:
-            del props['inode_id']
-        except: pass
-        #aff4.oracle.add(self.urn, "%s%s" % (PYFLAG_NS, table),
-        #                props)
-
-        aff4.oracle.add(self.urn, "%s%s" % (PYFLAG_NS, table),
-                        cPickle.dumps(props,protocol=2).encode("string_escape"))
-        #aff4.oracle.set(self.urn, "%s%s" % (PYFLAG_NS, table), "1")
-        #for k,v in props.items():
-        #    aff4.oracle.set(self.urn, "%s%s:%s" % (PYFLAG_NS, table, k), v)
+        urn_insert_to_table(self.urn, table, props)
 
     def update_tables(self):
-        #pdb.set_trace()
-        ## We need to do this explicitely because we might end up
-        ## inserting to tables our inherited object specifies. This
-        ## essentially maintains a copy of all the attribute in our
-        ## inherited object in the same table.
-        dbh = DB.DBO(self.case)
-        for table, columns in Registry.CASE_TABLES.case_tables.items():
-            for data_urn in aff4.oracle.resolve_list(self.urn, "%s%s" % (PYFLAG_NS, table)):
-                args = {'inode_id': self.inode_id}
-                if 0:
-                    ## We try to load all the attributes of the data_urn:
-                    for column in columns:
-                        arg = aff4.oracle.resolve(data_urn, column)
-                        if not arg:
-                            column = "_" + column
-                            arg = aff4.oracle.resolve(data_urn, column)
-
-                        if arg:
-                            args[column] = arg
-                else:
-                    args.update(cPickle.loads(data_urn.decode("string_escape")))
-                    
-                dbh.insert(table, _fast=True, **args)
-
+        update_table_from_urn(self.case, self.urn)
         if self.include_in_VFS:
             self.add_to_VFS(**self.include_in_VFS)
 

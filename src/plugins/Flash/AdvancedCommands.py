@@ -213,7 +213,7 @@ class scan_inode(scan):
             scanners.extend(fnmatch.filter(Registry.SCANNERS.scanners, self.args[i]))
             
         scanners = ScannerUtils.fill_in_dependancies(scanners)
-        Scanner.scan_inode(case, self.args[0], scanners, force = True)
+        Scanner.scan_inode(case, self.args[0], scanners, force = True, cookie=time.time())
 
 class scan_file(scan,BasicCommands.ls):
     """ Scan a file in the VFS by name """
