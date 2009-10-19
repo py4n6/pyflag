@@ -12,7 +12,11 @@ import ctypes.util
 import pdb, sys
 import struct
 from aff4_attributes import *
-import RDF
+
+try:
+    import RDF
+except ImportError: pass
+
 import cStringIO
 import uuid
 

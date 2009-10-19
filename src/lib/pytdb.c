@@ -1,5 +1,7 @@
 /** This is the python interface to the tdb trivial database */
 
+#define PY_SSIZE_T_CLEAN
+
 #include <Python.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -63,6 +65,8 @@ static int pytdb_init(PyTDB *self, PyObject *args, PyObject *kwds) {
     return -1;
   };
 
+  printf("Opened tdb file %s\n", self->filename);
+
   return 0;
 };
 
@@ -71,9 +75,11 @@ static PyObject *pytdb_store(PyTDB *self, PyObject *args, PyObject *kwds) {
   TDB_DATA value;
   static char *kwlist[] = {"key", "value", NULL};
   
+  key.dsize =0;
+  value.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#", kwlist, 
-				  &key.dptr, &key.dsize, 
-				  &value.dptr, &value.dsize))
+				  &key.dptr, (uint32_t *)&key.dsize, 
+				  &value.dptr, (uint32_t *)&value.dsize))
     return NULL;
   
   tdb_store(self->context, key, value, TDB_REPLACE);
@@ -85,8 +91,9 @@ static PyObject *pytdb_delete(PyTDB *self, PyObject *args, PyObject *kwds) {
   TDB_DATA key;
   static char *kwlist[] = {"key", NULL};
   
+  key.dsize=0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
-				  &key.dptr, &key.dsize))
+				  &key.dptr, (uint32_t *)&key.dsize))
     return NULL; 
   
   tdb_delete(self->context, key);
@@ -100,9 +107,10 @@ static PyObject *pytdb_get(PyTDB *self, PyObject *args, PyObject *kwds) {
   PyObject *result;
 
   static char *kwlist[] = {"key", NULL};
-  
+  key.dsize=0;
+
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
-				  &key.dptr, &key.dsize)) {
+				  &key.dptr, (uint32_t *)&key.dsize)) {
     return NULL; 
   };
 
@@ -418,11 +426,18 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
 static PyObject *get_id_by_urn(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"urn", "create_new", NULL};
   TDB_DATA key;
+  char *key_name;
+  Py_ssize_t key_len;
+
   int create_new=0;
   
+  key.dsize=0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|L", kwlist, 
-				  &key.dptr, &key.dsize, &create_new))
+				  &key_name, &key_len, &create_new))
     return NULL;
+
+  key.dptr = key_name;
+  key.dsize = key_len;
 
   return PyLong_FromUnsignedLongLong(get_id(self->urn_db, key, create_new));
 };
@@ -545,6 +560,8 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   uint32_t new_offset;
   int unique = 0;
 
+  attribute.dsize = 0;
+  urn.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O|L", kwlist, 
 				  &urn.dptr, &urn.dsize, 
 				  &attribute.dptr, &attribute.dsize,
@@ -556,7 +573,7 @@ static PyObject *add(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   if(!value_str) return NULL;
 
   PyString_AsStringAndSize(value_str, (char **)&value.dptr, 
-			   (int *)&value.dsize);
+			   &value.dsize);
 
   /** If the value is already in the list, we just ignore this
       request.
@@ -642,6 +659,8 @@ static PyObject *set(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   PyObject *value_obj, *value_str;
   TDB_DATA value;
 
+  urn.dsize = 0;
+  attribute.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#O", kwlist, 
 				  &urn.dptr, &urn.dsize, 
 				  &attribute.dptr, &attribute.dsize,
@@ -675,6 +694,8 @@ static PyObject *delete(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   TDB_DATA key;
   char buff[BUFF_SIZE];
 
+  urn.dsize = 0;
+  attribute.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#", kwlist, 
 				  &urn.dptr, &urn.dsize, 
 				  &attribute.dptr, &attribute.dsize
@@ -754,6 +775,8 @@ static PyObject *resolve_list(BaseTDBResolver *self, PyObject *args, PyObject *k
   TDB_DATA_LIST i;
   int follow_inheritence=1;
 
+  urn.dsize = 0;
+  attribute.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s#|L", kwlist, 
 				  &urn.dptr, &urn.dsize, 
 				  &attribute.dptr, &attribute.dsize,
@@ -815,6 +838,8 @@ static PyObject *export_dict(BaseTDBResolver *self, PyObject *args, PyObject *kw
   TDB_DATA_LIST data_list;
   PyObject *result;
 
+  urn.dsize = 0;
+  attribute.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, 
 				  &urn.dptr, &urn.dsize))
     return NULL;
@@ -852,6 +877,8 @@ static PyObject *lock(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   TDB_DATA_LIST data_list;
   uint32_t offset;
 
+  urn.dsize = 0;
+  attribute.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s", kwlist, 
 				  &urn.dptr, &urn.dsize, &mode))
     return NULL;
@@ -890,6 +917,9 @@ static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) 
   TDB_DATA attribute;
   TDB_DATA_LIST data_list;
   uint32_t offset;
+
+  urn.dsize = 0;
+  attribute.dsize = 0;
 
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#s", kwlist, 
 				  &urn.dptr, &urn.dsize, &mode))
@@ -1176,6 +1206,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
   int max_attr_id=1,i, urn_id;
   PyObject *exclude=NULL;
 
+  urn.dsize = 0;
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|O", kwlist, 
 				  &urn.dptr, &urn.dsize, &exclude))
     return NULL;

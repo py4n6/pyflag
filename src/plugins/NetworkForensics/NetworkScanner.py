@@ -158,7 +158,7 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
             urn = urn_dispatcher[packet.pcap_file_id]
 
             if packet.offset==0: pdb.set_trace()
-            
+
             connection['map'].write_from(urn, packet.offset + tcp.data_offset, length)
             connection['map.pkt'].write_from(urn, packet.offset, length)
 

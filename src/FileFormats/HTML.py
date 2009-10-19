@@ -25,7 +25,7 @@ def traced(func):
         try:
             return func(*__args,**__kw)
         except:
-            pdb.post_mortem()
+            pdb.post_mortem(t=sys.exc_info()[2])
 
     return wrapper
 

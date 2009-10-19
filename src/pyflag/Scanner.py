@@ -39,7 +39,7 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import pyflag.pyflaglog as pyflaglog
 import os,imp, StringIO
-import re,pdb, time
+import re,pdb, time, sys
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.FlagFramework as FlagFramework
@@ -163,7 +163,7 @@ def scan_inode(case, inode_id, scanners, cookie, force=False):
                 c.scan(fd, scanners=scanners, type=type, mime=mime, cookie=cookie)
             except Exception,e:
                 print e
-                pdb.post_mortem()
+                pdb.post_mortem(t = sys.exc_info()[2])
     
     global MESSAGE_COUNT
     MESSAGE_COUNT += 1

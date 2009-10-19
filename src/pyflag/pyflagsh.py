@@ -325,7 +325,7 @@ if __name__ == "__main__":
             except ParserException, e:
                 print "Problem parsing the previous line: %s" % e
             except Exception,e:
-                pdb.post_mortem()
+                pdb.post_mortem(t = sys.exc_info()[2])
                 print isinstance(e,ParserException)
                 print "Unknown error: %r %s" % (e,e)
                 print FlagFramework.get_bt_string(e)

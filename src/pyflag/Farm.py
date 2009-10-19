@@ -57,7 +57,8 @@ import pickle
 ## that commands are atomically read and written.
 PACKET_SIZE = 512
 job_pipe = None
-job_tdb = None
+
+FlagFramework.job_tdb = None
 
 config.add_option("MAXIMUM_WORKER_MEMORY", default=0, type='int',
                   help='Maximum amount of memory (Mb) the worker is allowed to consume (0=unlimited,default)')
@@ -83,6 +84,34 @@ config.add_option("WORKERS", default=2, type='int',
 config.add_option("FIFO", default=config.RESULTDIR + "/jobs",
                   help = "The fifo to use for distributing jobs")
 
+def run_task(command, argdict, cookie):
+    """ Runs the given task in the current process """
+    ## Jobs tdb keeps track of outstanding jobs
+    job_tdb = get_job_tdb()
+    
+    try:
+        task = Registry.TASKS.dispatch(command)
+    except:
+        pyflaglog.log(pyflaglog.DEBUG, "Dont know how to process job %s" % command)
+        return
+    
+    try:
+        task = task()
+        task.run(cookie=cookie, **argdict)
+    except Exception,e:
+        pdb.post_mortem(t = sys.exc_info()[2])
+        pyflaglog.log(pyflaglog.ERRORS, "Error %s %s %s" % (task.__class__.__name__,argdict,e))
+
+    ## Decrement the cookie in the jobs_tdb
+    job_tdb.lock()
+    try:
+        count = int(job_tdb.get("%s" % cookie)) - 1
+        job_tdb.store(str(cookie), str(count))
+    except (KeyError, TypeError):
+        job_tdb.store(str(cookie), str(0))
+        
+    job_tdb.unlock()
+
 def worker_run(keepalive=None):
      """ The main loop of the worker.
 
@@ -103,12 +132,9 @@ def worker_run(keepalive=None):
 
      global job_pipe
      
-     read_pipe = open(config.FIFO, "r")
-     job_pipe = open(config.FIFO, "w")
+     read_pipe = os.open(config.FIFO, os.O_RDONLY | os.O_NONBLOCK) 
+     job_pipe = os.open(config.FIFO, os.O_WRONLY | os.O_NONBLOCK)
 
-     ## Jobs tdb keeps track of outstanding jobs
-     job_tdb = get_job_tdb()
-     
      while 1:
          fds = [read_pipe]
          if keepalive:
@@ -120,36 +146,19 @@ def worker_run(keepalive=None):
              ## Action on the keepalive fd means the parent quit
              print "Child %s exiting" % os.getpid()
              os._exit(0)
-
-         data = os.read(read_pipe.fileno(), PACKET_SIZE)
-         command, argdict, cookie = pickle.loads(data)
-
-         try:
-             task = Registry.TASKS.dispatch(command)
-         except:
-             pyflaglog.log(pyflaglog.DEBUG, "Dont know how to process job %s" % command)
-             continue
-
-         try:
-             task = task()
-             task.run(cookie=cookie, **argdict)
-         except Exception,e:
-             raise
-             pyflaglog.log(pyflaglog.ERRORS, "Error %s %s %s" % (task.__class__.__name__,argdict,e))
-
-         ## Decrement the cookie in the jobs_tdb
-         job_tdb.lock()
-         try:
-             count = int(job_tdb.get("%s" % cookie)) - 1
-             job_tdb.store(str(cookie), str(count))
-         except (KeyError, TypeError):
-             job_tdb.store(str(cookie), str(0))
              
-         job_tdb.unlock()
+         elif read_pipe in fds[0]:
+             try:
+                 data = os.read(read_pipe, PACKET_SIZE)
+                 command, argdict, cookie = pickle.loads(data)
+                 run_task(command, argdict, cookie)
+             except OSError:
+                 pass
 
 def start_workers():
     print "%s: starting workers" % os.getpid()
     global job_pipe
+
     children = []
 
     ## These pipes control the worker. If the master exits, the pipes
@@ -174,18 +183,19 @@ def start_workers():
     FlagFramework.post_event("startup")
 
 def get_job_tdb():
-    global job_tdb
-    
-    if not job_tdb:
-        job_tdb = pytdb.PyTDB("%s/jobs.tdb" % config.RESULTDIR)
+    if not FlagFramework.job_tdb:
+        FlagFramework.job_tdb = pytdb.PyTDB("%s/jobs.tdb" % config.RESULTDIR)
 
-    return job_tdb
+    return FlagFramework.job_tdb
 
 def post_job(command, argdict={}, cookie=0):
     global job_pipe
 
     if not job_pipe:
-        job_pipe = open(config.FIFO, "w")
+        try:
+            job_pipe = os.open(config.FIFO, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            pass
 
     job_tdb = get_job_tdb()
     
@@ -199,15 +209,27 @@ def post_job(command, argdict={}, cookie=0):
         job_tdb.store(str(cookie), str(1))
 
     job_tdb.unlock()
-    
-    data = pickle.dumps((command, argdict, cookie))
-    if len(data) > PACKET_SIZE:
-        print "Error: data is larger than packet size... "
-        os._exit(1)
+
+    fds = []
+    if job_pipe:
+        fds.append(job_pipe)
+
+    ## Now we see if we can actually write to the jobs fifo:
+    fds = select.select([], fds, [], 0)
+    if job_pipe in fds[1]:
+        ## We can write to the fifo - dispatch the job for someone else
+        data = pickle.dumps((command, argdict, cookie))
+        if len(data) > PACKET_SIZE:
+            print "Error: data is larger than packet size... "
+            os._exit(1)
         
-    res = os.write(job_pipe.fileno(), data + bytearray(PACKET_SIZE - len(data)))
-    
-    return res
+        res = os.write(job_pipe, data + '\x00' * (PACKET_SIZE - len(data)))
+        
+    else:
+        ## No we can not write it now - we should just do the job
+        ## ourselves
+        run_task(command, argdict, cookie)
+        
 
 def get_cookie_reference(cookie):
     job_tdb = get_job_tdb()
