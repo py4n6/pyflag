@@ -716,10 +716,10 @@ class Resolver:
         for cb in self.set_hooks:
             cb(uri, attribute, value)
             
-    def close(self, urn):
-        DEBUG(_DEBUG, "Closing urn %s" % urn)
-        #self.closed[urn] = self.urn[urn]
-        del self.urn[urn]
+#     def close(self, urn):
+#         DEBUG(_DEBUG, "Closing urn %s" % urn)
+#         #self.closed[urn] = self.urn[urn]
+#         del self.urn[urn]
         
     def add(self, uri, attribute, value):
         DEBUG(_DEBUG, "Adding %s: %s=%s", uri, attribute, value);

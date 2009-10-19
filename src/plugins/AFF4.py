@@ -153,6 +153,14 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         aff4.oracle = tdb_resolver.TDBResolver()        
 
     def worker_startup(self, dbh, case):
+        if FlagFramework.job_tdb:
+            FlagFramework.job_tdb.close()
+            FlagFramework.job_tdb = None
+
+        try:
+            aff4.oracle.close()
+        except AttributeError: pass
+
         ## Make sure we have our own unique resolver
         aff4.oracle = tdb_resolver.TDBResolver()
 

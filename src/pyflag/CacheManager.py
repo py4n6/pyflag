@@ -80,7 +80,7 @@ class PyFlagMap(aff4.Map):
                 else:
                     args.update(cPickle.loads(data_urn.decode("string_escape")))
                     
-                dbh.insert(table, **args)
+                dbh.insert(table, _fast=True, **args)
 
         if self.include_in_VFS:
             self.add_to_VFS(**self.include_in_VFS)

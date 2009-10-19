@@ -65,8 +65,6 @@ static int pytdb_init(PyTDB *self, PyObject *args, PyObject *kwds) {
     return -1;
   };
 
-  printf("Opened tdb file %s\n", self->filename);
-
   return 0;
 };
 
@@ -158,6 +156,11 @@ static PyObject *pytdb_unlock(PyTDB *self, PyObject *args, PyObject *kwds) {
   Py_RETURN_NONE;
 }
 
+static PyObject *pytdb_close(PyTDB *self, PyObject *args, PyObject *kwds) {
+  tdb_close(self->context);
+  self->context = NULL;
+  Py_RETURN_NONE;
+}
 
 static int pytdb_dealloc(PyTDB *self) {
   if(self->context)
@@ -179,7 +182,8 @@ static PyMethodDef PyTDB_methods[] = {
      "Lock the tdb" },
     {"unlock", (PyCFunction)pytdb_unlock, METH_VARARGS|METH_KEYWORDS,
      "Unlocks the tdb" },
-
+    {"close", (PyCFunction)pytdb_close, METH_VARARGS|METH_KEYWORDS,
+     "close the tdb" },
     {NULL}  /* Sentinel */
 };
 
@@ -237,10 +241,14 @@ typedef struct {
 static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value);
 
 static int tdbresolver_dealloc(BaseTDBResolver *self) {
-  tdb_close(self->urn_db);
-  tdb_close(self->attribute_db);
-  tdb_close(self->data_db);
-  close(self->data_store_fd);
+  if(self->urn_db)
+    tdb_close(self->urn_db);
+  if(self->attribute_db)
+    tdb_close(self->attribute_db);
+  if(self->data_db)
+    tdb_close(self->data_db);
+  if(self->data_store_fd)
+    close(self->data_store_fd);
 
   return 1;
 };
@@ -329,15 +337,36 @@ static int tdbresolver_init(BaseTDBResolver *self, PyObject *args, PyObject *kwd
 
  error3:
   tdb_close(self->data_db);
+  self->data_db = NULL;
  error2:
   tdb_close(self->attribute_db);
+  self->attribute_db = NULL;
  error1:
   tdb_close(self->urn_db);
+  self->urn_db = NULL;
  error:
   PyErr_Format(PyExc_IOError, "Unable to open tdb files");
 
   return -1;
 };
+
+static PyObject *resolver_close(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  // Close all the tdb handles
+  tdb_close(self->urn_db);
+  self->urn_db = NULL;
+
+  tdb_close(self->attribute_db);
+  self->attribute_db = NULL;
+
+  tdb_close(self->data_db);
+  self->data_db = NULL;
+
+  close(self->data_store_fd);
+  self->data_store_fd = 0;
+
+  Py_RETURN_NONE;
+};
+
 
 static PyObject *get_urn_by_id(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"id", NULL};
@@ -362,7 +391,7 @@ static PyObject *get_urn_by_id(BaseTDBResolver *self, PyObject *args, PyObject *
   key.dsize = from_int(id, buff, BUFF_SIZE);
 
   urn = tdb_fetch(self->urn_db, key);
-
+  
   if(urn.dptr) {
     result = PyString_FromStringAndSize((char *)urn.dptr, urn.dsize);
     free(urn.dptr);
@@ -899,10 +928,6 @@ static PyObject *lock(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
 
   // If we get here data_list should be valid:
   lseek(self->data_store_fd, offset, SEEK_SET);
-  /*
-    printf("locking %s %lu:%u\n", urn.dptr, offset, data_list.length);
-    fflush(stdout);
-  */
   if(lockf(self->data_store_fd, F_LOCK, data_list.length)==-1){
     return PyErr_Format(PyExc_IOError, "Unable to lock: %s", strerror(errno));
   };
@@ -944,10 +969,6 @@ static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) 
     if(i==0) break;
   };
 
-  /*
-    printf("unlocking %s\n", urn.dptr);
-    fflush(stdout);
-  */
  exit:
   Py_RETURN_NONE;
 }
@@ -973,6 +994,8 @@ static PyMethodDef PyTDBResolver_methods[] = {
    "locks a given URN - all other lock requests will block until this thread unlocks it. There are 2 types of lock held by each URN a 'r' and 'w' lock."},
   {"release", (PyCFunction)release, METH_VARARGS|METH_KEYWORDS,
    "release 'r' or 'w' locks of the given URN"},
+  {"close", (PyCFunction)resolver_close, METH_VARARGS|METH_KEYWORDS,
+   "Close all tdb handles (This is important if you are going to reopen them"},
   {NULL}  /* Sentinel */
 };
 

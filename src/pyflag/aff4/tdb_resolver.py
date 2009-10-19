@@ -105,10 +105,6 @@ class Tdb:
             libc.free(current_key)
             current_key = next_key
             
-    ## Make sure we close the files
-#    def __del__(self):
-#        libtdb.close(self.tdb_fh)
-
 import aff4
 NoneObject = aff4.NoneObject
 

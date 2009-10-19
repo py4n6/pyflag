@@ -57,13 +57,16 @@ import pickle
 ## that commands are atomically read and written.
 PACKET_SIZE = 512
 job_pipe = None
+keepalive = None
+write_keepalive = None
+
 
 FlagFramework.job_tdb = None
 
 config.add_option("MAXIMUM_WORKER_MEMORY", default=0, type='int',
                   help='Maximum amount of memory (Mb) the worker is allowed to consume (0=unlimited,default)')
 
-def check_mem(cb, *args, **kwargs):
+def check_mem():
     """ Checks for our current memory usage - if it exceeds the limit
     we exit and let the nanny restart us.
     """
@@ -71,7 +74,7 @@ def check_mem(cb, *args, **kwargs):
         mem = open("/proc/%s/statm" % os.getpid()).read().split()
         if int(mem[1])*4096/1024/1024 > config.MAXIMUM_WORKER_MEMORY:
             pyflaglog.log(pyflaglog.WARNING, "Process resident memory exceeds threshold. Exiting")
-            cb(*args, **kwargs)
+            os._exit(0)
 
 class Task:
     """ All distributed tasks need to extend this subclass """
@@ -135,11 +138,18 @@ def worker_run(keepalive=None):
      read_pipe = os.open(config.FIFO, os.O_RDONLY | os.O_NONBLOCK) 
      job_pipe = os.open(config.FIFO, os.O_WRONLY | os.O_NONBLOCK)
 
+     count = 0
      while 1:
+         count += 1
+         if (count % 100) == 0:
+             ## Check our memory footprint
+             check_mem()
+             count = 0
+
          fds = [read_pipe]
          if keepalive:
              fds.append(keepalive)
-             
+         
          ## This blocks until a job is available
          fds = select.select(fds, [], [], None)
          if keepalive in fds[0]:
@@ -157,14 +167,16 @@ def worker_run(keepalive=None):
 
 def start_workers():
     print "%s: starting workers" % os.getpid()
-    global job_pipe
+    global job_pipe, keepalive, write_keepalive
 
     children = []
 
     ## These pipes control the worker. If the master exits, the pipes
     ## will be closed which will notify the worker immediately. It
     ## will then exit.
-    keepalive,w = os.pipe()
+
+    if not keepalive:
+        keepalive, write_keepalive = os.pipe()
 
     ## Start up as many children as needed
     for i in range(config.WORKERS):
@@ -173,7 +185,7 @@ def start_workers():
             children.append(pid)
 
         else:
-            os.close(w)
+            os.close(write_keepalive)
 
             ## Initialise the worker
             worker_run(keepalive)
@@ -182,6 +194,27 @@ def start_workers():
     ## The process which called this function is a master
     FlagFramework.post_event("startup")
 
+    ## The master is responsible for ensuring its child is running -
+    ## if the child quits, we restart it.
+    signal.signal(signal.SIGCHLD, handler)
+
+def handler(signal, frame):
+    pid, status = os.waitpid(-1, 0)
+    print "Child %s Died - starting" % pid
+    global keepalive, write_keepalive
+    
+    if not keepalive:
+        keepalive, write_keepalive = os.pipe()
+    
+    pid = os.fork()
+    if not pid:
+        os.close(write_keepalive)
+        
+        ## child
+        FlagFramework.post_event("worker_startup")
+        worker_run(keepalive)
+        sys.exit(0)
+    
 def get_job_tdb():
     if not FlagFramework.job_tdb:
         FlagFramework.job_tdb = pytdb.PyTDB("%s/jobs.tdb" % config.RESULTDIR)
@@ -222,8 +255,14 @@ def post_job(command, argdict={}, cookie=0):
         if len(data) > PACKET_SIZE:
             print "Error: data is larger than packet size... "
             os._exit(1)
-        
-        res = os.write(job_pipe, data + '\x00' * (PACKET_SIZE - len(data)))
+
+        try:
+            res = os.write(job_pipe, data + '\x00' * (PACKET_SIZE - len(data)))
+        except OSError:
+            ## Cant write to this pipe - try again next time
+            os.close(job_pipe)
+            job_pipe = None
+            run_task(command, argdict, cookie)            
         
     else:
         ## No we can not write it now - we should just do the job
