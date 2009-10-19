@@ -118,7 +118,7 @@ def worker_run(keepalive=None):
          fds = select.select(fds, [], [], None)
          if keepalive in fds[0]:
              ## Action on the keepalive fd means the parent quit
-             print "Child exiting"
+             print "Child %s exiting" % os.getpid()
              os._exit(0)
 
          data = os.read(read_pipe.fileno(), PACKET_SIZE)
@@ -161,13 +161,11 @@ def start_workers():
     for i in range(config.WORKERS):
         pid = os.fork()
         if pid:
-            print "Parent"
             children.append(pid)
 
         else:
             os.close(w)
-            print "Child %s" % os.getpid()
-            
+
             ## Initialise the worker
             worker_run(keepalive)
             sys.exit(0)
@@ -185,7 +183,6 @@ def get_job_tdb():
 
 def post_job(command, argdict={}, cookie=0):
     global job_pipe
-    #print os.getpid(),command,argdict.get('inode_id')
 
     if not job_pipe:
         job_pipe = open(config.FIFO, "w")
@@ -204,15 +201,23 @@ def post_job(command, argdict={}, cookie=0):
     job_tdb.unlock()
     
     data = pickle.dumps((command, argdict, cookie))
+    if len(data) > PACKET_SIZE:
+        print "Error: data is larger than packet size... "
+        os._exit(1)
+        
     res = os.write(job_pipe.fileno(), data + bytearray(PACKET_SIZE - len(data)))
     
     return res
 
 def get_cookie_reference(cookie):
     job_tdb = get_job_tdb()
-
+    cookie = str(cookie)
+    
     try:
-        return int(job_tdb.get(str(cookie)))
+        result = int(job_tdb.get(cookie))
+        if result == 0:
+            job_tdb.delete(cookie)
+        return result
     except (KeyError, TypeError):
         return 0
 

@@ -80,7 +80,7 @@ import pyflag.DB as DB
 import pyflag.Scanner as Scanner
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
-import re,cgi,pdb
+import re,cgi,pdb, time
 import pyflag.pyflaglog as pyflaglog
 import textwrap
 import pyflag.HTMLUI as HTMLUI
@@ -792,6 +792,12 @@ class HotmailTests(tests.ScannerTest):
         dbh.execute("select count(*) as c from webmail_messages")
         row = dbh.fetch()
         self.assert_(row['c'] > 0, "No hotmail messages were found")
+
+        ## Close off the volume
+        print "Closing off volume"
+        now = time.time()
+        CacheManager.AFF4_MANAGER.close(self.test_case)
+        print "Volume closed in %s" % (time.time() - now)
 
 if __name__ == '__main__':
     import sys

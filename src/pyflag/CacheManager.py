@@ -158,6 +158,11 @@ class AFF4Manager:
 
         return volume_urn
 
+    def close(self, case):
+        volume_urn = self.make_volume_urn(case)
+        volume = aff4.oracle.open(volume_urn, 'w')
+        volume.close()
+
     def create_cache_data(self, case, path, data='', include_in_VFS=True,
                           inherited = None,**kwargs):
         """ Creates a new AFF4 segment. A segment is useful for 

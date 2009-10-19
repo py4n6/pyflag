@@ -150,12 +150,10 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         aff4.oracle.cache_return(volume)
 
     def startup(self, dbh, case):
-        print "%s: Getting TDB Resolver" % os.getpid()
         aff4.oracle = tdb_resolver.TDBResolver()        
 
     def worker_startup(self, dbh, case):
         ## Make sure we have our own unique resolver
-        print "%s: Getting TDB Resolver" % os.getpid()
         aff4.oracle = tdb_resolver.TDBResolver()
 
     def exit(self, dbh, case):

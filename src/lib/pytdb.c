@@ -25,14 +25,20 @@ static TDB_DATA INHERIT = {
 };
 
 static TDB_DATA WLOCK = {
-  .dptr = (unsigned char *)"__WLOCK",
-  .dsize = 7
+  .dptr = (unsigned char *)VOLATILE_NS "WLOCK",
+  .dsize = 18
 };
 
 static TDB_DATA RLOCK = {
-  .dptr = (unsigned char *)"__RLOCK",
-  .dsize = 7
+  .dptr = (unsigned char *)VOLATILE_NS "RLOCK",
+  .dsize = 18
 };
+
+static TDB_DATA LOCK = {
+  .dptr = (unsigned char *)"LOCK",
+  .dsize = 4
+};
+
 
 typedef struct {
   PyObject_HEAD
@@ -857,7 +863,7 @@ static PyObject *lock(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
   offset = get_data_head(self, urn, attribute, &data_list);
   if(!offset){
     // The attribute is not set - make it now:
-    set_new_value(self,urn, attribute, attribute);
+    set_new_value(self,urn, attribute, LOCK);
     offset = get_data_head(self, urn, attribute, &data_list);
     if(!offset) {
       return PyErr_Format(PyExc_IOError, "Unable to set lock attribute");
