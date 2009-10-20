@@ -37,6 +37,7 @@ import pyflag.FlagFramework as FlagFramework
 import zlib, gzip
 import pyflag.Reports as Reports
 import plugins.NetworkForensics.NetworkScanner as NetworkScanner
+import FileFormats.urlnorm as urlnorm
 
 class RelaxedGzip(gzip.GzipFile):
     """ A variant of gzip which is more relaxed about errors """
@@ -102,6 +103,23 @@ class HTTPScanner(Scanner.GenScanFactory):
         
         self.read_headers(request, forward_fd)
 
+        ## Now we try to parse out different elements of the
+        ## request. We are after the hostname and a canonicalised
+        ## url. The canonicalised url allows us to compare urls
+        ## encoded in different ways. See
+        ## http://en.wikipedia.org/wiki/URL_normalization for details.
+        (method, host, url, query_string, fragment) = urlnorm.parse(request['url'])
+        
+        ## Normalise the URL
+        if query_string:
+            request['url'] = "%s?%s" % (url, query_string)
+        else:
+            request['url'] = url
+            
+        ## The host is in the headers or it might be specified as part
+        ## of the URL too (e.g. if its a proxy connection)
+        request['host'] = request.get('host', host)
+        
         return True
         
     def read_response(self, response, fd):
@@ -247,7 +265,7 @@ class HTTPScanner(Scanner.GenScanFactory):
                                         value = value))
             target.dirty = 1
 
-    def process_post_body(self, request, request_body, target):
+    def process_post_body(self, request, request_body, target):        
         try:
             base, query = request['url'].split('?',1)
         except ValueError:
@@ -317,10 +335,14 @@ class HTTPScanner(Scanner.GenScanFactory):
                 
             if response_body and response_body.size > 0:
                 ## Store information about the object in the http table:
-                url = request.get('url','')
+                url = request.get('url','/')
+
+                ## We try to store the url in a normalized form so we
+                ## can find it regardless of the various permutations
+                ## it can go though
                 response_body.insert_to_table("http",
                                               dict(method = request.get('method'),
-                                                   url = HTML.url_unquote(url),
+                                                   url = url,
                                                    status = response.get('HTTP_code'),
                                                    content_type = response.get('content-type'),
                                                    useragent = request.get('user-agent'),

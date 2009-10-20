@@ -21,6 +21,7 @@ import StringIO
 import threading, mutex
 import pdb
 import textwrap, os.path, glob
+import zipfile, warnings
 
 ZIP64_LIMIT = (1<<31) - 1
 ZIP_FILECOUNT_LIMIT = 1 << 16
@@ -917,8 +918,6 @@ class Resolver:
 
 oracle = Resolver()
 
-import zipfile
-
 class ZipFileStream(FileLikeObject):
     """ This is a stream object which reads data from within a zip
     file. Note that the archive file is mapped and each read request
@@ -1268,7 +1267,8 @@ class ZipVolume(RAWVolume):
     """ AFF4 Zip Volumes store segments within zip files """
     type = AFF4_ZIP_VOLUME
 
-    def writestr(self, subject, data, compress_type = ZIP_STORED):
+    def writestr(self, subject, data, compress_type = ZIP_STORED,
+                 timestamp=0):
         """ Write the filename on the archive.
 
         subject is a fully qualified name or relative to the current volume.
@@ -1287,9 +1287,9 @@ class ZipVolume(RAWVolume):
 
             ## Where should we write the new file?
             directory_offset = parse_int(oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET)) or 0
-
+            timestamp = timestamp or time.time()
             zinfo = zipfile.ZipInfo(filename = filename,
-                                    date_time=time.gmtime(time.time())[:6])
+                                    date_time= time.gmtime(int(timestamp))[:6])
 
             zinfo.external_attr = 0600 << 16L      # Unix attributes        
             zinfo.header_offset = directory_offset
@@ -1308,7 +1308,12 @@ class ZipVolume(RAWVolume):
 
             ## Write the header and data
             backing_fd.seek(directory_offset)
-            backing_fd.write(zinfo.FileHeader())
+            ## This issues a warning - im not sure what im supposed to
+            ## do about it since its in the python standard library?
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                backing_fd.write(zinfo.FileHeader())
+                
             backing_fd.write(data)
 
             ## Add this new file to the resolver

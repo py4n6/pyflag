@@ -130,9 +130,10 @@ class PyFlagSegment(PyFlagMap):
         volume = aff4.oracle.open(self.volume_urn, 'w')
         try:
             aff4.oracle.set(self.urn, AFF4_STORED, self.volume_urn)
-            aff4.oracle.set(self.urn, PYFLAG_CASE, self.case)
+            #aff4.oracle.set(self.urn, PYFLAG_CASE, self.case)
             volume.writestr(self.urn, self.buffer.getvalue(),
-                            compress_type=aff4.ZIP_DEFLATED)
+                            compress_type = aff4.ZIP_DEFLATED,
+                            timestamp = aff4.oracle.resolve(self.urn, AFF4_TIMESTAMP) or 0)
         finally:
             aff4.oracle.cache_return(volume)
         
@@ -153,6 +154,7 @@ class AFF4Manager:
         volume.close()
 
     def create_cache_data(self, case, path, data='', include_in_VFS=True,
+                          timestamp = None,
                           inherited = None,**kwargs):
         """ Creates a new AFF4 segment. A segment is useful for 
         storing small amounts of data in a single compressed file.
@@ -167,8 +169,12 @@ class AFF4Manager:
         volume_urn = self.make_volume_urn(case)
         urn = aff4.fully_qualified_name(path, volume_urn)
         fd = PyFlagSegment(case, volume_urn, urn, data)
-        
+
+        if timestamp:
+            aff4.oracle.set(fd.urn, AFF4_TIMESTAMP, timestamp)
+
         if inherited:
+            assert(type(inherited) == str)
             fd.set_inheritence(inherited)
 
         fd.finish()
@@ -180,7 +186,8 @@ class AFF4Manager:
         return fd
         
     def create_cache_fd(self, case, path, include_in_VFS=True,
-                        inherited = None,**kwargs):
+                        inherited = None, timestamp = None,
+                        **kwargs):
         """ Creates a new non-seakable AFF4 Image stream that can be
         written on.
         
@@ -196,11 +203,14 @@ class AFF4Manager:
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
 
+        if timestamp:
+            aff4.oracle.set(fd.urn, AFF4_TIMESTAMP, timestamp)
+
         if inherited:
             fd.set_inheritence(inherited)
 
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
-        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
+        #aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
 
         kwargs['path'] = path
@@ -212,7 +222,7 @@ class AFF4Manager:
         return fd
 
     def create_cache_map(self, case, path, include_in_VFS=True, size=0,
-                         target = None, inherited = None,
+                         target = None, inherited = None, timestamp = 0,
                          **kwargs):
         """ Creates a new map in the VFS.
 
@@ -236,7 +246,12 @@ class AFF4Manager:
             aff4.oracle.set(fd.urn, AFF4_TARGET, target)
             
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
-        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
+        ## If a timestamp was specified we set it - otherwise we just
+        ## take it from our inherited URN
+        if timestamp:
+            aff4.oracle.set(fd.urn, AFF4_TIMESTAMP, timestamp)
+            
+        #aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd.finish()
         
         kwargs['path'] = path
@@ -252,7 +267,7 @@ class AFF4Manager:
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(destination, volume_urn)
         aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
-        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
+#        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         aff4.oracle.set(fd.urn, AFF4_TARGET, aff4.fully_qualified_name(source, volume_urn))
         fd.finish()
         fd.close()

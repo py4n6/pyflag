@@ -24,36 +24,40 @@
 """ This module is designed to extract information from google
 searches. This is needed now as google image search is ajax based.
 """
-import Gmail
-from FileFormats.HTML import decode_entity, HTMLParser, url_unquote
+import FileFormats.HTML as HTML
 import pyflag.DB as DB
 import pyflag.pyflaglog as pyflaglog
 import re
 import pyflag.CacheManager as CacheManager
+import pyflag.Magic as Magic
+import pyflag.Scanner as Scanner
 
-class GoogleImageScanner(Gmail.GmailScanner):
+class GoogleImageSearchMagic(Magic.Magic):
+    """ Detect pages from Google image search """
+    type = "Google Image Search"
+    mime = "text/html"
+    default_score = 40
+
+    regex_rules = [
+        ("<html", (0,10)),
+        ("Google Image Search", (50,200)),
+        ('content="text/html;', (0,200))
+        ]
+
+class GoogleImageScanner(Scanner.GenScanFactory):
     """ Detect Google image searches and clean up the html """
-    
-    class Scan(Gmail.GmailScanner.Scan):
-        def boring(self, data=''):
-            ## FIXME
-            return True
-            self.get_url(metadata)
+    default = True
+    depends = ['HTTPScanner']
+    group = 'NetworkScanners'
 
-            try:
-                if metadata['host'].startswith("images.google.com"):
-                    self.parser = HTMLParser(verbose=0)
-                    return False
-            except AttributeError: pass
+    def scan(self, fd, scanners, type, mime, cookie):
+        if "Google Image Search" in type:
+            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Google image search processing" % fd.inode_id)
+            ## Parse the file
+            self.parser = HTML.HTMLParser()        
+            self.parser.feed(fd.read())
+            self.parser.close()
             
-            return True
-
-        def external_process(self, fd):
-            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Google image search processing" % self.fd.inode)
-            self.process_image_list()
-            #print self.parser.root.tree()
-
-        def process_image_list(self):
             ## Pull out all the scripts and match the regex:
             result = ''
             image_text = ''
@@ -103,27 +107,12 @@ class GoogleImageScanner(Gmail.GmailScanner):
                 page = self.parser.root.innerHTML()
                 page = page.encode("utf8","ignore")
 
-                inode_id = self.ddfs.VFSCreate(self.inode,
-                                               "xGimage",
-                                               "Gimage",
-                                               size=len(page))
+                new_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                    fd.case,
+                    "%s/Gimage" % fd.urn,
+                    page, inherited = fd.urn)
 
-                ## Update the http and http_parameters table to point
-                ## to this new Inode instead:
-                dbh = DB.DBO(self.case)
-                dbh.update('http_parameters',
-                           where = DB.expand("inode_id=%r",self.inode_id),
-                           inode_id = inode_id)
-
-                dbh.update('http',
-                           where = DB.expand("inode_id=%r",self.inode_id),
-                           inode_id = inode_id)
-
-                CacheManager.MANAGER.create_cache_from_data(self.case,
-                                                            "%s|xGimage" % self.inode,
-                                                            page,
-                                                            inode_id=inode_id)
-                
+                new_fd.close()
 
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh
@@ -133,8 +122,6 @@ class GoogleImageTests(tests.ScannerTest):
     """ Tests Google Image Scanner """
     test_case = "PyFlagTestCase"
     test_file = 'google_image.pcap'
-    subsystem = "Standard"
-    fstype = "PCAP Filesystem"
 
     def test01GmailScanner(self):
         """ Test Google Image Scanner """

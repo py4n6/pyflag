@@ -268,6 +268,6 @@ class YahooMail20Tests(tests.ScannerTest):
                              argv=["*",                   ## Inodes (All)
                                    "YahooMail20Scan", "YahooMailScan",
                                    ])                   ## List of Scanners
-    def tearDown(self):
+    def XXXtearDown(self):
         print "Closing volume"
         CacheManager.AFF4_MANAGER.close(self.test_case)

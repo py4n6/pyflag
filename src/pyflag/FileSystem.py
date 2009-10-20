@@ -990,9 +990,8 @@ class DBFS(FileSystem):
                                 mode= aff4.oracle.resolve(urn, AFF4_MODE) or 40755,
                                 inode_id = inode_id,
                                 type='file',
-                                mtime = aff4.oracle.resolve(urn, AFF4_MTIME) or \
-                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP) or \
-                                        timestamp,
+                                mtime = timestamp or aff4.oracle.resolve(urn, AFF4_MTIME) or \
+                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP),
                                 atime = aff4.oracle.resolve(urn, AFF4_ATIME) or timestamp,
                                 ctime = aff4.oracle.resolve(urn, AFF4_CTIME) or timestamp,
                                 size = aff4.oracle.resolve(urn, AFF4_SIZE) or 0,

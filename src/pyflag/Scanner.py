@@ -163,6 +163,7 @@ def scan_inode(case, inode_id, scanners, cookie, force=False):
                 c.scan(fd, scanners=scanners, type=type, mime=mime, cookie=cookie)
             except Exception,e:
                 print e
+                continue
                 pdb.post_mortem(t = sys.exc_info()[2])
     
     global MESSAGE_COUNT
