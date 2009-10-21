@@ -78,11 +78,18 @@ def gmail_unescape(string):
 
     return string
 
-class GmailScanner(LiveCom.HotmailScanner):
+class GmailScanner(Scanner.GenScanFactory):
     """ Detect Gmail web mail sessions """
-    depends = ['HotmailScanner']
-
-    class Scan(LiveCom.HotmailScanner.Scan):
+    depends = ['HTTPScanner']
+    default = True
+    group = 'NetworkScanners'
+    def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
+        if "javascript" in mime:
+            data = fd.read(1024)
+            if "top.GG_iframeFn" in data:
+                pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Gmail processing" % fd.inode_id)
+                
+    class Scan:
         parser = None
         javascript = None
         service = "Gmail"
@@ -137,8 +144,8 @@ class GmailScanner(LiveCom.HotmailScanner):
         def process_send_message(self,fd):
             ## Check to see if this is a POST request (i.e. mail is
             ## sent to the server):
-            dbh = DB.DBO(self.case)
-            dbh.execute("select `inode_id`,`key`,`value` from http_parameters where inode_id=%r", self.fd.inode_id)
+            dbh = DB.DBO(fd.case)
+            dbh.execute("select `inode_id`,`key`,`value` from http_parameters where inode_id=%r", fd.inode_id)
             query = {}
             key_map = {}
 
@@ -263,9 +270,9 @@ class GmailScanner(LiveCom.HotmailScanner):
 
                 return message_id
 
-class GoogleDocs(LiveCom.HotmailScanner):
+class GoogleDocs(Scanner.GenScanFactory):
     """ A scanner for google docs related pages """
-    class Scan(GmailScanner.Scan):
+    class Scan:
         service = "Google Docs"
         def boring(self, data=''):
             ## This string identifies this document as worth scanning
@@ -304,35 +311,6 @@ class GoogleDocs(LiveCom.HotmailScanner):
 
             if result:
                 return self.insert_message(result, "webmail")
-
-class WebmailViewer(FileSystem.StringIOFile):
-    """ A VFS Driver to view formatted webmail messages """
-    specifier = 'w'
-    size = 0
-    def read(self, length = None):
-        try:
-            return FileSystem.StringIOFile.read(self, length)
-        except IOError: pass
-
-        id = self.lookup_id()
-        dbh = DB.DBO(self.case)
-        dbh.execute("select * from webmail_messages where inode_id = %r limit 1" , id)
-        row = dbh.fetch()
-        if row:
-            self.size = len(row['message'])
-            return row['message']
-
-        return ''
-
-    def explain(self, query, result):
-        self.fd.explain(query, result)
-        id = self.lookup_id()
-        dbh = DB.DBO(self.case)
-        dbh.execute("select * from webmail_messages where inode_id = %r limit 1" , id)
-        row = dbh.fetch()
-        if row:
-            result.row("Web App", "Analyse %s transaction" % row.get('service','unknown'),
-                       **{'class': 'explainrow'})
 
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh

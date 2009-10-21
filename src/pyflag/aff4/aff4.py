@@ -1880,11 +1880,11 @@ class Map(FileLikeObject):
         offset = self.readptr
         result = self.read(size)
         try:
-            result = result[:result.index("\n")]
-            offset += len(result)+1
+            result = result[:result.index("\n")+1]
         except ValueError:
-            offset += len(result)
-
+            pass
+        
+        offset += len(result)
         self.seek(offset)
         
         return result

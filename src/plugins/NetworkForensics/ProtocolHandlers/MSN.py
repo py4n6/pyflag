@@ -101,7 +101,7 @@ class MSNScanner(Scanner.GenScanFactory):
     group = 'NetworkScanners'
     depends = ['PCAPScanner']
         
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "MSN" in type and fd.urn.endswith("forward"):
             pyflaglog.log(pyflaglog.DEBUG,"Openning %s for MSN" % fd.inode_id)
             dbfs = FileSystem.DBFS(fd.case)

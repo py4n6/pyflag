@@ -49,7 +49,7 @@ class LibMagic(Magic.Magic):
             if magic.load(LibMagic.mimemagic,config.MAGICFILE) < 0:
                 raise IOError("Could not open magic file %s" % config.MAGICFILE)
 
-    def score(self, data, case, inode_id):
+    def score(self, fd, data):
         ## The Magic library expects a byte string and does not look
         ## at encoding at all. We need to provide it a utf8 encoded
         ## string.

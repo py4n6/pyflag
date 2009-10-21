@@ -50,7 +50,7 @@ class GoogleImageScanner(Scanner.GenScanFactory):
     depends = ['HTTPScanner']
     group = 'NetworkScanners'
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "Google Image Search" in type:
             pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Google image search processing" % fd.inode_id)
             ## Parse the file

@@ -47,26 +47,27 @@ class MagicResolver:
 
             pyflaglog.log(pyflaglog.DEBUG,"Loaded %s signatures into Magic engine" % MagicResolver.count)
             
-    def get_type(self, data, case=None, inode_id=None):
-        max_score, scores = self.estimate_type(data, case, inode_id)
-        return max_score[1].type_str(), max_score[1].mime_str()
-
-    def estimate_type(self,data, case, inode_id):
+    def estimate_type(self, fd):
         """ Given the data we guess the best type determination. 
         """
         scores = {}
         max_score = [0, None]
         pending = set(self.rule_map.keys())
+
+        fd.seek(0)
+        data = fd.read(1024)
+
         
         ## Give all handlers a chance to rate the data
         for cls in self.magic_handlers:
-            scores[cls] = cls.score(data, case, inode_id)
+            scores[cls.__class__.__name__] = cls.score(fd, data)
             
             ## Maintain the higher score in the list:
-            if scores[cls] > max_score[0]:
-                max_score = [ scores[cls], cls]
+            if scores[cls.__class__.__name__] > max_score[0]:
+                max_score = [ scores[cls.__class__.__name__], cls]
 
         ## Index the data using the indexer:
+        ## Get some data to match in our rules
         for offset, matches in self.indexer.index_buffer(data, unique=0):
             for match in matches:
                 ## match is (rule_id, offset, length)
@@ -81,14 +82,14 @@ class MagicResolver:
                 try:
                     rng = rule[1]
                     if offset >= rng[0] and offset <= rng[1]:
-                        scores[cls] += cls.score_hit(data, match, pending)
+                        scores[cls.__class__.__name__] += cls.score_hit(data, match, pending)
                 except IndexError:
                     if offset == rule[1]:
-                        scores[cls] += cls.score_hit(data, match, pending)
+                        scores[cls.__class__.__name__] += cls.score_hit(data, match, pending)
             
                 ## Maintain the higher score in the list:
-                if scores[cls] > max_score[0]:
-                    max_score = [ scores[cls], cls]
+                if scores[cls.__class__.__name__] > max_score[0]:
+                    max_score = [ scores[cls.__class__.__name__], cls]
 
                 ## When one of the scores is big enough we quit:
                 if max_score[0] >= 100:
@@ -96,17 +97,15 @@ class MagicResolver:
 
             if max_score[0] >= 100:
                 break
-
             
         ## Return the highest score:
         return max_score, scores
 
-    def find_inode_magic(self, case, inode_id=None, urn=None, data=None):
+    def find_inode_magic(self, case, inode_id=None, urn=None):
         """ A convenience function to resolve an inode's magic.
 
         We check the db cache first.
         """
-        dbh = DB.DBO(case)
         if urn:
             import pyflag.aff4.aff4 as aff4
             
@@ -115,41 +114,13 @@ class MagicResolver:
                 raise IOError("Unknown URN %s" % urn)
             
         ## Is it already in the type table?
-        try:
-            dbh.execute("select mime,type from type where inode_id=%r limit 1",inode_id)
-            row = dbh.fetch()
-            content_type = row['mime']
-            type = row['type']
-        except (DB.DBError,TypeError):
-            if not data:
-                import pyflag.FileSystem as FileSystem
+        import pyflag.FileSystem as FileSystem
 
-                fsfd = FileSystem.DBFS(case)
-                fd = fsfd.open(inode_id = inode_id)
-                ## We could not find it in the mime table - lets do magic
-                ## ourselves:
-                data = fd.read(1024)
-                fd.seek(0)
-                
-            type, content_type = self.cache_type(case, inode_id, data)
-
-        return type, content_type
-
-    def cache_type(self, case, inode_id, data):
-        """ Performs a type lookup of data and caches it in the inode_id """
-        dbh = DB.DBO(case)
-        type, content_type = self.get_type(data, case, inode_id)
-
-        ## Store it in the db for next time:
-        try:
-            dbh.insert("type",
-                       inode_id = inode_id,
-                       mime = content_type,
-                       type = type)
-        except Exception,e:
-            pass
-            
-        return type, content_type
+        fsfd = FileSystem.DBFS(case)
+        fd = fsfd.open(inode_id = inode_id)
+        max_score, scores = self.estimate_type(fd)
+        
+        return max_score[1].type_str(), max_score[1].mime_str(), scores
 
 def set_magic(case, inode_id, magic, mime=None):
     """ Set the magic string on the inode """
@@ -186,7 +157,7 @@ class Magic:
     def mime_str(self):
         return self.mime
     
-    def score(self, data, case, inode_id):
+    def score(self, fd, data):
         """ This is called on each class asking them to score the data """
         return 0
 

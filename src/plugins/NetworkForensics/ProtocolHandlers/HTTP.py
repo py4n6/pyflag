@@ -60,7 +60,7 @@ class HTTPScanner(Scanner.GenScanFactory):
     group = 'NetworkScanners'
     depends = [ 'PCAPScanner' ]
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "HTTP Request stream" in type:
             forward_fd = fd
             reverse_urn = fd[PYFLAG_REVERSE_STREAM]
@@ -246,24 +246,33 @@ class HTTPScanner(Scanner.GenScanFactory):
         """ All parameters are attached to target """
         ## Non printable keys are probably not keys at all.
         if re.match("[^a-z0-9A-Z_]+",key): return
-        try:
-            value = value.value
-        except: pass
 
         ## Deal with potentially very large uploads:
         if hasattr(value,'filename') and value.filename:
             new_urn = target.urn + "/" + value.filename
             
             ## dump the file to the AFF4 volume
-            fd = CacheManager.AFF4_MANAGER.create_cache_fd(fd.case, new_urn,
+            fd = CacheManager.AFF4_MANAGER.create_cache_fd(target.case, new_urn,
                                                            inherited = target.urn)
-            fd.write(value.value)
+            ## More efficient copying:
+            while 1:
+                data = value.file.read(1024*1024)
+                if not data: break
+                
+                fd.write(data)
+            
+            ## We store the urn of the dumped file in place of the value
+            value = fd.urn
             fd.close()
         else:
-            target.insert_to_table('http_parameters',
-                                   dict(key = key,
-                                        value = value))
-            target.dirty = 1
+            try:
+                value = value.value
+            except: pass
+            
+        target.insert_to_table('http_parameters',
+                               dict(key = key,
+                                    value = value))
+        target.dirty = 1
 
     def process_post_body(self, request, request_body, target):        
         try:
@@ -274,25 +283,23 @@ class HTTPScanner(Scanner.GenScanFactory):
         except KeyError:
             return
 
+        request_body.seek(0)
         env = dict(REQUEST_METHOD=request['method'],
                    CONTENT_TYPE=request.get('content-type',''),
                    CONTENT_LENGTH=request_body.size,
                    REQUEST_BODY=request_body.urn,
                    QUERY_STRING=query)
         
-        result =cgi.FieldStorage(environ = env, fp = request_body)
+        result = cgi.FieldStorage(environ = env, fp = request_body)
         self.count = 1
-        if type(result.value)==str:
-            class dummy:
-                value = result.value
-                filename = "body"
+        
+        if type(result.value) == str:
+            result = {str(result.name): result}
+            
+        for key in result:
+            self.process_parameter(key, result[key], target)
 
-            self.process_parameter("body", dummy(), target)
-        else:
-            for key in result:
-                self.process_parameter(key, result[key], target)
-
-            self.process_parameter("request_urn", request_body.urn, target)
+        self.process_parameter("request_urn", request_body.urn, target)
                 
     def parse(self, forward_fd, reverse_fd, scanners):
         while True:
@@ -456,16 +463,15 @@ HTTP/1.1 301 Moved Permanently
 class HTTPMagic(Magic.Magic):
     """ HTTP Objects have content types within the protocol. These may be wrong though so we need to treat them carefully.
     """
-    def score(self, data, case, inode_id):
-        if case:
-            dbh = DB.DBO(case)
-            dbh.execute("select content_type from http where inode_id = %r", inode_id)
-            row = dbh.fetch()
-            if row:
-                self.type = "HTTP %s" % row['content_type']
-                self.mime = row['content_type']
-                return 40
-
+    def score(self, fd, data):
+        dbh = DB.DBO(fd.case)
+        dbh.execute("select content_type from http where inode_id = %r", fd.inode_id)
+        row = dbh.fetch()
+        if row:
+            self.type = "HTTP %s" % row['content_type']
+            self.mime = row['content_type']
+            return 40
+        
         return 0
 
 class HTTPTLDRequests(Reports.PreCannedCaseTableReports):

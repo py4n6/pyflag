@@ -208,7 +208,7 @@ class PCAPScanner(GenScanFactory):
     automatically. Note that this code creates map streams for
     forward, reverse and combined streams.
     """
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "PCAP" not in type: return
 
         urn_dispatcher = {1: fd.urn}

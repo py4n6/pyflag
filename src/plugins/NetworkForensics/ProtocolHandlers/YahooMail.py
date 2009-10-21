@@ -75,7 +75,7 @@ class YahooMail20Scan(LiveCom.HotmailScanner):
         message = result.get('message','')
         return message
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "Yahoo Mail AJAX" in type:        
             self.parser =  HTML.HTMLParser(verbose=0)
             pyflaglog.log(pyflaglog.DEBUG,"Opening %s for YahooMail2.0 processing" %

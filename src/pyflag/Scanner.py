@@ -154,16 +154,16 @@ def scan_inode(case, inode_id, scanners, cookie, force=False):
     ## The new scanning framework is much simpler - we just call the
     ## scan() method on each factory.
     m = Magic.MagicResolver()
-    type, mime = m.find_inode_magic(case, fd.inode_id)
+    type, mime, scores = m.find_inode_magic(case, fd.inode_id)
 
     for c in get_factories(scanners):
         if c.__class__.__name__ not in scanners_run:
             fd.seek(0)
             try:
-                c.scan(fd, scanners=scanners, type=type, mime=mime, cookie=cookie)
+                c.scan(fd, scanners=scanners, type=type, mime=mime, cookie=cookie, scores=scores)
             except Exception,e:
                 print e
-                continue
+                #continue
                 pdb.post_mortem(t = sys.exc_info()[2])
     
     global MESSAGE_COUNT

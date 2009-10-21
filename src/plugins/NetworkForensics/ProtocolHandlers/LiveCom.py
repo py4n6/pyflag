@@ -356,7 +356,7 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return self.parser.root.innerHTML()
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "HTML" in type:
             data = fd.read(1024)
             if not re.search("<title>\s+Windows Live", data): return
@@ -535,7 +535,7 @@ class Live20Scanner(HotmailScanner):
     """ Parse Hotmail Web 2.0 Session """
     service = "Hotmail 2.0 AJAX"
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "Hotmail 2.0 AJAX" in type:
             pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Hotmail AJAX processing" % fd.inode_id)
             js_parser = Javascript.JSParser()
