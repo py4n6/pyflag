@@ -105,7 +105,7 @@ class Lexer:
                 m = regex.match(self.buffer)
                 if m:
                     if self.verbose > 3:
-                        print "%s matched %s" % (re_str, m.group(0))
+                        print "%s matched %s" % (re_str, m.group(0).encode("utf8"))
                     ## The match consumes the data off the buffer (the
                     ## handler can put it back if it likes)
                     self.processed_buffer += self.buffer[:m.end()]
@@ -182,6 +182,14 @@ class Lexer:
     def close(self):
         """ Just a conveniece function to force us to parse all the data """
         while self.next_token(): pass
+
+    def parse_fd(self, fd):
+        while 1:
+            data = fd.read(10240)
+            if not data: break
+            
+            self.feed(data)
+            while self.next_token(): pass
 
 class SelfFeederMixIn(Lexer):
     """ This mixin is used to make a lexer which feeds itself one

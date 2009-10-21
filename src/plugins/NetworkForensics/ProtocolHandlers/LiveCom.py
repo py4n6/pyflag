@@ -88,7 +88,8 @@ import pyflag.Registry as Registry
 import pyflag.Graph as Graph
 import pyflag.Time as Time
 import pyflag.CacheManager as CacheManager
-
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 
 Live20Style = """.SortSearchContainer{z-index:3;background-color:#BBD8FB;background-position:left bottom;background-repeat:repeat-x;height:2.15em;}
 .Managed .SortSearchContainer{position:absolute;top:0px;left:0em;right:0em;}
@@ -272,28 +273,31 @@ class HTMLStringType(StringType):
 
 	result.text(value, wrap='full', font='typewriter')
 
+class MessageTags(HTML.ResolvingHTMLTag):
+    body_extra = ''
+
 class MessageColumn(AFF4URN):
     """ Displays the attachments related to the webmail message """
+    def sanitize_data(self, data, value, result):
+        parser = HTML.HTMLParser(tag_class = \
+                                 FlagFramework.Curry(MessageTags,
+                                                     case = self.case,
+                                                     inode_id = value))
+        parser.feed(data)
+        parser.close()
+
+        value = parser.root.innerHTML()
+        result.raw(value)
+        
     def display(self, value, row, result):
         dbh = DB.DBO(self.case)        
         dbfs=FileSystem.DBFS(self.case)
-        path = dbfs.lookup(inode_id = value)
+        fd = dbfs.open(inode_id = value)
 
-        ## Parts have a URN which is in the VFS under the message's
-        ## URN - this is equivalent to doing an ls of the message URN
-        dbh.execute("select * from vfs where path = %r", path)
-        for row in dbh:
-            fd = dbfs.open(inode_id=row['inode_id'])
-            data = fd.read()
-            parser = HTML.HTMLParser(tag_class = \
-                                     FlagFramework.Curry(HTML.ResolvingHTMLTag,
-                                                         case = self.case,
-                                                         inode_id = value))
-            parser.feed(data)
-            parser.close()
-            
-            value = parser.root.innerHTML()
-            result.raw(value)
+        self.sanitize_data(fd.read(fd.size), value, result)
+        for part_urn in aff4.oracle.resolve_list(fd.urn, AFF4_CONTAINS):
+            part_fd = dbfs.open(urn = part_urn)
+            self.sanitize_data(part_fd.read(part_fd.size), part_fd.inode_id, result)
         
         return result
 

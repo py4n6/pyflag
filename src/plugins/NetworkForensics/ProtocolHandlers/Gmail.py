@@ -23,13 +23,57 @@
 # ******************************************************
 """ This module is designed to extract information from gmail traffic.
 
-This is similar but slightly different to the module implemented in
-LiveCom. This protocol is a little more complicated because messages
-are sent back in a json stream via ajax, rather than simple html.
+Basically gmail traffic is sent via javascript objects. The code is
+evaluated dynamically so the data structures are not known. Its not
+really valid JSON either. Previously we used an eval to try to parse
+it but this has lots of problems especially when the data is corrupted
+or truncated. We really needed a very forgiving parser to gloss over
+data problems.
+
+The way its implemented now is using the PyFlag Javascript
+parser. This parser basically generates a DOM with javascript objects
+(similar to an AST). We can then use regular DOM manipulation
+algorithms to find what we need.
+
+The following documents some of the protocol commands that I have seen:
+
+Labels or mail boxes are marked with ^ e.g. ^i = inbox, ^all = all boxes
+
+la - last activity:
+    ['la', time, Access type. N = browser, IP address, ?, ?, ?,
+     Timestamp, Last IP address, how long ago]
+
+v - gmail version:
+     ['v', major version. lang, minor version, hash]
+
+ct - contact:
+     ['ct' , proper name, email address, ?, ?]
+
+ms - Message stream - this one is really complex:
+     [ 'ms', unique message id, ?, ?, From name and email, from name, from email,
+       sent time in ms, summary message, [list of labels], ?, Title,
+       [ message_id,
+           [ List of to receipients ], [ List of cc receipients], [ bcc receipients], ?,
+           title,
+           message, [ [ ## Now follows a list of attachments
+                [ attachement_id, filename, content_type, size in bytes,
+                  real attachement_id (this will be generated when posted eg - f_fas6ipsc0)
+                  A placeholder image, content_type of placeholder,
+                  link to thread attachement,
+                  link to download attachement,
+                  link to inline attachement (thumbnail),
+                ] ] ]
+           ?, ?
+       ]
+     ]
+
+me - User's mail box:
+      [ 'me', email address ]
+     
 """
 import pyflag.FlagFramework as FlagFramework
 from pyflag.ColumnTypes import StringType, TimestampType, IntegerType, PacketType, guess_date
-from FileFormats.HTML import decode_entity, HTMLParser
+import FileFormats.urlnorm as urlnorm
 import pyflag.DB as DB
 import pyflag.Scanner as Scanner
 import pyflag.Reports as Reports
@@ -38,56 +82,139 @@ import re, urllib
 import pyflag.pyflaglog as pyflaglog
 import pyflag.Time as Time
 import LiveCom
+import pdb
+import FileFormats.Javascript as Javascript
+import pyflag.Magic as Magic
+import pyflag.CacheManager as CacheManager
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.aff4_attributes import *
 
-def parse_json(string):
-    """ This function attempts to parse the json stream returned by the gmail server.
+class GmailStreamMagic(Magic.Magic):
+    """ Detect Gmail emails """
+    type = "Gmail Stream"
+    mime = "protocol/x-google-ajax"
+    default_score = 20
 
-    This is a little tricky because the gmail application itself uses
-    javascript to eval it, with a couple of internal functions of its
-    own. We try to eval the stream using python too, but there are
-    some subtle differences between the javascript syntax and the
-    python syntax which we need to massage.
-
-    This should not expose a security vulnerability because we provide
-    both local and global dictionaries.
-    """
-    def _A(x='',*args):
-        """ Not really sure what this function is used for, we just
-        return our first element
-        """
-        return x
-
-    ## First we need to tweak the data to avoid some subtle syntax
-    ## differnces: Javascript allows empty array elements to be
-    ## omitted (as in [1,,,2])
-    string = re.sub("(?<=,),","'',",string)
-
-    result = eval(string, {"_A": _A}, {})
-    return result
-
-def gmail_unescape(string):
-    """ We find gmail strings to be escaped in an unusual way. This
-    function reverses it
-    """
-    string = string.replace(r"\'","'")
-    string = string.replace(r'\"','"')
-    string = re.sub(r"\\u(....)",lambda m: chr(int(m.group(1),16)), string)
-    string = re.sub(r"\\>",">", string)
-    string = re.sub(r"&#([^;]+);",lambda m: chr(int(m.group(1),10)), string)
-    string = urllib.unquote(string)
-
-    return string
+    regex_rules = [
+        ( "while(1);", (0,0)),
+        ]
 
 class GmailScanner(Scanner.GenScanFactory):
     """ Detect Gmail web mail sessions """
     depends = ['HTTPScanner']
     default = True
     group = 'NetworkScanners'
+    service = "Gmail"
+    url = None
+
+    def make_link_from_query(self, fd, query):
+        if not self.url:
+            dbh = DB.DBO(fd.case)
+            dbh.execute("select url from http where inode_id = %r limit 1", fd.inode_id)
+            row = dbh.fetch()
+            self.url = row['url'] or '?'
+            try:
+                self.url = self.url.split('?')[0]
+            except IndexError: pass
+
+        ## Normalise the url now
+        url = "%s%s" % (self.url, query)
+        
+        return urlnorm.normalize(url)
+        
+    def ms(self, fd, root):
+        """ This is the main message parsing command """
+        result = dict(message_id = root[1],
+                      From = root[4], type="Read",
+                      service = self.service,
+                      _sent = "from_unixtime(%d)" % (root[7]/1000))
+
+        message_urn = "/Webmail/%s/%s" % (self.service,
+                                          str(result['message_id']).replace("/","_"))
+        
+        ## Make sure we dont have duplicates of the same message -
+        ## duplicates may occur in other connections, so we check
+        ## the webmail table for the same yahoo message id
+        fsfd = FileSystem.DBFS(fd.case)
+        try:
+            if fsfd.lookup(path = message_urn):
+                return
+        except RuntimeError:
+            pass
+
+        message = root[12]
+        result['To'] = ','.join([str(x) for x in message[1]])
+        result['CC'] = ','.join([str(x) for x in message[2]])
+        result['BCC'] = ','.join([str(x) for x in message[3]])
+        result['subject'] = message[5]
+        
+        message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+            fd.case, message_urn, data = message[6],
+            inherited = fd.urn)
+
+        message_fd.insert_to_table("webmail_messages",
+                                   result)
+
+        message_fd.close()
+
+        ## Now the attachments:
+        for part in message[7][0]:
+            part_urn = "%s/%s" % (message_urn, part[1] or part[0])
+            
+            data = "<html><body><table><tr><td><a href='%s'>"\
+                   "<img src='%s' /></a></td><td>%s (%s)</td></tr>"\
+                   "</table></body></html>" % (
+                self.make_link_from_query(fd, part[8]),
+                self.make_link_from_query(fd, part[7]),
+                part[1], part[3],
+                )
+
+            ## Note that parts are not inserted into the VFS so they
+            ## are in effect "hidden" from the tables, and VFS
+            ## browsing.
+            part_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+                fd.case, part_urn,
+                inherited = message_fd.urn, include_in_VFS=False,
+                data = data)
+
+            part_fd.close()
+            ## This link allows the GUI to associate the parts with
+            ## the main message.
+            aff4.oracle.add(message_fd.urn, AFF4_CONTAINS, part_fd.urn)
+
+    def version(self, fd, root):
+        ## FIXME - ideally we would like to have a templating system
+        ## where we can derive the different object offsets based on
+        ## the version.
+        print "Gmail Version %s" % root[1]
+        
+    def __init__(self):
+        self.dispatcher = {'ms': self.ms,
+                           'v': self.version}
+    
     def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
-        if "javascript" in mime:
-            data = fd.read(1024)
-            if "top.GG_iframeFn" in data:
-                pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Gmail processing" % fd.inode_id)
+        if "javascript" in mime and scores.get('GmailStreamMagic',0) > 0:
+            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Gmail processing" % fd.inode_id)
+
+            ## Make a new parser
+            j=Javascript.JSParser()
+            j.parse_fd(fd)
+            j.close()
+
+            ## gmail stream consist of arrays. The first element of
+            ## the array is the command name, then the rest of the
+            ## array is the args for that command. We look for
+            ## commands which we support (much of the commands are not
+            ## relevant), and pass the entire array up to the handler.
+            for x in j.root.search("Array"):
+                try:
+                    command = x.children[0]
+                    assert command.name == 'string'
+                    command = command.innerHTML()
+                except: continue
+
+                if command in self.dispatcher:
+                    self.dispatcher[command](fd, x)
                 
     class Scan:
         parser = None
@@ -319,7 +446,7 @@ import pyflag.tests as tests
 class GmailTests(tests.ScannerTest):
     """ Tests Gmail Scanner """
     test_case = "PyFlagTestCase1"
-    test_file = 'gmail.com.pcap.e01'
+    test_file = 'gmail.com2.pcap'
     subsystem = "EWF"
     fstype = "PCAP Filesystem"
 

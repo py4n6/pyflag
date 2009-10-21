@@ -83,7 +83,7 @@ class ViewFile(Reports.report):
             if query['hint']: content_type=query['hint']
         except KeyError:      
             m = Magic.MagicResolver()
-            type, content_type = m.find_inode_magic(self.case, inode_id)
+            type, content_type, scores = m.find_inode_magic(self.case, inode_id)
 
         return type, content_type
     

@@ -57,8 +57,18 @@ def urn_insert_to_table(urn, table, props):
         del props['inode_id']
     except: pass
 
+    ## Flatten out the props dictionary
+    result = {}
+    for k,v in props.items():
+        if type(v)==unicode:
+            v = v.encode("utf8",'ignore')
+        else:
+            v = str(v)
+
+        result[k] = v
+
     aff4.oracle.add(urn, "%s%s" % (PYFLAG_NS, table),
-                    cPickle.dumps(props,protocol=2).encode("string_escape"))
+                    cPickle.dumps(result,protocol=2).encode("string_escape"))
 
 class PyFlagMap(aff4.Map):
     include_in_VFS = None
@@ -105,6 +115,8 @@ class PyFlagImage(aff4.Image, PyFlagMap):
 
 class PyFlagSegment(PyFlagMap):
     def __init__(self, case, volume_urn, segment_urn, data=''):
+        data = str(data)
+        
         self.urn = segment_urn
         self.buffer = cStringIO.StringIO()
         self.buffer.write(data)

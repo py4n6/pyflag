@@ -142,6 +142,9 @@ class Tag:
             self.children[-1] += child
         except (IndexError, TypeError):
             self.children.append(child)
+            try:
+                child.parent = self
+            except AttributeError: pass
 
     def prune(self):
         """ Remove all children of this node """

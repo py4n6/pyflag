@@ -22,6 +22,20 @@
 
 import lexer, HTML, re, sys, pdb
 
+class JSTag(HTML.Tag):
+    def __str__(self):
+        if self.name == 'string':
+            return ''.join([x.encode("utf8") for x in self.children])
+        else:
+            return HTML.Tag.__str__(self)
+
+    def __getitem__(self, item):
+        return self.children[item]
+
+    def __iter__(self):
+        for i in self.children:
+            yield i
+
 class JSParser(lexer.Lexer):
     state = "GLOBAL"
     flags = re.I
@@ -31,10 +45,12 @@ class JSParser(lexer.Lexer):
 
     tokens = [
         ## String handling
-        [ "STRING", '"', "POP_STATE,FUNCTION_END", None],
+        [ "STRING_DQ", '"', "POP_STATE,FUNCTION_END", None],
+        [ "STRING_SQ", "'", "POP_STATE,FUNCTION_END", None],
         [ "STRING", r"\\u(....)", "STRING_UNICODE_ESCAPE", None],
         [ "STRING", r"\\.", "STRING_ESCAPE", None],
-        [ "STRING", r"[^\"\\]+", "STRING_ADD", None],
+        [ "STRING_DQ", r"[^\"\\]+", "STRING_ADD", None],
+        [ "STRING_SQ", r"[^\'\\]+", "STRING_ADD", None],
 
         ## Function and array handling
         [ ".", ",", "NEXT_ARG", None],
@@ -45,7 +61,8 @@ class JSParser(lexer.Lexer):
         [ ".", r"([a-zA-Z0-9.]+)\s*\(", "PUSH_STATE,FUNCTION", "FUNCTION" ],
         [ '.', '[a-zA-Z]+', "VARIABLE", None],
         [ ".", "[0-9]+", "INTEGER", None],
-        [ ".", '"', "PUSH_STATE,STRING_START", "STRING"],
+        [ ".", '"', "PUSH_STATE,STRING_START", "STRING_DQ"],
+        [ ".", "'", "PUSH_STATE,STRING_START", "STRING_SQ"],
         [ ".", r"\[", "PUSH_STATE,ARRAY_START", "ARRAY"],
         [ ".", r"\]", "POP_STATE,FUNCTION_END", "ARRAY"],
 
@@ -57,17 +74,17 @@ class JSParser(lexer.Lexer):
     def __init__(self, verbose=0):
         ## This is the root element - everything else will be attached
         ## to this:
-        self.root = HTML.Tag(name='root', charset='utf8')
+        self.root = JSTag(name='root', charset='utf8')
         self.stack = [self.root]
         lexer.Lexer.__init__(self, verbose)
 
     def FUNCTION(self, t, m):
-        t = HTML.Tag(name="function", attributes=dict(name=m.group(1)))
+        t = JSTag(name="function", attributes=dict(name=m.group(1)))
         self.stack[-1].add_child(t)
         self.stack.append(t)
 
     def ARRAY_START(self, t, m):
-        t = HTML.Tag(name="Array")
+        t = JSTag(name="Array")
         self.stack[-1].add_child(t)
         self.stack.append(t)
 
@@ -92,17 +109,20 @@ class JSParser(lexer.Lexer):
         self.current = None
 
     def VARIABLE(self, t, m):
-        t = HTML.Tag(name = "variable", attributes=dict(name=m.group(0)))
+        t = JSTag(name = "variable", attributes=dict(name=m.group(0)))
         self.current = t
 
     def STRING_START(self, t, m):
-        t = HTML.Tag(name = "string")
+        t = JSTag(name = "string")
         self.stack[-1].add_child(t)
         self.stack.append(t)
         self.current = u''
 
     def STRING_ADD(self, t, m):
-        self.current += m.group(0)
+        try:
+            self.current += m.group(0).decode("utf8","ignore")
+        except:
+            self.current += m.group(0)
 
     def parse_string(self, string):
         self.feed(string)
@@ -110,10 +130,9 @@ class JSParser(lexer.Lexer):
 
 if __name__=='__main__':
     try:
-        parser = JSParser(verbose = 10)
+        parser = JSParser(verbose = 0)
         parser.parse_string(open(sys.argv[1]).read().decode("utf8"))
         
         print parser.root.innerHTML().encode("utf8")
     except:
-        raise
         pdb.post_mortem()

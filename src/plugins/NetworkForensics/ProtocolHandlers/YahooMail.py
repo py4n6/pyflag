@@ -65,16 +65,6 @@ class YahooMail20Scan(LiveCom.HotmailScanner):
     """ A Scanner for Yahoo Mail 2.0 (AJAX) """
     service = "YahooMail AJAX"
 
-    def fixup_page(self, result, tag_class):
-        """ Its not really possible to represent AJAX communications
-        properly, so we just write the message here.
-
-        FIXME - It may be possible to render the page by inserting the
-        message into a template created by other pages.
-        """
-        message = result.get('message','')
-        return message
-
     def scan(self, fd, scanners, type, mime, cookie, **args):
         if "Yahoo Mail AJAX" in type:        
             self.parser =  HTML.HTMLParser(verbose=0)
@@ -211,19 +201,17 @@ class YahooMail20Scan(LiveCom.HotmailScanner):
                               ('to','To')]:
                 result[field] = self.parse_email_address(message, tag)
 
-            ## now iterate over all the parts:
             message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
                 fd.case, message_urn, 
                 inherited = fd.urn)
             
             message_fd.insert_to_table("webmail_messages",
                                        result)
-
             message_fd.close()
             
+            ## now iterate over all the parts:            
             for part in message.search("part"):
-                #pdb.set_trace()
-                ## Parts basically message attachments.
+                ## Parts are basically message attachments.
                 ct = part.attributes['type']
                 part_number = part.attributes['partid']
                 part_urn = "/".join((message_urn, part_number))
