@@ -1,0 +1,16 @@
+## This is a little note for me to keep track of performance.
+## All tests were made using --workers=3 on a dual core laptop. Tests
+## ran several times until the disk cache was primed.
+
+rm *tdb; python utilities/Tester.py --uploaddir /var/tmp/uploads/testimages/ -f Live
+Ran 1 test in 26.99s
+Serializing 1.206 sec
+
+Ran 1 test in 14.428s
+Volume closed in 1.27537703514
+
+rm *tdb; python utilities/Tester.py --uploaddir /var/tmp/uploads/testimages/ -f YahooMail
+Ran 1 test in 14.179s
+
+
+

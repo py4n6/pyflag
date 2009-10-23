@@ -16,7 +16,7 @@ level interface itself. Its possible to achieve everything with the
 low level API alone.
 """
 import uuid, posixpath, hashlib, base64, bisect
-import urllib, os, re, struct, zlib, time, sys
+import urllib, os, re, struct, zlib, time, sys, urlparse
 import StringIO
 import threading, mutex
 import pdb
@@ -431,20 +431,36 @@ class FileBackedObject(FileLikeObject):
     """ A FileBackedObject is a stream which reads and writes physical
     files on disk.
 
-    The file:// URL scheme is used.
+    The file:// URL scheme is used. Note that files are opened
+    according to the search path specified in the environment variable
+    AFF4_FILEPATH which needs to be a : seperated list of paths.
+
+    Note that new files will always be created in the path of the
+    first element.
     """
+    def search_path(self, filename):
+        """ Tries to open the filename according to the search path.
+
+        Returns an open filehandle or NoneObject.
+        """
+        paths = os.environ.get("AFF4_FILEPATH",".").split(":")
+        for p in paths:
+            try:
+                return open("%s/%s" % (p, filename), 'rb')
+            except IOError: pass
+    
     def __init__(self, uri, mode):
-        filename = uri
-        if not uri.startswith("file://"):
-            filename = oracle.resolve(uri, AFF4_STORED)
-
-        if not filename.startswith("file://"):
-            Raise("You must have a fully qualified urn here, not %s" % filename)
-
-        filename = filename[len("file://"):]
-        escaped = escape_filename(filename)
+        ## Parse the uri
+        p = urlparse.urlparse(uri)
+        
+        ## Prepare the filename to be suitable for a filesystem by
+        ## escaping all unsuitable characters
+        escaped = escape_filename(p.path or "/")
         if mode == 'r':
-            self.fd = open(escaped, 'rb')
+            self.fd = self.search_path(escaped)
+            if not self.fd:
+                raise IOError("Unable to find URN %s" % uri)
+            
             self.fd.seek(0,2)
             self.size = self.fd.tell()
             self.fd.seek(0)
@@ -454,10 +470,12 @@ class FileBackedObject(FileLikeObject):
             except Exception,e:
                 pass
 
+            path = os.environ.get("AFF4_FILEPATH",".").split(':')[0]
+            path = "%s/%s" % (path,escaped)
             try:
-                self.fd = open(escaped, 'r+b')
+                self.fd = open(path, 'r+b')
             except:
-                self.fd = open(escaped, 'w+b')
+                self.fd = open(path, 'w+b')
                 
         AFFObject.__init__(self, uri, mode)
 
@@ -815,19 +833,7 @@ class Resolver:
         """
         result = None
 
-        #if uri.startswith(FQN) and \
-        #       not self.resolve(uri, AFF4_TYPE):
-        #    pdb.set_trace()
-        #    Raise("Trying to open a non existant or already closed object %s" % uri)
-
-        ## If the uri is not complete here we guess its a file://
-        #if ":" not in uri:
-        #    uri = "file://%s" % uri
-
-        ## Check for links
-        #if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
-        #    uri = oracle.resolve(uri, AFF4_TARGET)
-
+        ## Is it in the cache?
         try:
             if mode =='r':
                 result = self.read_cache[uri]
@@ -837,35 +843,38 @@ class Resolver:
             pass
 
         if not result:
-            ## Do we know what type it is?
-            type = self.resolve(uri, AFF4_TYPE)
-            if type:
-                for scheme, prefix, handler in DISPATCH:
-                    if prefix == type:
-                        result = handler(uri, mode)
-                        result.mode = mode
-                        break
+            ## Parse out the uri
+            p = urlparse.urlparse(uri)
+
+            ## Now we need to find the handler for this URI
+            ## If the scheme is specified we take the handler from the SCHEME_DISPATCH
+            try:
+                handler = SCHEME_DISPATCH[p.scheme or 'file']
+            except KeyError:
+                ## Ok we look for the type of the URN
+                type = self.resolve(uri, AFF4_TYPE)
+                try:
+                    handler = TYPE_DISPATCH[type]
+                except KeyError:
+                    ## We dont know how to open it.
+                    return NoneObject("Dont know how to handle URN %s. (type %s)" % (uri, type))
+
+            ## Now instantiate the object
+            result = handler(uri, mode)
+            result.mode = mode
 
         if not result:
-            ## find the handler according to the scheme:
-            for scheme, prefix, handler in DISPATCH:
-                if scheme and uri.startswith(prefix):
-                    result = handler(uri, mode)
-                    result.mode = mode
-                    break
+            raise IOError("Unable to open URN %s for %s" % (uri, mode))
 
-        if result:
-            self.lock(uri, mode)
+        ## Lock it
+        self.lock(uri, mode)
             
-            ## Try to seek it to the start
-            try:
-                result.seek(0)
-            except: pass
-            
-            return result
-
-        ## We dont know how to open it.
-        return NoneObject("Dont know how to handle URN %s. (type %s)" % (uri, type))
+        ## Try to seek it to the start
+        try:
+            result.seek(0)
+        except: pass
+        
+        return result
 
     def lock(self, uri, mode='r'):
         ## Obtain a lock on the object
@@ -2473,26 +2482,25 @@ class ErrorStream(FileLikeObject):
 
         raise IOError("Invalid read of %s" % self.urn)
         
-## This is a dispatch table for all handlers of a URL method. The
-## format is scheme, URI prefix, handler class.
-DISPATCH = [
-    [ 1, "file://", FileBackedObject ],
-    [ 1, "http://", HTTPObject ],
-    [ 1, "https://", HTTPObject ],
-    [ 0, AFF4_SEGMENT, ZipFileStream ],
-    [ 0, AFF4_LINK, Link ],
-    [ 0, AFF4_IMAGE, Image ],
-    [ 0, AFF4_MAP, Map ],
-    [ 0, AFF4_ENCRYTED, Encrypted ],
-    [ 0, AFF4_IDENTITY, Identity],
-    [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
-    [ 0, AFF4_ERROR_STREAM, ErrorStream],
-    [ 0, AFF4_EWF_STREAM, EWFStream],
-    [ 0, AFF4_EWF_VOLUME, EWFVolume],
-    [ 0, AFF4_AFF1_STREAM, AFF1Stream],
-    [ 0, AFF4_RAW_STREAM, FileBackedObject],
-    ]
+## These are dispatch tables for all handlers of a URL method.
+SCHEME_DISPATCH = dict(file = FileBackedObject,
+                       http = HTTPObject,
+                       https = HTTPObject)
 
+TYPE_DISPATCH = {
+    AFF4_SEGMENT: ZipFileStream,
+    AFF4_LINK: Link,
+    AFF4_IMAGE: Image,
+    AFF4_MAP: Map,
+    AFF4_ENCRYTED: Encrypted,
+    AFF4_IDENTITY: Identity,
+    AFF4_ZIP_VOLUME: ZipVolume,
+    AFF4_ERROR_STREAM: ErrorStream,
+    AFF4_EWF_STREAM: EWFStream,
+    AFF4_EWF_VOLUME: EWFVolume,
+    AFF4_AFF1_STREAM: AFF1Stream,
+    AFF4_RAW_STREAM: FileBackedObject,
+    }
 
 ### Following is the high level API. See specific documentation on using these.
 

@@ -76,7 +76,7 @@ class GenScanFactory:
     ## Relative order of scanners - Higher numbers come later in the order
     order=10
 
-    def scan(self, fd, scanners, type, mime, cookie):
+    def scan(self, fd, scanners, type, mime, cookie, scores=None):
         """ This is the new scan method - scanners just implement this
         method and go from there.
 

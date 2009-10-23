@@ -35,6 +35,10 @@ import time
 PYFLAG_NS = "urn:pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
+## Make sure the aff4 subsystem can only load files from the upload
+## dir:
+os.environ['AFF4_FILEPATH'] = "%s:%s" % (config.RESULTDIR, config.UPLOADDIR)
+
 ## Ensure that it does not get exported.
 
 ## These are the supported streams
@@ -73,10 +77,10 @@ class LoadAFF4Volume(Reports.report):
 
         loaded_volumes = []
         
-        for f in filenames:
+        for filename in filenames:
             ## Filenames are always specified relative to the upload
             ## directory
-            filename = "file://%s/%s" % (config.UPLOADDIR, f)
+            #filename = "file://%s/%s" % (config.UPLOADDIR, f)
             volumes = aff4.load_volume(filename)
             result.row("%s" % volumes)
             loaded_volumes.extend(volumes)
@@ -144,8 +148,9 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     def create(self, dbh, case):
         """ Create a new case AFF4 Result file """
         volume = aff4.ZipVolume(None, 'w')
-        filename = "file://%s/%s.aff4" % (config.RESULTDIR, case)
+        filename = CacheManager.AFF4_MANAGER.make_volume_filename(case)
         aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
+        aff4.oracle.set(filename, aff4.AFF4_CONTAINS, volume.urn)
         volume.finish()
         aff4.oracle.cache_return(volume)
 

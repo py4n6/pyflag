@@ -154,9 +154,28 @@ class PyFlagSegment(PyFlagMap):
 class AFF4Manager:
     """ A Special Cache manager which maintains the main AFF4 Cache
     """
+    def make_volume_filename(self, case):
+        return "%s.aff4" % (case)
+
+    def create_volume(self, case):
+        """ Create a new case AFF4 Result file """
+        volume = aff4.ZipVolume(None, 'w')
+        filename = self.make_volume_filename(case)
+        aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
+        aff4.oracle.set(filename, aff4.AFF4_CONTAINS, volume.urn)
+        volume.finish()
+        aff4.oracle.cache_return(volume)
+
+        return volume.urn
+
     def make_volume_urn(self, case):
-        volume_path = "file://%s/%s.aff4" % (config.RESULTDIR, case)
+        volume_path = self.make_volume_filename(case)
         volume_urn = aff4.oracle.resolve(volume_path, aff4.AFF4_CONTAINS)
+
+        if not volume_urn:
+            ## Volume does not exist - we need to make a new one for
+            ## this case:
+            return self.create_volume(case)
 
         return volume_urn
 

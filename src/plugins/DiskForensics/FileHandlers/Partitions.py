@@ -14,8 +14,10 @@ SECTOR_SIZE = 512
 class PartitionScanner(Scanner.GenScanFactory):
     """ Detects partitions in the image and creates VFS nodes for them.
     """
-
-    def scan(self, fd, factories, type, mime):
+    default = True
+    group = "Disk Forensics"
+    
+    def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
         if 'x86 boot sector' in type:
             try:
                 parts = sk.mmls(fd)
@@ -34,7 +36,7 @@ class PartitionScanner(Scanner.GenScanFactory):
                 names.add(name)
                 ## Add new maps for each partition
                 map = CacheManager.AFF4_MANAGER.create_cache_map(
-                    self.case,
+                    fd.case,
                     "%s/%s" % (fd.urn, name))
 
                 map.write_from(fd.urn, SECTOR_SIZE * part[0],
@@ -43,24 +45,26 @@ class PartitionScanner(Scanner.GenScanFactory):
                 map.close()
 
                 ## Now we recursively scan each object
-                new_fd = self.fsfd.open(inode_id = map.inode_id)
+                fsfd = FileSystem.DBFS(fd.case)
+                new_fd = fsfd.open(inode_id = map.inode_id)
                 try:
                     fs = sk.skfs(new_fd)
                     fs.close()
-                    dbh = DB.DBO(self.case)
+                    dbh = DB.DBO(fd.case)
                     dbh.insert("type",
                                inode_id = map.inode_id,
                                mime = "application/filesystem",
                                type = "Filesystem")
                 except: pass
 
-                Scanner.scan_inode(self.case, map.inode_id,
-                                   factories)
+                Scanner.scan_inode_distributed(fd.case, map.inode_id,
+                                               scanners, cookie)
                 
 
 class FilesystemLoader(Scanner.GenScanFactory):
     """ A Scanner to automatically load filesystem """
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
+        pdb.set_trace()
         if 'Filesystem' in type:
             print "Will load %s" % fd.urn
 
@@ -80,7 +84,7 @@ class FilesystemLoader(Scanner.GenScanFactory):
                 skfd.seek(0,2)
                 size = skfd.tell()
                 map = CacheManager.AFF4_MANAGER.create_cache_map(
-                    self.case,
+                    fd.case,
                     "%s/__inodes__/%s" % (fd.urn, skfs_inode),
                     size = size,
                     status=status)
@@ -89,7 +93,7 @@ class FilesystemLoader(Scanner.GenScanFactory):
                     map.write_from(fd.urn, block * block_size, block_size)
 
                 CacheManager.AFF4_MANAGER.create_link(
-                    self.case,
+                    fd.case,
                     map.urn, DB.expand("%s/%s",(fd.urn, path)))
                 map.close()
             

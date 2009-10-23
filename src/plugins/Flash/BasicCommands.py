@@ -618,7 +618,8 @@ class ifile(ls):
 
         m = Magic.MagicResolver()
         for inode_id in self.args:
-            type, mime = m.find_inode_magic(case = self.environment._CASE, inode_id=inode_id)
+            type, mime, scores = m.find_inode_magic(
+                case = self.environment._CASE, inode_id=inode_id)
 
             yield dict(type=type, mime = mime)
 
