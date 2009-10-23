@@ -191,14 +191,12 @@ class less(ls):
             return "Pipe files to less pager "
         
         def execute(self):
-            args=self.args
-            glob_files=self.glob_files(args)
-            if not glob_files:
-                yield "Error: No such file"
+            for arg in self.args:
+                try:
+                    fd=self.environment._FS.open(path=arg)
+                except IOError:
+                    fd=self.environment._FS.open(urn=arg)
                 
-            for arg in glob_files:
-                fd=self.environment._FS.open(path=arg)
-                    
                 pipe=os.popen("less","w")
                 while 1:
                     data=fd.read(10000)

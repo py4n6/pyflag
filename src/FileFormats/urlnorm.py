@@ -69,11 +69,12 @@ def parse(url):
     fragment=quote(clean(fragment),"~")
 
     # note care must be taken to only encode & and = characters as values
-    parts = [ q.split("=",1) for q in query.split('&') ]
+    parts = [ q.split("=",1) for q in query.split('&') if "=" in q ]
     parts.sort()
 
-    ## Join together
-    query="&".join(["=".join(x) for x in parts])
+    ## Join together and quote everything
+    ## (e.g. "hello?a=b/c&c=d" -> 'hello?a=b%2Fc&c=d')
+    query="&".join(["=".join((quote(x[0],"%"),quote(x[1],"%"))) for x in parts])
 
     # Prevent dot-segments appearing in non-relative URI paths.
     if scheme in ["","http","https","ftp","file"]:

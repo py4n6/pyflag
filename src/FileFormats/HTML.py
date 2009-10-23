@@ -190,7 +190,7 @@ class Tag:
                 for k,v in regex.items():
                     ## Is the required attribute actually there?
                     try:
-                        value = m[k]
+                        value = m.attributes[k]
                     except KeyError:
                         failed = True
                         break

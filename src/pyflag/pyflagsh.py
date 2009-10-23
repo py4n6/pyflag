@@ -286,7 +286,10 @@ if __name__ == "__main__":
     print "Welcome to the Flag shell. Type help for help"
     
     ## Create a worker thread:
-    Farm.start_workers()
+    ## Farm.start_workers()
+
+    ## The process which called this function is a master
+    FlagFramework.post_event("startup")
 
     if config.command_file != None:
       asker=Asker()

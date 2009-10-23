@@ -180,14 +180,7 @@ class GenericUI:
     def checkbox(self,description,name,value,**options):
         """ Create a checkbox input for the name,value pair given. """
         pyflaglog.log(pyflaglog.DEBUG, "checkbox not implemented")
-        
-    def filebox(self,dir=None,target="datafile",multiple="single"):
-        """ Draws a file selector for all the files in directory dir.
-        
-        For security purposes, flag is unable to read files outside that directory.
-        """
-        pyflaglog.log(pyflaglog.DEBUG, "filebox not implemented")
-    
+            
     def case_selector(self,case='case',message='Case:', **options):
         """ Present a case selection box. Reports should call this method in their form in order to allow the user to specify the exact case to select. Note that a report may not need a case to operate on. """
         self.selector(message,case,'select value as `key`,value as `value` from meta where property=\'flag_db\'',(),**options)

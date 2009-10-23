@@ -28,6 +28,7 @@ import pyflag.pyflaglog as pyflaglog
 import pyflag.Scanner as Scanner
 import re
 import FileFormats.HTML as HTML
+import FileFormats.urlnorm as urlnorm
 import pyflag.ColumnTypes as ColumnTypes
 import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
@@ -207,7 +208,6 @@ class YahooMail20Scan(LiveCom.HotmailScanner):
             
             message_fd.insert_to_table("webmail_messages",
                                        result)
-            message_fd.close()
             
             ## now iterate over all the parts:            
             for part in message.search("part"):
@@ -220,25 +220,17 @@ class YahooMail20Scan(LiveCom.HotmailScanner):
                 data = None
                 if "text" in ct:
                     text = part.find("text")
-                    data = HTML.unquote(HTML.decode_entity(text.innerHTML()))
+                    message_fd.write(HTML.unquote(HTML.decode_entity(text.innerHTML())))
                 elif "image" in ct:
-                    data = DB.expand("<b>%s</b><br><img src='%s'/>",(
-                        HTML.url_unquote(part.attributes.get('filename','')),
-                        HTML.url_unquote(part.attributes['thumbnailurl'])))
-                    
-                if data:
-                    ## Put the data in its own part - the part
-                    ## inherits from the message which in turn
-                    ## inherits from the HTTP stream. This way we
-                    ## implicitly have the URL attached to this
-                    ## URN. This is needed when rendering the part (in
-                    ## case its html).
-                    part_fd = CacheManager.AFF4_MANAGER.create_cache_data(
-                        fd.case, part_urn,
-                        inherited = message_fd.urn,
-                        data = data)
-                    
-                    part_fd.close()
+                    message_fd.write(DB.expand("<b>%s</b><br><img src='%s'/>",(
+                        self.make_link(part.attributes.get('filename','')),
+                        self.make_link(part.attributes['thumbnailurl']))))
+
+            message_fd.close()
+
+    def make_link(self, url):
+        return urlnorm.normalize(HTML.unquote(url))
+
 
 import pyflag.tests as tests
 import pyflag.pyflagsh as pyflagsh

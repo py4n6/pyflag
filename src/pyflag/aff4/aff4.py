@@ -376,6 +376,45 @@ class FileLikeObject(AFFObject):
     def close(self):
         pass
 
+    end_of_line = '\r\n'
+
+    def readline(self, size=1024):
+        idx = None
+        try:
+            ## We try to find the marker in the lookahead buffer. This
+            ## check protects us from seeks or reads that were done
+            ## out of sync with readline()
+            assert(self.readptr == self.lookahead_readptr)
+            idx = self.lookahead.index(self.end_of_line)
+
+        except (AttributeError, ValueError, AssertionError): 
+            ## There is no lookahead buffer, or mark not found in the
+            ## current buffer. Refresh the lookahead buffer.
+            self.lookahead_readptr = self.readptr
+            self.lookahead = self.read(size)
+            self.readptr = self.lookahead_readptr
+
+        ## Try to find it again in the new buffer:
+        try:
+            if idx == None:
+                idx = self.lookahead.index(self.end_of_line)
+        except ValueError:
+            ## If the mark is still not found in the buffer, we just
+            ## return the whole buffer. The lookahead buffer will be
+            ## refreshed next time.
+            self.readptr += len(self.lookahead)
+            return self.lookahead
+
+        ## If we get here, the end_of_line was found in the lookahead
+        ## - we adjust the buffer and return it:
+        idx += len(self.end_of_line)
+        self.lookahead, data = self.lookahead[idx:], self.lookahead[:idx]
+
+        ## Update the new readptrs for the buffer and the fd:
+        self.readptr = self.lookahead_readptr = self.lookahead_readptr + idx
+
+        return data
+
 def escape_filename(filename):
     """ Escape a URN so its suitable to be stored in filesystems.
 
@@ -782,8 +821,8 @@ class Resolver:
         #    Raise("Trying to open a non existant or already closed object %s" % uri)
 
         ## If the uri is not complete here we guess its a file://
-        if ":" not in uri:
-            uri = "file://%s" % uri
+        #if ":" not in uri:
+        #    uri = "file://%s" % uri
 
         ## Check for links
         #if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
@@ -1721,7 +1760,7 @@ class Map(FileLikeObject):
         self.image_offsets = [0]
         self.last_image_offset_index = None
 
-        ## There are the target offsets for each image_offset kept in
+        ## These are the target offsets for each image_offset kept in
         ## self.image_offsets:
         self.target_offsets = {0:0}
 
@@ -1875,19 +1914,6 @@ class Map(FileLikeObject):
             self.size = max(self.size, self.readptr)
         finally:
             oracle.cache_return(backing_fd)
-
-    def readline(self, size=1024):
-        offset = self.readptr
-        result = self.read(size)
-        try:
-            result = result[:result.index("\n")+1]
-        except ValueError:
-            pass
-        
-        offset += len(result)
-        self.seek(offset)
-        
-        return result
 
     def write_from(self, target_urn, target_offset, target_length):
         """ Adds the next chunk from this target_urn. This advances

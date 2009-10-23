@@ -216,20 +216,47 @@ class File:
         
         return stat_names, stat_cbs
 
-    def readline(self,delimiter='\n'):
-        """ Emulates a readline by reading upto the \n """
-        buffer = ''
-        start = self.tell()
-        while 1:
-            try:
-                o = buffer.index(delimiter)+1
-                self.seek(start+o)
-                return buffer[:o]
-            except ValueError:
-                data=self.read(256)
-                if len(data)==0: return buffer
-                buffer += data
+    end_of_line = '\r\n'
 
+    ## We seem to get a good speed up if we do the caching here rather
+    ## than in aff4.FileLikeObject because we really reduce lock
+    ## contention. It seems that locking is rather expensive.
+    def readline(self, size=1024):
+        idx = None
+        try:
+            ## We try to find the marker in the lookahead buffer. This
+            ## check protects us from seeks or reads that were done
+            ## out of sync with readline()
+            assert(self.readptr == self.lookahead_readptr)
+            idx = self.lookahead.index(self.end_of_line)
+
+        except (AttributeError, ValueError, AssertionError): 
+            ## There is no lookahead buffer, or mark not found in the
+            ## current buffer. Refresh the lookahead buffer.
+            self.lookahead_readptr = self.readptr
+            self.lookahead = self.read(size)
+            self.readptr = self.lookahead_readptr
+
+        ## Try to find it again in the new buffer:
+        try:
+            if idx == None:
+                idx = self.lookahead.index(self.end_of_line)
+        except ValueError:
+            ## If the mark is still not found in the buffer, we just
+            ## return the whole buffer. The lookahead buffer will be
+            ## refreshed next time.
+            self.readptr += len(self.lookahead)
+            return self.lookahead
+
+        ## If we get here, the end_of_line was found in the lookahead
+        ## - we adjust the buffer and return it:
+        idx += len(self.end_of_line)
+        self.lookahead, data = self.lookahead[idx:], self.lookahead[:idx]
+
+        ## Update the new readptrs for the buffer and the fd:
+        self.readptr = self.lookahead_readptr = self.lookahead_readptr + idx
+
+        return data
 
     def explain(self, query, result):
         """ This method is called to explain how we arrive at this

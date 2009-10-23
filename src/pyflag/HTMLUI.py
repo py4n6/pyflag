@@ -1226,29 +1226,6 @@ class HTMLUI(UI.GenericUI):
     def join(self,ui):
         """ Joins the supplied ui object with this object """
         self.result += ui.__str__()
-
-    def filebox(self,dir=None,target="datafile",multiple="single"):
-        """ Draws a file selector for all the files in directory dir.
-
-        For security purposes, flag is unable to read files outside that directory.
-        """
-        import os
-        self.result +="<select name=\"%s\" size=\"7\" multiple=\"%s\">\n" % (target,multiple)
-        import cgi
-        if not dir: dir=config.UPLOADDIR
-
-        for dirpath, dirnames, filenames in os.walk(dir):
-            filenames.sort()
-            for filename in filenames:
-                file=os.path.join(dirpath,filename)
-                if (target,file) in self.defaults.q:
-                    self.result+="<option value=\"%s\" selected=\"selected\">%s</option>\n" % (cgi.escape(file,quote=True),file[len(dir):])
-                else:
-                    self.result+="<option value=\"%s\">%s</option>\n" % (cgi.escape(file,quote=True),file[len(dir):])
-
-        self.result += "</select><br>Files taken from %s" % (dir)
-        if self.form_parms.has_key(target):
-            del self.form_parms[target]
                 
     def ruler(self):
         """ Draws a ruller to seperate previous entries """

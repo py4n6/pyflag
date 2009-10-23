@@ -155,32 +155,17 @@ class GmailScanner(Scanner.GenScanFactory):
         message_fd.insert_to_table("webmail_messages",
                                    result)
 
-        message_fd.close()
-
         ## Now the attachments:
         for part in message[7][0]:
-            part_urn = "%s/%s" % (message_urn, part[1] or part[0])
-            
-            data = "<html><body><table><tr><td><a href='%s'>"\
-                   "<img src='%s' /></a></td><td>%s (%s)</td></tr>"\
-                   "</table></body></html>" % (
+            message_fd.write("<html><body><table><tr><td><a href='%s'>"\
+                             "<img src='%s' /></a></td><td>%s (%s)</td></tr>"\
+                             "</table></body></html>" % (
                 self.make_link_from_query(fd, part[8]),
                 self.make_link_from_query(fd, part[7]),
                 part[1], part[3],
-                )
+                ))
 
-            ## Note that parts are not inserted into the VFS so they
-            ## are in effect "hidden" from the tables, and VFS
-            ## browsing.
-            part_fd = CacheManager.AFF4_MANAGER.create_cache_data(
-                fd.case, part_urn,
-                inherited = message_fd.urn, include_in_VFS=False,
-                data = data)
-
-            part_fd.close()
-            ## This link allows the GUI to associate the parts with
-            ## the main message.
-            aff4.oracle.add(message_fd.urn, AFF4_CONTAINS, part_fd.urn)
+        message_fd.close()
 
     def version(self, fd, root):
         ## FIXME - ideally we would like to have a templating system

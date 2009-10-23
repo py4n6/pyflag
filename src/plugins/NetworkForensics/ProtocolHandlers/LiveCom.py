@@ -501,11 +501,11 @@ class HotmailScanner(Scanner.GenScanFactory):
 
         return self.insert_message(fd, result)
 
-    def XXXinsert_message(self, fd, result, message_urn = None):
+    def insert_message(self, fd, result, message_urn = None):
         try:
             assert(result['message'])
         except: return
-        data = self.fixup_page(result, HTML.SanitizingTag)
+        data = self.fixup_page(result, result['message'], HTML.SanitizingTag)
         message_urn = message_urn or "/".join((fd.urn, "Message"))
         
         live_obj = CacheManager.AFF4_MANAGER.create_cache_data(
@@ -514,7 +514,8 @@ class HotmailScanner(Scanner.GenScanFactory):
             inherited = fd.urn)
 
         result['service'] = self.service
-        live_obj.insert_to_table('webmail_messages', result)
+        ## FIXME
+        #live_obj.insert_to_table('webmail_messages', result)
         live_obj.close()
 
         return live_obj
@@ -779,8 +780,8 @@ class HotmailTests(tests.ScannerTest):
     """ Tests Hotmail Scanner """
     test_case = "PyFlagTestCase"
 #    test_file = 'live.com.pcap.e01'
-#    test_file = 'private/livecom.pcap'
-    test_file = 'private/hotmail_test.pcap'
+    test_file = 'private/livecom.pcap'
+#    test_file = 'private/hotmail_test.pcap'
 #    test_file = 'gmail.com.pcap.e01'
     
     def test01HotmailScanner(self):
