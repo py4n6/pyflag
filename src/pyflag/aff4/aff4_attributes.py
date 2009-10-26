@@ -1,12 +1,12 @@
 ## Common attributes - part of the AFF4 standard
 
 ## namespaces
-NAMESPACE = "aff4:" ## AFF4 namespace
+NAMESPACE = "aff4://" ## AFF4 namespace
 VOLATILE_NS = "aff4volatile:" ## Never written to files
 CONFIGURATION_NS = VOLATILE_NS + "config:" ## Used to configure the
                                            ## library with global
                                            ## settings
-FQN = "urn:" + NAMESPACE
+FQN = NAMESPACE
 
 GLOBAL = VOLATILE_NS + "global" ## A special urn representing the
                                 ## global context
@@ -16,6 +16,7 @@ CONFIG_THREADS = CONFIGURATION_NS + "threads"
 CONFIG_VERBOSE = CONFIGURATION_NS + "verbosity"
 CONFIG_AUTOLOAD = CONFIGURATION_NS + "autoload"
 CONFIG_PAD      = CONFIGURATION_NS + "pad"
+CONFIG_RDF_SERIALIZER = CONFIGURATION_NS + "serializer"
 ## This is set to control how properties are stored:
 ## relative - a properties file is created relative to each URN (default)
 ## combined - All properties are lumped into the same file in the volume (more efficient)
@@ -144,6 +145,6 @@ AFF4_MODE  = FQN + "mode"
 AFF4_INHERIT = NAMESPACE + "inherit"
 
 ## PyFlag specific attributes
-PYFLAG_NS = "urn:pyflag:"
+PYFLAG_NS = "pyflag:"
 PYFLAG_STREAM = PYFLAG_NS + "streams:"
 PYFLAG_REVERSE_STREAM = PYFLAG_STREAM + "reverse"

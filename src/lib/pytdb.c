@@ -9,6 +9,7 @@
 #include <raptor.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <setjmp.h>
 
 #undef min
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
@@ -236,6 +237,10 @@ typedef struct {
   struct tdb_context *data_db;
   int data_store_fd;
   uint32_t hashsize;
+
+  /** This is used to restore state if the RDF parser fails */
+  jmp_buf env;
+  char *message;
 } BaseTDBResolver;
 
 static int resolve(BaseTDBResolver *self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value);
@@ -973,13 +978,137 @@ static PyObject *release(BaseTDBResolver *self, PyObject *args, PyObject *kwds) 
   Py_RETURN_NONE;
 }
 
+static void
+triples_handler(void* user_data, const raptor_statement* triple) 
+{
+  BaseTDBResolver *self = (BaseTDBResolver *)user_data;
+  TDB_DATA urn, attribute, value;
+
+  // Ignore anonymous and invalid triples.
+  if(triple->subject_type != RAPTOR_IDENTIFIER_TYPE_RESOURCE ||
+     triple->predicate_type != RAPTOR_IDENTIFIER_TYPE_RESOURCE)
+    return;
+
+  /* do something with the triple */
+  urn.dptr = (const char *)raptor_uri_as_string(triple->subject);
+  urn.dsize = strlen(urn.dptr);
+  
+  attribute.dptr = (const char *)raptor_uri_as_string(triple->predicate);
+  attribute.dsize = strlen(attribute.dptr);
+
+  if(triple->object_type == RAPTOR_IDENTIFIER_TYPE_LITERAL ||
+     triple->object_type == RAPTOR_IDENTIFIER_TYPE_XML_LITERAL) {
+    value.dptr = triple->object;
+  } else if(triple->object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
+    value.dptr = (const char *)raptor_uri_as_string(triple->object);
+  } else return;
+  
+  value.dsize = strlen(value.dptr);
+
+  if(!is_value_present(self, urn, attribute, value, 1)) {
+      set_new_value(self, urn, attribute, value);
+  };
+}
+
+static void
+message_handler(void *user_data, raptor_locator* locator, 
+                const char *message)
+{
+  printf("%s\n", message);
+}
+
+static void fatal_error_handler(void *user_data, raptor_locator *locator,
+			  const char *message) { 
+  BaseTDBResolver *self = (BaseTDBResolver *)user_data;
+  
+  // An error occured - copy the message and to the caller.
+  self->message = strdup(message);
+  longjmp(self->env, 1);
+};
+
+
+static PyObject *resolver_parse(BaseTDBResolver *self, PyObject *args, PyObject *kwds) {
+  static char *kwlist[] = {"fd", "format", "base", NULL};
+  char *format = "turtle";
+  PyObject *fd = NULL;
+  raptor_parser* rdf_parser;
+  char *base=NULL;
+  raptor_uri uri=NULL;
+
+  if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|s", kwlist, 
+				  &fd, &format, &base))
+    goto error;
+  
+  rdf_parser = raptor_new_parser(format);
+  if(!rdf_parser)
+    return PyErr_Format(PyExc_RuntimeError, "Unable to create parser for RDF serialization %s", format);
+
+  raptor_set_feature(rdf_parser, RAPTOR_FEATURE_NO_NET, 1);  
+  raptor_set_statement_handler(rdf_parser, self, triples_handler);
+
+  raptor_set_fatal_error_handler(rdf_parser, self, fatal_error_handler);
+  raptor_set_error_handler(rdf_parser, self, message_handler);
+  raptor_set_warning_handler(rdf_parser, self, message_handler);
+
+
+  /* FIXME - handle errors using a message handler. We need to setjmp
+     it here because the raptor library will abort() if the error
+     handler returns. We need to unwind the stack and raise a Python
+     exception instead.
+  */
+  if(base)
+    uri = raptor_new_uri((const unsigned char*)base);
+  
+  // Set jmp location in case the parser has a fatal error
+  if(setjmp(self->env)!=0) {
+    // Oops an error occured
+    PyErr_Format(PyExc_RuntimeError, "Parser Error: %s", self->message);
+    free(self->message);
+    goto error1;
+  };
+
+  raptor_start_parse(rdf_parser, uri);
+  while(1) {
+    unsigned char *buff;
+    size_t buffer_len=BUFF_SIZE;
+    PyObject *result = PyObject_CallMethod(fd, "read", "I", BUFF_SIZE);
+    if(!result)
+      goto error1;
+    
+    PyString_AsStringAndSize(result, (char **)&buff, &buffer_len);
+    // EOF
+    if(buffer_len==0) {
+      Py_DECREF(result);
+      break;
+    };
+
+    raptor_parse_chunk(rdf_parser, buff, buffer_len, 0);
+    Py_DECREF(result);
+  }
+  raptor_parse_chunk(rdf_parser, NULL, 0, 1); /* no data and is_end =
+						 1 */
+  // Done
+  if(uri)
+    raptor_free_uri((raptor_uri*)uri);
+  raptor_free_parser(rdf_parser);
+  Py_RETURN_NONE;
+
+ error1:
+  if(uri)
+    raptor_free_uri((raptor_uri*)uri);
+  raptor_free_parser(rdf_parser);
+ error:
+  return NULL;
+};
+
+
 static PyMethodDef PyTDBResolver_methods[] = {
   {"get_urn_by_id",(PyCFunction)get_urn_by_id, METH_VARARGS|METH_KEYWORDS,
    "Resolves a URN by an id"},
   {"get_id_by_urn",(PyCFunction)get_id_by_urn, METH_VARARGS|METH_KEYWORDS,
    "Resolves a unique ID for a urn"},
   {"set",(PyCFunction)set, METH_VARARGS|METH_KEYWORDS,
-   "Sets a attribute for a given URN"},
+   "Sets an attribute for a given URN"},
   {"add",(PyCFunction)add, METH_VARARGS|METH_KEYWORDS,
    "Adds an attribute for a URN"},
   {"delete",(PyCFunction)delete, METH_VARARGS|METH_KEYWORDS,
@@ -996,6 +1125,8 @@ static PyMethodDef PyTDBResolver_methods[] = {
    "release 'r' or 'w' locks of the given URN"},
   {"close", (PyCFunction)resolver_close, METH_VARARGS|METH_KEYWORDS,
    "Close all tdb handles (This is important if you are going to reopen them"},
+  {"parse", (PyCFunction)resolver_parse, METH_VARARGS|METH_KEYWORDS,
+   "Parses RDF from the file like object provided. Triples are inserted into this resolver."},
   {NULL}  /* Sentinel */
 };
 
@@ -1123,7 +1254,7 @@ raptor_iostream_handler2 python_iostream_handler = {
 static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwds) {
   static char *kwlist[] = {"resolver", "write_callback", "data", "base", "type", NULL};
   char *type = "turtle";
-  char *base = "";
+  char *base=NULL;
 
   self->iostream = raptor_new_iostream_from_handler2((void *)self, &python_iostream_handler);
 
@@ -1146,8 +1277,8 @@ static int rdfserializer_init(RDFSerializer *self, PyObject *args, PyObject *kwd
     PyErr_Format(PyExc_RuntimeError, "Cant create serializer of type %s", type);
     goto error;
   };
-
-  {
+  
+  if(base) {
     raptor_uri uri = raptor_new_uri((const unsigned char*)base);
     raptor_serialize_start(self->rdf_serializer, 
 			   uri, self->iostream);
@@ -1172,7 +1303,7 @@ static void export_list(RDFSerializer *self, TDB_DATA urn,
   // Get the offset to the value and retrieve it from the data
   // store:
   TDB_DATA_LIST tmp;
-
+  
   tmp.offset = to_int(offset);
   
   // Iterate over all hits in the attribute list
@@ -1206,16 +1337,29 @@ static void export_list(RDFSerializer *self, TDB_DATA urn,
 	triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute_buf);
 	triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
 	
-	triple.object = buff;
-	triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+	/** We work out if its a literal or a urn by virtue of it
+	    being fully qualified. This is a bit of a hack actually.
+
+	    FIXME:
+	    This should be solved properly by having TDB_DATA_LIST
+	    contain a type field.
+	*/
+	if(!memcmp("aff4://", buff, 7)) {
+	  triple.object = (void*)raptor_new_uri((const unsigned char*)buff);
+	  triple.object_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+	} else {
+	  triple.object = buff;
+	  triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+	};
+
 	triple.object_literal_datatype = 0;
-	//triple.object_literal_language=(const unsigned
-	//char*)"en";
 	triple.object_literal_language=NULL;
 	
 	raptor_serialize_statement(self->rdf_serializer, &triple);
 	raptor_free_uri((raptor_uri*)triple.subject);
-	raptor_free_uri((raptor_uri*)triple.predicate);	      
+	raptor_free_uri((raptor_uri*)triple.predicate);
+	if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
+	  raptor_free_uri((raptor_uri*)triple.object);
       };
     } else return;
   };
@@ -1233,7 +1377,7 @@ static PyObject *rdfserializer_serialize_urn(RDFSerializer *self,
   if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|O", kwlist, 
 				  &urn.dptr, &urn.dsize, &exclude))
     return NULL;
-     
+   
   // Find the URN id
   {
     id = tdb_fetch(self->resolver->urn_db, urn);

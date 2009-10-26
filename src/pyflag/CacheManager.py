@@ -306,7 +306,6 @@ class AFF4Manager:
         fsfd = FileSystem.DBFS(case)
         destination_path = aff4.relative_name(destination, volume_urn)
         fsfd.VFSCreate(urn, destination_path,
-                       size=aff4.oracle.resolve(destination, AFF4_SIZE) or 0,
                        **kwargs)
         
 AFF4_MANAGER = AFF4Manager()

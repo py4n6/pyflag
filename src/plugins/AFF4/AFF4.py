@@ -31,8 +31,11 @@ import pyflag.Registry as Registry
 from pyflag.ColumnTypes import AFF4URN, StringType, FilenameType, DeletedType, IntegerType, TimestampType, BigIntegerType, StateType, ThumbnailType, SetType
 import time
 
+config.add_option("RDF_SERIALIZER", default="turtle",
+                  help = "RDF serialiser for new AFF4 volumes")
+
 ## Some private AFF4 namespace objects
-PYFLAG_NS = "urn:pyflag:"
+PYFLAG_NS = "pyflag:"
 PYFLAG_CASE = PYFLAG_NS + "case"
 
 ## Make sure the aff4 subsystem can only load files from the upload
@@ -147,6 +150,8 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     
     def startup(self, dbh, case):
         aff4.oracle = tdb_resolver.TDBResolver()        
+        ## configure some defaults
+        aff4.oracle.set(GLOBAL, CONFIG_RDF_SERIALIZER, config.RDF_SERIALIZER)
 
     def worker_startup(self, dbh, case):
         if FlagFramework.job_tdb:

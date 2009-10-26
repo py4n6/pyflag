@@ -17,7 +17,7 @@ low level API alone.
 """
 import uuid, posixpath, hashlib, base64, bisect
 import urllib, os, re, struct, zlib, time, sys, urlparse
-import StringIO
+import cStringIO
 import threading, mutex
 import pdb
 import textwrap, os.path, glob
@@ -78,12 +78,12 @@ def fully_qualified_name(filename, context_name):
     context_name. If filename is already a fully_qualified_name, do
     nothing.
     """
-    if "://" in filename: return filename
-    
-    if not filename.startswith(FQN):
-        filename = "%s/%s" % (context_name, filename)
+    if filename.startswith("/"): filename=filename[1:]
+    x = urlparse.urlparse(filename)
+    if not x.scheme:
+        return "%s/%s" % (context_name, posixpath.normpath(filename))
 
-    return posixpath.normpath(filename)
+    return filename
 
 def relative_name(filename, context_name):
     """ Returns a relative name to the supplied context. (ie. if the
@@ -315,19 +315,6 @@ class AFFObject(object):
     def set_inheritence(self, inherited):
         oracle.add(self.urn, AFF4_INHERIT, inherited)
 
-#     def close(self):
-#         if oracle.resolve(GLOBAL, CONFIG_PROPERTIES_STYLE) == 'combined': return
-
-#         ## Write the properties file
-#         container = oracle.resolve(self.urn, AFF4_STORED)
-#         volume = oracle.open(container,'w')
-#         try:
-#             volume.writestr(fully_qualified_name("properties", self.urn),
-#                             oracle.export(self.urn),
-#                             compress_type = ZIP_DEFLATED)
-#         finally:
-#             oracle.cache_return(volume)
-            
 
 class AFFVolume(AFFObject):
     """ A Volume simply stores segments """
@@ -555,7 +542,7 @@ try:
             if urn:
                 if mode=='r':
                     self.handle = pycurl.Curl()
-                    self.buffer = StringIO.StringIO()
+                    self.buffer = cStringIO.StringIO()
 
                     def parse_header_callback(header):
                         ## we are looking for a Content-Range header
@@ -756,6 +743,20 @@ class Resolver:
         self.clear_hooks()
         self.closed = {}
         self.urn_obj_class = URNObject
+        self.set_defaults()
+
+    def set_defaults(self):
+        ## Set up some defaults
+        self.set(GLOBAL, CONFIG_VERBOSE, _INFO)
+        self.set(GLOBAL, CONFIG_THREADS, "1")
+        self.set(GLOBAL, CONFIG_AUTOLOAD, 'yes')
+        self.set(GLOBAL, CONFIG_RDF_SERIALIZER, 'turtle')
+
+        ## Some well known objects
+        self.set(AFF4_SPECIAL_URN_NULL, AFF4_TYPE, AFF4_ERROR_STREAM)
+        self.set(AFF4_SPECIAL_URN_NULL, CONFIG_PAD, 1)
+        self.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
+        self.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
 
     def __getitem__(self, urn):
         try:
@@ -772,7 +773,7 @@ class Resolver:
         try:
             items = value.iteritems()
             pdb.set_trace()
-            annon = "urn:annon:%s" % uuid4.uuid4()
+            annon = "aff4://annon:%s" % uuid4.uuid4()
             for k,v in items:
                 self.set(annon, k ,v)
 
@@ -1056,9 +1057,9 @@ class ImageWorker(threading.Thread):
         threading.Thread.__init__(self)
 
         self.condition_variable = condition_variable
-        self.buffer = StringIO.StringIO()
-        self.bevy = StringIO.StringIO()
-        self.bevy_index = StringIO.StringIO()
+        self.buffer = cStringIO.StringIO()
+        self.bevy = cStringIO.StringIO()
+        self.bevy_index = cStringIO.StringIO()
         self.chunk_size = chunk_size
         self.chunks_in_segment = chunks_in_segment
         self.bevy_size = chunk_size * chunks_in_segment
@@ -1505,10 +1506,14 @@ class ZipVolume(RAWVolume):
         """
         ## Is this file dirty?
         if oracle.resolve(self.urn, AFF4_VOLATILE_DIRTY):
-            result = oracle.export_volume(self.urn)
-                                          
+            ## Get a segment
+            result = cStringIO.StringIO()
+            type = oracle.resolve(GLOBAL, CONFIG_RDF_SERIALIZER) or 'turtle'
+            oracle.export_volume(self.urn, result, type)
+            
             ## Store volume properties
-            self.writestr("properties", result,
+            self.writestr("information.%s" % type,
+                          result.getvalue(),
                           compress_type = ZIP_DEFLATED)
 
             ## Where are we stored?
@@ -1556,11 +1561,15 @@ class ZipVolume(RAWVolume):
         for zinfo in infolist:
             subject = fully_qualified_name(unescape_filename(zinfo.filename), self.urn)
 
-            if zinfo.filename.endswith("properties"):
+            path,basename = os.path.split(zinfo.filename)
+            basename, extension = os.path.splitext(basename)
+            
+            if basename == 'information':
                 ## A properties file refers to the object which
                 ## contains it:
-                oracle.parse_properties(zf.read(zinfo.filename),
-                                        context=os.path.dirname(subject))
+                fd = cStringIO.StringIO(zf.read(zinfo.filename))
+                oracle.parse(fd = fd, format = extension,
+                             context=os.path.dirname(subject))
                 
             self.import_zinfo(subject, zinfo)
 
@@ -1967,7 +1976,7 @@ class Map(FileLikeObject):
     def close(self):
         if self.mode == 'r': return
 
-        fd = StringIO.StringIO()
+        fd = cStringIO.StringIO()
         oracle.set(self.urn, AFF4_SIZE, self.size)
 
         previous = None
@@ -2882,17 +2891,6 @@ class CreateNewVolume:
             volume = oracle.open(self.container_volume_urn, 'w')
             volume.close()
         
-## Set up some defaults
-oracle.set(GLOBAL, CONFIG_VERBOSE, _INFO)
-oracle.set(GLOBAL, CONFIG_THREADS, "1")
-oracle.set(GLOBAL, CONFIG_AUTOLOAD, 'yes')
-
-## Some well known objects
-oracle.set(AFF4_SPECIAL_URN_NULL, AFF4_TYPE, AFF4_ERROR_STREAM)
-oracle.set(AFF4_SPECIAL_URN_NULL, CONFIG_PAD, 1)
-oracle.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
-oracle.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
-
 #def DEBUG(verb, fmt, *args):
 #    if verb <= _DEBUG:
 #        print fmt % args

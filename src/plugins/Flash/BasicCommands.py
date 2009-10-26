@@ -104,11 +104,13 @@ class ls(pyflagsh.command):
                     else: new_path=path
                     
                     if dir:
-                        yield "[%s/%s]" % (new_path,dir)
+                        #yield "[%s/%s]" % (new_path,dir)
+                        yield "[%s]" % (dir)
 
                 for dent in self.environment._FS.longls(path=path,dirs=0):
                     if dent:
-                        yield " %s/%s " % (dent['path'],dent['name'])
+                        #yield " %s/%s " % (dent['path'],dent['name'])
+                        yield " %s " % (dent['name'])
 
             ## Do we need to recurse?
             if self.opts.has_key('-R'):

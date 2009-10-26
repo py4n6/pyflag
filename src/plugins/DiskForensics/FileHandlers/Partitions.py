@@ -27,15 +27,10 @@ class PartitionScanner(Scanner.GenScanFactory):
                 print e
                 return
 
-            names = set()
             for part in parts:
-                count = 1
-                name = part[2]
-                while name in names:
-                    name = "%s %u" % (part[2], count)
-                    count +=1
+                ## Make a unique and sensible name for this partition
+                name = "%s @ 0x%X" % (part[2], part[0])
 
-                names.add(name)
                 ## Add new maps for each partition
                 map = CacheManager.AFF4_MANAGER.create_cache_map(
                     fd.case,
@@ -93,11 +88,11 @@ class FilesystemLoader(Scanner.GenScanFactory):
 
         ## update the size of the map
         map.size = size
-        print map.size
-
         CacheManager.AFF4_MANAGER.create_link(
             fd.case,
-            map.urn, FlagFramework.sane_join(fd.urn, path))
+            map.urn, FlagFramework.sane_join(fd.urn, path),
+            size = size)
+        
         map.close()
 
     def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):

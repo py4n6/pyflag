@@ -230,7 +230,7 @@ class BASETDBResolver:
             for v in self.resolve_list(inherited, attribute):
                 yield v
 
-    def export_volume(self, volume_urn):
+    def export_volume(self, volume_urn, fd):
         """ Serialize a suitable properties file for the
         volume_urn. We include all the objects which are contained in
         the volume.
@@ -248,7 +248,7 @@ class BASETDBResolver:
 
         self.export_model(volume_urn, model)
         serializer = RDF.Serializer("turtle")
-        return serializer.serialize_model_to_string(model)
+        fd.write(serializer.serialize_model_to_string(model))
 
 
     def export_dict(self, uri):
@@ -310,24 +310,27 @@ try:
                 for k,v in self.export_dict(urn).items():
                     print k,v
 
-        def export_volume(self, volume_urn):
-            result = cStringIO.StringIO()
-            
+        def export_volume(self, volume_urn, fd, type):
+            """ This function exports the volume information into the
+            fd which must have a write() method.
+            """
             def cb(self, data):
-                result.write(data)
+                fd.write(data)
             
             serializer = pytdb.RDFSerializer(resolver = self, write_callback = cb,
+                                             type = type,
                                              data = self, base = volume_urn)
 
-            #serializer.set_namespace(volume_urn, "VFS")
+            try:
+                serializer.set_namespace("aff4://", "" )
+            except RuntimeError: pass
+            
             for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):
                 type = self.resolve(urn, AFF4_TYPE)
                 excluded_attributes = aff4.NON_SERIALIZABLE_OBJECTS.get(type, [])
                 serializer.serialize_urn(urn, exclude=excluded_attributes)
 
             serializer.close()
-
-            return result.getvalue()
 
     BASETDBResolver = BaseTDBResolver
 except ImportError,e:
@@ -342,7 +345,8 @@ class TDBResolver(BASETDBResolver, aff4.Resolver):
         self.write_cache = aff4.Store(50)
         self.clear_hooks()
         BASETDBResolver.__init__(self)
-
+        self.set_defaults()
+        
     def add(self, uri, attribute, value):
         ## A dict means we store an anonymous object:
         if 0:
@@ -350,7 +354,7 @@ class TDBResolver(BASETDBResolver, aff4.Resolver):
                 items = value.iteritems()
 
                 ## we create an annonymous object to contain the data
-                annon = "urn:annon:%s" % uuid.uuid4()
+                annon = "aff4://annon:%s" % uuid.uuid4()
                 stored = self.resolve(uri, AFF4_STORED)
                 BASETDBResolver.set(self, annon, AFF4_STORED, stored)
                 BASETDBResolver.add(self, stored, AFF4_CONTAINS, annon)

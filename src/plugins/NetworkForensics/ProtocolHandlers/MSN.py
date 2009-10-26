@@ -304,7 +304,6 @@ import pyflag.tests
 
 class MSNTests(pyflag.tests.ScannerTest):
     """ Tests MSN Scanner (Ver 8) """
-    # We pick an obscure name on purpose
     test_case = "PyFlagTestCase"
     test_file = "/NetworkForensics/ProtocolHandlers/MSN/MSN_Cap1_Ver8_LoginWithMessages.pcap"
 
@@ -322,12 +321,6 @@ class MSNTests(pyflag.tests.ScannerTest):
         dbh = DB.DBO(self.test_case)
         dbh.execute("""select count(*) as total from `msn_session` where type=\"MESSAGE\"""")
         row = dbh.fetch()
-        print row
         assert row['total'] == 10
 
-        ## We should also find user information  
-        ## For example, check we pulled out the user's OS.
-        dbh.execute("""select user_data from `msn_users` where """\
-                    """user_data_type=\"os\" and packet_id=19""")
-        row=dbh.fetch()
-        assert row["user_data"] == "winnt 5.1 i386"
+        CacheManager.AFF4_MANAGER.close(self.test_case)
