@@ -452,7 +452,11 @@ class FileBackedObject(FileLikeObject):
     def __init__(self, uri, mode):
         ## Parse the uri
         p = urlparse.urlparse(uri)
-        
+
+        ## Make sure the scheme is compatible
+        if p.scheme and p.scheme != "file":
+            Raise("FileBackedObjects must use the file:// url schemes")
+
         ## Prepare the filename to be suitable for a filesystem by
         ## escaping all unsuitable characters
         escaped = escape_filename(p.path or "/")
@@ -476,7 +480,14 @@ class FileBackedObject(FileLikeObject):
                 self.fd = open(path, 'r+b')
             except:
                 self.fd = open(path, 'w+b')
-                
+
+        ## Update the uri to the correct value
+        p = list(p)
+        p[0] = "file"
+        uri = urlparse.urlunparse(p)
+        
+        ## Make the real filename available
+        self.filename = self.fd.name
         AFFObject.__init__(self, uri, mode)
 
     def seek(self, offset, whence=0):
@@ -1592,37 +1603,38 @@ try:
 
         def load_from(self, urn):
             """ Load volume from the URN """
-            if urn.startswith(FQN):
-                Raise("EWF module only supports storage to real files")
-
-            if urn.startswith("file://"):
-                filename = urn[7:]
-            else:
-                filename = urn
-                
-            ## Try to glob the volumes
-            base, ext = os.path.splitext(filename)
-            if not ext.lower().startswith(".e"):
-                Raise("EWF files usually have an extension of .E00")
-
-            files = glob.glob(base + ".[Ee]*")
-            self.handler = ewf.ewf_open(files)
-            ## Now add headers
-            h = self.handler.get_headers()
-            h['md5'] = h.get('md5','').encode("hex")
-
-            ## Try to make a unique volume URN
+            fd = oracle.open(urn, 'r') or Raise("Unable to open %s" % urn)
             try:
-                self.urn = h["md5"]
-            except: self.urn = base
-            self.urn = FQN + self.urn
-            
+                if not fd.urn.startswith("file://"):
+                    Raise("EWF driver only supports opening file:// schemes")
+
+                ## Try to glob the volumes
+                base, ext = os.path.splitext(fd.filename)
+                if not ext.lower().startswith(".e"):
+                    Raise("EWF files usually have an extension of .E00")
+
+                files = glob.glob(base + ".[Ee]*")
+                self.handler = ewf.ewf_open(files)
+                
+                ## Now add headers
+                h = self.handler.get_headers()
+                h['md5'] = h.get('md5','').encode("hex")
+
+                ## Try to make a unique volume URN
+                try:
+                    self.urn = h["md5"]
+                except: self.urn = base
+                self.urn = FQN + self.urn
+                
+            finally:
+                oracle.cache_return(fd)
+
             oracle.set(self.urn, AFF4_TYPE, AFF4_EWF_VOLUME)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
             oracle.set(self.urn, AFF4_STORED, urn)
             
             ## The stream URN is based on the volume
-            stream_urn = self.urn + "/stream"
+            stream_urn = self.urn + "/" + os.path.split(base)[1]
             oracle.set(self.urn, AFF4_CONTAINS, stream_urn)
             oracle.set(stream_urn, AFF4_STORED, self.urn)
             oracle.set(stream_urn, AFF4_SIZE, self.handler.size)

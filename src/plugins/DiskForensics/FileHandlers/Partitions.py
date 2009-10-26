@@ -8,6 +8,8 @@ import pyflag.pyflaglog as pyflaglog
 import pyflag.CacheManager as CacheManager
 import pdb
 import sk
+import pyflag.Magic as Magic
+import pyflag.FlagFramework as FlagFramework
 
 SECTOR_SIZE = 512
 
@@ -50,11 +52,13 @@ class PartitionScanner(Scanner.GenScanFactory):
                 try:
                     fs = sk.skfs(new_fd)
                     fs.close()
-                    dbh = DB.DBO(fd.case)
-                    dbh.insert("type",
-                               inode_id = map.inode_id,
-                               mime = "application/filesystem",
-                               type = "Filesystem")
+
+                    ## Lets add a hint
+                    Magic.set_magic(fd.case,
+                                    inode_id = map.inode_id,
+                                    mime = "application/filesystem",
+                                    magic = "Filesystem")                    
+
                 except: pass
 
                 Scanner.scan_inode_distributed(fd.case, map.inode_id,
@@ -63,43 +67,65 @@ class PartitionScanner(Scanner.GenScanFactory):
 
 class FilesystemLoader(Scanner.GenScanFactory):
     """ A Scanner to automatically load filesystem """
+    def create_map(self, fd, fs, skfs_inode, path):
+        block_size = fs.block_size
+
+        if str(skfs_inode) == "0-0-0":
+            return 1
+
+        if skfs_inode.alloc:
+            status = 'alloc'
+        else:
+            status = 'deleted'
+
+        ## Add the map under the path
+        skfd = fs.open(inode=skfs_inode)
+        skfd.seek(0,2)
+        size = skfd.tell()
+        map = CacheManager.AFF4_MANAGER.create_cache_map(
+            fd.case,
+            "%s/__inodes__/%s" % (fd.urn, skfs_inode),
+            size = size, target = fd.urn,
+            status=status)
+
+        for block in skfd.blocks():
+            map.write_from(fd.urn, block * block_size, block_size)
+
+        ## update the size of the map
+        map.size = size
+        print map.size
+
+        CacheManager.AFF4_MANAGER.create_link(
+            fd.case,
+            map.urn, FlagFramework.sane_join(fd.urn, path))
+        map.close()
+
     def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
-        pdb.set_trace()
         if 'Filesystem' in type:
             print "Will load %s" % fd.urn
 
             fs = sk.skfs(fd)
-            block_size = fs.block_size
-            def create_map(skfs_inode, path):
-                if str(skfs_inode) == "0-0-0":
-                    return 1
-                
-                if skfs_inode.alloc:
-                    status = 'alloc'
-                else:
-                    status = 'deleted'
 
-                ## Add the map under the path
-                skfd = fs.open(inode=skfs_inode)
-                skfd.seek(0,2)
-                size = skfd.tell()
-                map = CacheManager.AFF4_MANAGER.create_cache_map(
-                    fd.case,
-                    "%s/__inodes__/%s" % (fd.urn, skfs_inode),
-                    size = size,
-                    status=status)
-
-                for block in skfd.blocks():
-                    map.write_from(fd.urn, block * block_size, block_size)
-
-                CacheManager.AFF4_MANAGER.create_link(
-                    fd.case,
-                    map.urn, DB.expand("%s/%s",(fd.urn, path)))
-                map.close()
-            
             for root, dirs, files in fs.walk('/', unalloc=True, inodes=True):
                 for d, dirname in dirs:
-                    create_map(d, DB.expand("%s/%s", (root[1], dirname)))
+                    self.create_map(fd, fs, d, FlagFramework.sane_join(root[1], dirname))
                     
                 for f, filename in files:
-                    create_map(f, DB.expand("%s/%s", (root[1], filename)))
+                    self.create_map(fd, fs, f, FlagFramework.sane_join(root[1], filename))
+
+
+## UnitTests:
+import unittest
+import pyflag.pyflagsh as pyflagsh
+import pyflag.tests
+
+class PartitionTest(pyflag.tests.ScannerTest):
+    """ Test Partition scanner and Filesystem loader """
+    test_case = "PyFlagTestCase"
+    test_file = "pyflag_stdimage_0.5.e01"
+
+    def test01PartitionScan(self):
+        """ Check the Partition scanner works """
+        env = pyflagsh.environment(case=self.test_case)
+        pyflagsh.shell_execv(env=env, command="scan",
+                             argv=["*",'*'])

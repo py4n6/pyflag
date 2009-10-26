@@ -104,7 +104,7 @@ class ls(pyflagsh.command):
                     else: new_path=path
                     
                     if dir:
-                        yield "[%s%s]" % (new_path,dir)
+                        yield "[%s/%s]" % (new_path,dir)
 
                 for dent in self.environment._FS.longls(path=path,dirs=0):
                     if dent:
@@ -192,6 +192,7 @@ class less(ls):
         
         def execute(self):
             for arg in self.args:
+                arg = self.environment.CWD + arg
                 try:
                     fd=self.environment._FS.open(path=arg)
                 except IOError:
@@ -620,6 +621,8 @@ class ifile(ls):
         for inode_id in self.args:
             type, mime, scores = m.find_inode_magic(
                 case = self.environment._CASE, inode_id=inode_id)
+
+            print scores
 
             yield dict(type=type, mime = mime)
 

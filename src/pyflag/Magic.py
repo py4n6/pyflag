@@ -122,18 +122,25 @@ class MagicResolver:
         
         return max_score[1].type_str(), max_score[1].mime_str(), scores
 
+import pyflag.aff4.aff4 as aff4
+from pyflag.aff4.pyflag_attributes import *
+
 def set_magic(case, inode_id, magic, mime=None):
     """ Set the magic string on the inode """
-    args = dict(inode_id=inode_id,
-                type = magic)
-    if mime:
-        args['mime'] = mime
+    urn = aff4.oracle.get_urn_by_id(inode_id)
+    
+    aff4.oracle.set(urn, PYFLAG_TYPE, magic)
 
-    dbh = DB.DBO(case)
-    dbh.update("type", where="inode_id = '%s'" % inode_id,
-               **args)
-    if dbh.cursor.rowcount == 0:
-            dbh.insert("type", **args)
+#     args = dict(inode_id=inode_id,
+#                 type = magic)
+#     if mime:
+#         args['mime'] = mime
+
+#     dbh = DB.DBO(case)
+#     dbh.update("type", where="inode_id = '%s'" % inode_id,
+#                **args)
+#     if dbh.cursor.rowcount == 0:
+#             dbh.insert("type", **args)
 
 class Magic:
     """ This is the base class for all Magic handlers. """

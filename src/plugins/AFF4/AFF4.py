@@ -145,15 +145,6 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     ## the exit functions are called.
     order = 1000
     
-    def create(self, dbh, case):
-        """ Create a new case AFF4 Result file """
-        volume = aff4.ZipVolume(None, 'w')
-        filename = CacheManager.AFF4_MANAGER.make_volume_filename(case)
-        aff4.oracle.set(volume.urn, aff4.AFF4_STORED, filename)
-        aff4.oracle.set(filename, aff4.AFF4_CONTAINS, volume.urn)
-        volume.finish()
-        aff4.oracle.cache_return(volume)
-
     def startup(self, dbh, case):
         aff4.oracle = tdb_resolver.TDBResolver()        
 

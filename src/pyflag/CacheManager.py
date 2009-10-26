@@ -294,19 +294,19 @@ class AFF4Manager:
 
     def create_link(self, case, source, destination, include_in_VFS=True, **kwargs):
         """ Creates a link object from source urn to destination urn """
-        fd = aff4.Link(None, 'w')
-        volume_urn = self.make_volume_urn(case)
-        fd.urn = aff4.fully_qualified_name(destination, volume_urn)
-        aff4.oracle.set(fd.urn, AFF4_STORED, volume_urn)
-#        aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
-        aff4.oracle.set(fd.urn, AFF4_TARGET, aff4.fully_qualified_name(source, volume_urn))
-        fd.finish()
-        fd.close()
+        import pyflag.FileSystem as FileSystem
 
-        kwargs['path'] = path
-        kwargs['case'] = case
-        fd.include_in_VFS = kwargs
+        volume_urn = self.make_volume_urn(case)
+        urn = aff4.fully_qualified_name(destination, volume_urn)
         
-        return fd
+        ## Links are managed through inheritance now
+        aff4.oracle.set(urn, AFF4_INHERIT, source)
+
+        ## Add the new link to the VFS:
+        fsfd = FileSystem.DBFS(case)
+        destination_path = aff4.relative_name(destination, volume_urn)
+        fsfd.VFSCreate(urn, destination_path,
+                       size=aff4.oracle.resolve(destination, AFF4_SIZE) or 0,
+                       **kwargs)
         
 AFF4_MANAGER = AFF4Manager()
