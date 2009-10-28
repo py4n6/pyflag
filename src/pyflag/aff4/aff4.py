@@ -289,6 +289,10 @@ class AFFObject(object):
         return "<%s: %s instance at 0x%X>" % (self.urn, self.__class__.__name__, hash(self))
 
     def explain(self):
+        fd = StringIO.StringIO()
+        oracle.export_volume(self.urn, fd, 'turtle')
+        return fd.getvalue()
+        
         stored = oracle.resolve(self.urn, AFF4_STORED)
         result = "Stream %s %s:\n   %s" % (
             self.__class__.__name__,
@@ -1388,8 +1392,9 @@ class ZipVolume(RAWVolume):
             backing_fd.seek(directory_offset)
             ## This issues a warning - im not sure what im supposed to
             ## do about it since its in the python standard library?
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+##            with warnings.catch_warnings():
+##                warnings.simplefilter("ignore")
+            if 1:
                 backing_fd.write(zinfo.FileHeader())
                 
             backing_fd.write(data)
@@ -1565,8 +1570,8 @@ class ZipVolume(RAWVolume):
         
         ## Here we should have a valid zip file - what is our URN?
         try:
+            assert(zf.comment.startswith(FQN))
             self.urn = zf.comment
-            assert(self.urn.startswith(FQN))
         except Exception,e:
             ## Nope - maybe its in a __URN__ member
             try:

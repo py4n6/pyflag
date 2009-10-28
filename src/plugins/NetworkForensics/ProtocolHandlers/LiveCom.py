@@ -288,6 +288,19 @@ class MessageColumn(AFF4URN):
 
         value = parser.root.innerHTML()
         result.raw(value)
+
+    def render_html(self, inode_id, table_renderer):
+        import plugins.TableRenderers.HTMLBundle as HTMLBundle
+
+        fsfd = FileSystem.DBFS(table_renderer.case)
+        fd = fsfd.open(inode_id = inode_id)
+        parser = HTML.HTMLParser(tag_class = HTML.SanitizingTag)
+
+        parser.feed(fd.read(fd.size))
+        parser.close()
+
+        text = parser.root.innerHTML()
+        return text
         
     def display(self, value, row, result):
         dbh = DB.DBO(self.case)        
@@ -770,7 +783,7 @@ class AllWebMail(Reports.PreCannedCaseTableReports):
     default_table = 'WebMailTable'
     description = "View all Webmail messages"
     name = "/Network Forensics/Web Applications/Webmail"
-    columns = [ 'URN', 'From', 'To', 'Subject', 'Message', 'Service', 'Type']
+    columns = [ 'URN', 'AFF4VFS.Modified', 'From', 'To', 'Subject', 'Message', 'Service', 'Type']
     
 ## Unit tests:
 import pyflag.pyflagsh as pyflagsh

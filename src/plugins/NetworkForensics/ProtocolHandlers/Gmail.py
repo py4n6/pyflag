@@ -69,7 +69,17 @@ ms - Message stream - this one is really complex:
 
 me - User's mail box:
       [ 'me', email address ]
-     
+
+tb - Thread browser:
+      [ 'tb', start, number of messages in this batch,
+        [ message_id, message_id2, message_id3, ?, ?, [ list of mailboxes],
+          ?,
+          List of Receipeints followed by number of messages in thread in brackets, 
+          number of messages (basically > or >>),
+          Subject, Message summary, ?, ?, ?,
+          Short Date, Long Date, Timestamp in ms],
+        [ ... More messages like this ]
+      ]
 """
 import pyflag.FlagFramework as FlagFramework
 from pyflag.ColumnTypes import StringType, TimestampType, IntegerType, PacketType, guess_date
@@ -84,6 +94,7 @@ import pyflag.Time as Time
 import LiveCom
 import pdb
 import FileFormats.Javascript as Javascript
+import FileFormats.HTML as HTML
 import pyflag.Magic as Magic
 import pyflag.CacheManager as CacheManager
 import pyflag.aff4.aff4 as aff4
@@ -97,6 +108,8 @@ class GmailStreamMagic(Magic.Magic):
 
     regex_rules = [
         ( "while(1);", (0,0)),
+        ( "top.GG_iframeFn", (0,500)),
+        ( "<title>Gmail</title>", (0,500)),
         ]
 
 class GmailScanner(Scanner.GenScanFactory):
@@ -121,6 +134,55 @@ class GmailScanner(Scanner.GenScanFactory):
         url = "%s%s" % (self.url, query)
         
         return urlnorm.normalize(url)
+
+    def ub(self, fd, root):
+        self.current_time = int(root[2])/1000
+
+    def ti(self, fd, root):
+        self.current_box = root[1]
+
+    def tb(self, fd, root):
+        result = dict(From = "Mailbox %s" % self.current_box,
+                      type="Listing %s" % (root[1]),
+                      service = self.service)
+        
+        if self.current_time:
+            result['_sent'] = "from_unixtime(%d)" % (self.current_time)
+            
+        message_urn = "%s/%s/Listing %s/%s" % (
+            self.service, result['From'], self.current_time, root[1])
+
+        ## Make sure we dont have duplicates of the same message -
+        ## duplicates may occur in other connections, so we check
+        ## the webmail table for the same yahoo message id
+        fsfd = FileSystem.DBFS(fd.case)
+        try:
+            if fsfd.lookup(path = message_urn):
+                return
+        except RuntimeError:
+            pass
+        
+        message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
+            fd.case, message_urn, data = "<html><body><table>",
+            inherited = fd.urn)
+
+        message_fd.insert_to_table("webmail_messages",
+                                   result)
+
+        message_fd.write("<tr><th>Receipients</th><th></th><th>Subject</th><th>Message</th><th>Date</th></tr>")
+
+        index = 3
+        while 1:
+            try:
+                thread = root[index]
+
+                data = "<tr>" + "".join(["<td>%s</td>" % thread[x] for x in (6,7,8,9,14)])
+                message_fd.write(data)
+                index += 1
+            except IndexError: break
+
+        message_fd.write("</table></body></html>")
+        message_fd.close()
         
     def ms(self, fd, root):
         """ This is the main message parsing command """
@@ -171,27 +233,55 @@ class GmailScanner(Scanner.GenScanFactory):
         ## FIXME - ideally we would like to have a templating system
         ## where we can derive the different object offsets based on
         ## the version.
-        print "Gmail Version %s" % root[1]
+        pass
+        #print "Gmail Version %s" % root[1]
         
     def __init__(self):
         self.dispatcher = {'ms': self.ms,
+                           'ub': self.ub,
+                           'ti': self.ti,
+                           'tb': self.tb,
                            'v': self.version}
-    
-    def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
-        if "javascript" in mime and scores.get('GmailStreamMagic',0) > 0:
-            pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Gmail processing" % fd.inode_id)
 
+    def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
+        if scores.get('GmailStreamMagic',0) == 0:
+            return
+
+        pyflaglog.log(pyflaglog.DEBUG,"Opening %s for Gmail processing" % fd.inode_id)
+        self.current_time = None
+        self.current_box = 'Unknown'
+
+        if "html" in mime:
+            html_parser = HTML.HTMLParser()
+            html_parser.parse_fd(fd)
+            html_parser.close()
+
+            ## Process all script segments
+            for script_tag in html_parser.root.search("script"):
+                script = script_tag.innerHTML()
+                try:
+                    j=Javascript.JSParser()
+                    j.feed(script)
+                    j.close()
+                except: continue
+
+                self.process_js(j.root, fd)
+
+        elif "javascript" in mime:
             ## Make a new parser
             j=Javascript.JSParser()
             j.parse_fd(fd)
             j.close()
 
+            self.process_js(j.root, fd)
+
+    def process_js(self, tag, fd):
             ## gmail stream consist of arrays. The first element of
             ## the array is the command name, then the rest of the
             ## array is the args for that command. We look for
             ## commands which we support (much of the commands are not
             ## relevant), and pass the entire array up to the handler.
-            for x in j.root.search("Array"):
+            for x in tag.search("Array"):
                 try:
                     command = x.children[0]
                     assert command.name == 'string'

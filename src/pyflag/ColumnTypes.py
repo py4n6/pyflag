@@ -39,7 +39,7 @@ config=pyflag.conf.ConfObject()
 import pyflag.DB as DB
 import pyflag.TypeCheck as TypeCheck
 import pyflag.FileSystem as FileSystem
-import socket,re
+import socket,re, pdb
 import pyflag.Time as Time
 import time, textwrap, pdb
 import pyflag.Registry as Registry
@@ -1194,8 +1194,8 @@ class OldInodeIDType(IntegerType):
 class FilenameType(StringType):
     hidden = True
     LogCompatible = False
-    def __init__(self, name='Filename', inode_id='inode_id',
-                 basename=False, table='vfs',
+    def __init__(self, name='Filename', basename=False, table='vfs',
+                 column = 'path',
                  link=None, link_pane=None, case=None, **kwargs):
         if not link and not basename:
             link = query_type(case=case,
@@ -1205,7 +1205,7 @@ class FilenameType(StringType):
 
         ## This is true we only display the basename
         self.basename = basename
-        ColumnType.__init__(self,name=name, column=inode_id,
+        ColumnType.__init__(self,name=name, column=column,
                             link=link, link_pane=link_pane, table=table, **kwargs)
 
     def order_by(self):
@@ -1239,6 +1239,10 @@ class FilenameType(StringType):
 
     def create(self):
         return "path TEXT, name TEXT"
+
+    def make_index(self, dbh, table):
+        dbh.check_index(table, self.column, length=50)
+        dbh.check_index(table, 'name', length=50)
 
 class InodeInfo(StringType):
     """ Displays inode information from inode_id """

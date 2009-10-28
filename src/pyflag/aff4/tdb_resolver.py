@@ -110,7 +110,7 @@ NoneObject = aff4.NoneObject
 
 class BASETDBResolver:
     """ A basic resolver based on TDB """
-    def __init__(self):
+    def __init__(self, **args):
         ## urn -> urn_id, and urn_id -> urn
         self.urn_db = Tdb("urn.tdb")
 
@@ -340,13 +340,13 @@ except ImportError,e:
 ## Now extend this
 class TDBResolver(BASETDBResolver, aff4.Resolver):
     """ A resolver based on TDB """
-    def __init__(self):
+    def __init__(self, **args):
         self.read_cache = aff4.Store(50)
         self.write_cache = aff4.Store(50)
         self.clear_hooks()
         BASETDBResolver.__init__(self)
         self.set_defaults()
-        
+
     def add(self, uri, attribute, value):
         ## A dict means we store an anonymous object:
         if 0:

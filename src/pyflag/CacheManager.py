@@ -217,7 +217,7 @@ class AFF4Manager:
         return fd
         
     def create_cache_fd(self, case, path, include_in_VFS=True,
-                        inherited = None, timestamp = None,
+                        inherited = None, timestamp = None, compression=True,
                         **kwargs):
         """ Creates a new non-seakable AFF4 Image stream that can be
         written on.
@@ -233,6 +233,8 @@ class AFF4Manager:
         fd = PyFlagImage(None, 'w')
         volume_urn = self.make_volume_urn(case)
         fd.urn = aff4.fully_qualified_name(path, volume_urn)
+        if not compression:
+            aff4.oracle.set(fd.urn, AFF4_COMPRESSION, 0)
 
         if timestamp:
             aff4.oracle.set(fd.urn, AFF4_TIMESTAMP, timestamp)

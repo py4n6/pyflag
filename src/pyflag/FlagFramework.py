@@ -29,7 +29,7 @@
 
 """ Main flag framework modules contains many core classes
 """ 
-import sys,os
+import sys,os, pdb
 import pyflag.conf
 config=pyflag.conf.ConfObject()
 import pyflag.pyflaglog as pyflaglog
@@ -1069,7 +1069,7 @@ class CaseTable:
                 string += " " + c.misc
             except IndexError:
                 pass
-            
+
             tmp.append(string)
             if c.name in self.index or c.column in self.index:
                 indexes.append(c)
@@ -1086,10 +1086,9 @@ class CaseTable:
         dbh.execute(sql)
 
         ## Check indexes:
-        try:
-            for i in indexes:
-                i.make_index(dbh, name)
-        except: pass
+        for i in indexes:
+            i.make_index(dbh, name)
+            
 ## The following functions are for unicode support and are mostly
 ## borrowed from django:
 def smart_unicode(s, encoding='utf-8', errors='ignore'):

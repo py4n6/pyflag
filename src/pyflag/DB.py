@@ -495,6 +495,8 @@ class PooledDBO:
         
         self.dbh = pool.get()
 
+        ## FIXME - the TZ should be set when the dbh is connected.
+        return
         ## Ensure the tz is properly reset before handing out dbh:
         c = self.dbh.cursor()
         try:

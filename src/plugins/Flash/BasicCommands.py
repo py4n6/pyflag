@@ -35,6 +35,7 @@ import fnmatch
 import pyflag.TEXTUI as TEXTUI
 import pyflag.aff4.aff4 as aff4
 from pyflag.aff4.aff4_attributes import *
+import pyflag.CacheManager as CacheManager
 
 class load(pyflagsh.command):
     """ Assigns a current case for use in the shell """
@@ -193,6 +194,7 @@ class less(ls):
             return "Pipe files to less pager "
         
         def execute(self):
+            pager = os.environ.get("PAGER","less")
             for arg in self.args:
                 arg = self.environment.CWD + arg
                 try:
@@ -200,7 +202,8 @@ class less(ls):
                 except IOError:
                     fd=self.environment._FS.open(urn=arg)
                 
-                pipe=os.popen("less","w")
+                pipe=os.popen(pager,"w")
+
                 while 1:
                     data=fd.read(10000)
                     if not data: break
@@ -341,11 +344,12 @@ class iless(istat):
         return "Pipe inodes to less pager "
         
     def execute(self):
+        pager = os.environ.get("PAGER","less")
         for inode in self.args:
             fd=self.environment._FS.open(inode=inode)
-            pipe=os.popen("less","w")
+            pipe=os.popen(pager,"w")
             while 1:
-                data=fd.read(10000)
+                data=fd.read(1000000)
                 if not data: break
                 pipe.write(data)
                 
@@ -360,9 +364,10 @@ class iiless(iless):
         if not self.environment._CASE:
             raise RuntimeError("You must specify a case first (try load casename)")
         dbh = DB.DBO(self.environment._CASE)
+        pager = os.environ.get("PAGER","less")
         for inode_id in self.args:
             fd=self.environment._FS.open(inode_id=inode_id)
-            pipe=os.popen("less","w")
+            pipe=os.popen(pager,"w")
             while 1:
                 data=fd.read(10000)
                 if not data: break
@@ -419,7 +424,7 @@ class iicp(iless):
                 outfd = open(self.args[-1],'w')
                 
             while 1:
-                data=fd.read(10000)
+                data=fd.read(100000)
                 if not data: break
                 outfd.write(data)
                     
@@ -613,6 +618,21 @@ class file(ls):
 
             yield dict(type=type, mime = mime)
 
+class seal(load):
+    """ Seals the specified case by closing off the AFF4 volume. After using this command its possible to use the AFF4 volume (in the results dir) to interchange data.
+    """
+    def execute(self):
+        args=self.args
+        text=''
+        try:
+            case=args[0]
+            yield "Completing AFF4 volume %s (This could take a while)" % CacheManager.AFF4_MANAGER.make_volume_filename(case)
+            CacheManager.AFF4_MANAGER.close(case)
+            yield "Done"
+        except Exception,e:
+            raise RuntimeError("Unable to open filesystem %s (%s)" %(text,e))
+
+
 class ifile(ls):
     """ Returns the file magic of args """
     def execute(self):
@@ -623,9 +643,8 @@ class ifile(ls):
         for inode_id in self.args:
             type, mime, scores = m.find_inode_magic(
                 case = self.environment._CASE, inode_id=inode_id)
-
-            print scores
-
+            
+            yield scores
             yield dict(type=type, mime = mime)
 
 class delete_case(load):

@@ -263,7 +263,10 @@ class File:
         data"""
         fd = aff4.oracle.open(self.urn, 'r')
         try:
-            result.text(fd.explain(), font='typewriter')
+            data = fd.explain()
+            data = data.replace("<","&lt;")
+            data = data.replace(">","&gt;")
+            result.text(data, font='typewriter')
         finally:
             aff4.oracle.cache_return(fd)
 

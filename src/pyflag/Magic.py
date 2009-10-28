@@ -127,20 +127,8 @@ from pyflag.aff4.pyflag_attributes import *
 
 def set_magic(case, inode_id, magic, mime=None):
     """ Set the magic string on the inode """
-    urn = aff4.oracle.get_urn_by_id(inode_id)
-    
+    urn = aff4.oracle.get_urn_by_id(inode_id)    
     aff4.oracle.set(urn, PYFLAG_TYPE, magic)
-
-#     args = dict(inode_id=inode_id,
-#                 type = magic)
-#     if mime:
-#         args['mime'] = mime
-
-#     dbh = DB.DBO(case)
-#     dbh.update("type", where="inode_id = '%s'" % inode_id,
-#                **args)
-#     if dbh.cursor.rowcount == 0:
-#             dbh.insert("type", **args)
 
 class Magic:
     """ This is the base class for all Magic handlers. """

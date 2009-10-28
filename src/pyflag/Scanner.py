@@ -177,6 +177,10 @@ def scan_inode(case, inode_id, scanners, cookie, force=False):
                              (stat['path'],stat['name'],stat['inode_id']))
         pyflaglog.log(pyflaglog.VERBOSE_DEBUG, messages)
 
+    ## We dont care about scanning the same inode multiple times now -
+    ## so this is not necessary
+    return
+
     # Store the fact that we finished in the inode table:
     scanner_names = ','.join([ c.__class__.__name__ for c in factories ])
     try:

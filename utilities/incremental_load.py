@@ -154,6 +154,7 @@ for f in files:
         fd = open(os.path.join(directory, f))
         outfd = CacheManager.AFF4_MANAGER.create_cache_fd(config.case, f,
                                                           include_in_VFS = False,
+                                                          compression = False,
                                                           inherited = baseurn)
         if not baseurn: baseurn = outfd.urn
         while 1:

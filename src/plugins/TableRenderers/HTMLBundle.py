@@ -29,7 +29,7 @@ static) - you do not need pyflag to view them, just a web browser.
 
 This is a good way of delivering a report.
 """
-import os, os.path, tempfile, sys, time
+import os, os.path, tempfile, sys, time, pdb
 import pyflag.UI as UI
 import csv, cStringIO
 import pyflag.DB as DB
@@ -557,7 +557,7 @@ import pyflag.pyflaglog as pyflaglog
 
 class Export(Farm.Task):
     """ A Distributable table for exporting an inode into HTML """
-    def run(self, case, inode_id, *args):
+    def run(self,case=None, inode_id=0, *args, **kwargs):
         table_renderer = HTMLDirectoryRenderer(case=case, include_extra_files=True)
         self.export(case, inode_id, table_renderer)
 
@@ -584,15 +584,16 @@ class Export(Farm.Task):
         except AttributeError,e:
             pass
 
+        pdb.set_trace()
         ## Now explain this file:
         import pyflag.HTMLUI as HTMLUI
         result = HTMLUI.HTMLUI(initial = True)
-        result.heading("How to derive inode %s" % fd.inode)
+        result.heading("How to derive inode %s" % fd.inode_id)
         
         filename = "inodes/%s_explain.html" % inode_id
         if not table_renderer.filename_in_archive(filename):        
             result = HTMLUI.HTMLUI(initial = True)
-            result.heading("How to derive inode %s" % fd.inode)
+            result.heading("How to derive inode %s" % fd.inode_id)
 
             result.decoration='naked'
             fd.explain(None, result)
@@ -600,17 +601,10 @@ class Export(Farm.Task):
             table_renderer.add_file_from_string(filename, result.display())
 
 def render_html(self, inode_id, table_renderer):
-    dbh = DB.DBO()
-    case = table_renderer.case
-    dbh.insert("jobs",
-               command = "Export",
-               arg1 = case,
-               arg2 = inode_id,
-               cookie = int(time.time())
-               )
+    Farm.post_job("Export", dict(case=self.case, inode_id=inode_id))
 
     filename, content_type, fd = table_renderer.make_archive_filename(inode_id)
-    result = "<a href='%s'>%s</a><br />" % (filename, fd.inode)
+    result = "<a href='%s'>%s</a><br />" % (filename, fd.inode_id)
     
     try:
         filename = "inodes/%s_summary.html" % inode_id
@@ -624,7 +618,7 @@ def render_html(self, inode_id, table_renderer):
     result+="<a href='%s'><img src=images/question.png /></a>" %(filename,)
 
     ## Check if there are annotations for this
-    dbh = DB.DBO(case)
+    dbh = DB.DBO(self.case)
     dbh.execute("select * from annotate where inode_id=%r", inode_id)
     for row in dbh:
         result += "<br>%s" % row['note']

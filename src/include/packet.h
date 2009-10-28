@@ -119,7 +119,7 @@ struct struct_property_t {
       which contains the size. If size above is 0, we consult this to
       determine the size (this is useful in strings etc).
   */
-  int size_p;
+  size_t size_p;
   struct list_head list;
 };
 

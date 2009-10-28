@@ -98,7 +98,7 @@ class LoadAFF4Volume(Reports.report):
         for v in loaded_volumes:
             for urn in aff4.oracle.resolve_list(v, AFF4_CONTAINS):
                 type = aff4.oracle.resolve(urn, AFF4_TYPE)
-                if type in SUPPORTED_STREAMS:
+                if 1 or type in SUPPORTED_STREAMS:
                     if "/" in urn:
                         path = "%s/%s" % (base_dir, urn[urn.index("/"):])
                     else:
@@ -149,7 +149,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     order = 1000
     
     def startup(self, dbh, case):
-        aff4.oracle = tdb_resolver.TDBResolver()        
+        aff4.oracle = tdb_resolver.TDBResolver(hashsize=1024)        
         ## configure some defaults
         aff4.oracle.set(GLOBAL, CONFIG_RDF_SERIALIZER, config.RDF_SERIALIZER)
 
@@ -163,7 +163,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
         except AttributeError: pass
 
         ## Make sure we have our own unique resolver
-        aff4.oracle = tdb_resolver.TDBResolver()
+        aff4.oracle = tdb_resolver.TDBResolver(hashsize=1024)
 
     def exit(self, dbh, case):
         """ Check for dirty volumes and closes them """
@@ -183,7 +183,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
 class AFF4VFS(FlagFramework.CaseTable):
     """ A VFS implementation using AFF4 volumes """
     name = 'vfs'
-    indexes = ['urn_id']
+    index = ['inode_id', 'Filename']
     columns = [ [ AFF4URN, {} ],
                 [ DeletedType, {} ],
                 [ IntegerType, dict(name = 'UID', column = 'uid')],
