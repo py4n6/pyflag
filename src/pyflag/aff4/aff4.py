@@ -17,7 +17,7 @@ low level API alone.
 """
 import uuid, posixpath, hashlib, base64, bisect
 import urllib, os, re, struct, zlib, time, sys, urlparse
-import cStringIO
+import StringIO
 import threading, mutex
 import pdb
 import textwrap, os.path, glob
@@ -430,7 +430,7 @@ class FileBackedObject(FileLikeObject):
 
         Returns an open filehandle or NoneObject.
         """
-        paths = os.environ.get("AFF4_FILEPATH",".").split(":")
+        paths = os.environ.get("AFF4_FILEPATH",".:/").split(":")
         for p in paths:
             try:
                 return open("%s/%s" % (p, filename), 'rb')
@@ -542,7 +542,7 @@ try:
             if urn:
                 if mode=='r':
                     self.handle = pycurl.Curl()
-                    self.buffer = cStringIO.StringIO()
+                    self.buffer = StringIO.StringIO()
 
                     def parse_header_callback(header):
                         ## we are looking for a Content-Range header
@@ -723,11 +723,19 @@ class URNObject:
             return NoneObject("URN %s has no attribute %s" % (self.urn, attribute))
 
     def export(self, prefix=''):
+        """ A Simple ntriples serializer """
         result =''
         for attribute, v in self.properties.items():
             if not attribute.startswith(VOLATILE_NS):
                 for value in v:
-                    result += prefix + "%s=%s\n" % (attribute, value)
+                    if attribute.startswith("aff4://"):
+                        attribute = "<%s>" % attribute
+                    value = str(value)
+                    if value.startswith("aff4://"):
+                        value = "<%s>" % value
+                    else:
+                        value = '"%s"' % value
+                    result += prefix + "%s %s .\n" % (attribute, value)
                 
         return result
 
@@ -907,7 +915,9 @@ class Resolver:
             obj = self[uri] = self.urn_obj_class(uri)
 
         DEBUG(_DEBUG, "Releasing %s ",uri)
-        obj.lock.release(mode)
+        try:
+            obj.release(mode)
+        except: pass
 
     def __str__(self):
         result = ''
@@ -959,6 +969,12 @@ class Resolver:
         for urn, obj in self.urn.items():
             result += obj.export(prefix=urn + " ")
         return result
+
+    def export_volume(self, volume_urn, fd, type):
+        """ We only support type == ntriples """
+        print "Exporting ntriples"
+        for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):
+            fd.write(self.export(urn, prefix="<%s> " % urn ))
 
     def register_add_hook(self, cb):
         """ Callbacks may be added here to be notified of add
@@ -1057,9 +1073,9 @@ class ImageWorker(threading.Thread):
         threading.Thread.__init__(self)
 
         self.condition_variable = condition_variable
-        self.buffer = cStringIO.StringIO()
-        self.bevy = cStringIO.StringIO()
-        self.bevy_index = cStringIO.StringIO()
+        self.buffer = StringIO.StringIO()
+        self.bevy = StringIO.StringIO()
+        self.bevy_index = StringIO.StringIO()
         self.chunk_size = chunk_size
         self.chunks_in_segment = chunks_in_segment
         self.bevy_size = chunk_size * chunks_in_segment
@@ -1119,6 +1135,8 @@ class ImageWorker(threading.Thread):
                             self.bevy.getvalue())
             volume.writestr(subject + '.idx',
                             self.bevy_index.getvalue())
+        except:
+            pdb.post_mortem()
         finally:
             ## Done
             oracle.cache_return(volume)
@@ -1507,7 +1525,7 @@ class ZipVolume(RAWVolume):
         ## Is this file dirty?
         if oracle.resolve(self.urn, AFF4_VOLATILE_DIRTY):
             ## Get a segment
-            result = cStringIO.StringIO()
+            result = StringIO.StringIO()
             type = oracle.resolve(GLOBAL, CONFIG_RDF_SERIALIZER) or 'turtle'
             oracle.export_volume(self.urn, result, type)
             
@@ -1567,7 +1585,7 @@ class ZipVolume(RAWVolume):
             if basename == 'information':
                 ## A properties file refers to the object which
                 ## contains it:
-                fd = cStringIO.StringIO(zf.read(zinfo.filename))
+                fd = StringIO.StringIO(zf.read(zinfo.filename))
                 oracle.parse(fd = fd, format = extension,
                              context=os.path.dirname(subject))
                 
@@ -1976,7 +1994,7 @@ class Map(FileLikeObject):
     def close(self):
         if self.mode == 'r': return
 
-        fd = cStringIO.StringIO()
+        fd = StringIO.StringIO()
         oracle.set(self.urn, AFF4_SIZE, self.size)
 
         previous = None
@@ -2582,7 +2600,7 @@ def create_volume(filename):
     volume for appending. We return the volume URN.
     """
     ## Try to load the volume
-    load_volume(filename)
+    #load_volume(filename)
     volume_urn = oracle.resolve(filename, AFF4_CONTAINS)
     if volume_urn:
         return volume_urn

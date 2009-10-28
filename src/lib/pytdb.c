@@ -259,8 +259,9 @@ static int tdbresolver_dealloc(BaseTDBResolver *self) {
 };
 
 typedef struct TDB_DATA_LIST {
-  uint32_t offset;
-  uint32_t length;
+  uint64_t offset;
+  uint16_t length;
+  uint16_t encoding_type;
 } TDB_DATA_LIST;
 
 /* Given an int serialise into the buffer */

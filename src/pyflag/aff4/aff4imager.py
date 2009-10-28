@@ -1,16 +1,19 @@
 #!/usr/bin/python
-from aff4 import *
+import aff4
 from aff4_attributes import *
+import tdb_resolver
+
+aff4.oracle = tdb_resolver.TDBResolver()
 
 import optparse, pdb
-import sys
+import sys, os
 
 parser = optparse.OptionParser()
 parser.add_option("-i", "--image", default=None,
                   action='store_true',
                   help = "Imaging mode")
 
-parser.add_option("-m", "--max_size", default=0,
+parser.add_option("-m", "--max_size", default=0, type=int,
                   help = "Try to change volumes after the volume is bigger than this size")
 
 parser.add_option("-o", "--output", default=None,
@@ -84,14 +87,14 @@ parser.add_option("-p", "--password", default='',
 (options, args) = parser.parse_args()
     
 ## Load defaults into configuration space
-oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
-oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
+aff4.oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
+aff4.oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 
 if options.password:
-    oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, options.password)
+    aff4.oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, options.password)
 
 ## Prepare an identity for signing
-IDENTITY = load_identity(options.key, options.cert)
+IDENTITY = aff4.load_identity(options.key, options.cert)
 
 VOLUMES = []
 for volume_set in options.load:
@@ -103,29 +106,30 @@ for volume_set in options.load:
         ## Make a combined stream
         m = Map(None, 'w')
         m.urn  = loaded_volume_set[0] + "/combined"
-        oracle.set(m.urn, AFF4_STORED, AFF4_SPECIAL_URN_NULL)
-        oracle.set(m.urn, AFF4_HIGHLIGHT, 7)
+        aff4.oracle.set(m.urn, AFF4_STORED, AFF4_SPECIAL_URN_NULL)
+        aff4.oracle.set(m.urn, AFF4_HIGHLIGHT, 7)
         m.finish()
         m.mode = 'r'
 
         ## Add the image to the map
         for t in loaded_volume_set:
-            m.write_from(t, 0, oracle.resolve(t, AFF4_SIZE))
+            m.write_from(t, 0, aff4.oracle.resolve(t, AFF4_SIZE))
 
-        oracle.set(m.urn, AFF4_SIZE, m.size)
+        aff4.oracle.set(m.urn, AFF4_SIZE, m.size)
 
         ## The map is ready for use
-        oracle.cache_return(m)
+        aff4.oracle.cache_return(m)
         
     VOLUMES.extend(loaded_volume_set)
 
 ## Use the high level interface to get what we want:
 if options.image:
+    os.environ['AFF4_FILEPATH'] = '/'
     ## Imaging mode
-    volume = CreateNewVolume(options.output, encrypted=options.encrypt,
-                             password=options.password,
-                             chunks_in_segment=options.chunks_in_segment,
-                             max_volume_size = parse_int(options.max_size))
+    volume = aff4.CreateNewVolume(options.output, encrypted=options.encrypt,
+                                  password=options.password,
+                                  chunks_in_segment=options.chunks_in_segment,
+                                  max_volume_size = options.max_size)
 
     ## Add any identities needed
     volume.add_identity(options.key, options.cert)
@@ -136,7 +140,7 @@ if options.image:
         if "://" not in in_urn:
             in_urn = "file://%s" % in_urn
 
-        in_fd = oracle.open(in_urn)
+        in_fd = aff4.oracle.open(in_urn)
         while 1:
             data = in_fd.read(1024 * 1024)
             if not data: break
@@ -149,7 +153,7 @@ if options.image:
 elif options.dump:
     ## Look for the right stream in one of the volumes
     for v in VOLUMES:
-        stream = oracle.open(fully_qualified_name(options.dump, v), 'r')
+        stream = aff4.oracle.open(fully_qualified_name(options.dump, v), 'r')
         if stream: break
 
     output = options.output
@@ -167,19 +171,19 @@ elif options.dump:
 
             output_fd.write(data)
     finally:
-        oracle.cache_return(stream)
+        aff4.oracle.cache_return(stream)
         if output:
             output_fd.close()
             
 elif options.info:
-    print oracle
+    print aff4.oracle
     
 elif options.verify:
     ## Scan all volumes for identities
     for volume_urn in VOLUMES:
-        for identity_urn in oracle.resolve_list(volume_urn, AFF4_IDENTITY_STORED):
+        for identity_urn in aff4.oracle.resolve_list(volume_urn, AFF4_IDENTITY_STORED):
             ## Open each identity and verify it
-            identity = oracle.open(identity_urn, 'r')
+            identity = aff4.oracle.open(identity_urn, 'r')
             try:
                 print "\n****** Identity %s verifies *****" % identity_urn
                 print "    CN: %s \n" % identity.x509.get_subject().as_text()
@@ -191,7 +195,7 @@ elif options.verify:
                               (uri, calculated.encode("hex"), value.encode("hex"))
 
                 identity.verify(verify_cb = print_result)
-            finally: oracle.cache_return(identity)
+            finally: aff4.oracle.cache_return(identity)
 else:
     print "You must specify a mode (try -h)"
     
