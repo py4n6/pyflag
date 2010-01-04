@@ -63,8 +63,9 @@ import StringIO
 import pyflag.Scanner as Scanner
 import pyflag.Store as Store
 import pyflag.CacheManager as CacheManager
-from pyflag.aff4.aff4_attributes import *
-import pyflag.aff4.aff4 as aff4
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 class File:
     """ This is a proxy object to the underlying AFF4 stream object.
@@ -72,7 +73,7 @@ class File:
     specifier = None
     ignore = False
     overread = False
-    
+
     def __init__(self, case, inode_id=None, urn=None, path=None):
         self.case = case
         dbh = DB.DBO(case)
@@ -85,29 +86,32 @@ class File:
             row = dbh.fetch()
             if not row: raise IOError("File not found: %s" % path)
             self.inode_id = row['inode_id']
-            self.urn = aff4.oracle.get_urn_by_id(self.inode_id)
-            
+            self.urn = pyaff4.RDFURN()
+            ## This will raise if the urn is not found
+            if(not oracle.get_urn_by_id(self.inode_id, self.urn)):
+                raise IOError("URN %s not known" % self.inode_id)
+
         elif urn:
             self.urn = urn
-            self.inode_id = aff4.oracle.get_id_by_urn(urn)
+            self.inode_id = oracle.get_id_by_urn(urn)
         else:
-            self.urn = aff4.oracle.get_urn_by_id(inode_id)
+            self.urn = pyaff4.RDFURN()
+            oracle.get_urn_by_id(inode_id, self.urn)
             self.inode_id = inode_id
 
             if not self.urn:
                 raise IOError("Unable to find urn for inode_id %s" % inode_id)
 
-        fd = aff4.oracle.open(self.urn, 'r')
+        fd = oracle.open(self.urn, 'r')
         if not fd:
-            print self.urn
-            raise IOError("URN %s not found" % self.urn)
+            raise IOError("URN %s not found" % self.urn.value)
         try:
-            self.size = fd.size
+            self.size = fd.size.value
         finally:
-            aff4.oracle.cache_return(fd)
-            
+            fd.cache_return()
+
         self.readptr = 0
-        
+
         # should reads return slack space or overread into the next block? 
         # NOTE: not all drivers implement this (only really Sleuthkit)
         self.slack = False
@@ -117,8 +121,8 @@ class File:
         pass
 
     def __getitem__(self, item):
-        return aff4.oracle.resolve(self.urn, item)
-    
+        return oracle.resolve(self.urn, item)
+
     def seek(self, offset, rel=None):
         """ Seeks to a specified position inside the file """
         ## If the file is cached we seek the backing file:
@@ -137,19 +141,18 @@ class File:
             raise IOError("Invalid Arguement")
 
         return self.readptr
-         
+
     def tell(self):
         """ returns the current read pointer"""
         return self.readptr
 
     def get_range(self, offset):
-        fd = aff4.oracle.open(self.urn, 'r')
+        fd = oracle.open(self.urn, 'r')
         try:
             fd.seek(offset)
             return fd.get_range()
         finally:
-            aff4.oracle.cache_return(fd)
-        
+            fd.cache_return()
 
     def read(self, length=None):
         """ Reads length bytes from file, or less if there are less
@@ -157,12 +160,12 @@ class File:
         if length is None:
             length = self.size - self.readptr
 
-        fd = aff4.oracle.open(self.urn, 'r')
+        fd = oracle.open(self.urn, 'r')
         try:
             fd.seek(self.readptr)
             result = fd.read(length)
         finally:
-            aff4.oracle.cache_return(fd)
+            fd.cache_return()
 
         self.readptr+=len(result)
         return result
@@ -261,14 +264,14 @@ class File:
     def explain(self, query, result):
         """ This method is called to explain how we arrive at this
         data"""
-        fd = aff4.oracle.open(self.urn, 'r')
+        fd = oracle.open(self.urn, 'r')
         try:
             data = fd.explain()
             data = data.replace("<","&lt;")
             data = data.replace(">","&gt;")
             result.text(data, font='typewriter')
         finally:
-            aff4.oracle.cache_return(fd)
+            fd.cache_return()
 
     def summary(self, query,result):
         """ This method draws a summary of the file.
@@ -1013,35 +1016,45 @@ class DBFS(FileSystem):
         if directory: return
 
         if urn:
-            inode_id = aff4.oracle.get_id_by_urn(urn)
+            inode_id = oracle.get_id_by_urn(urn)
 
         if not inode_id: raise RuntimeError("No inode_id found for the urn %s" % urn)
+        xsddatetime = pyaff4.XSDDatetime()
+        integer = pyaff4.XSDInteger()
+
         inode_properties = dict(status=status,
-                                mode= aff4.oracle.resolve(urn, AFF4_MODE) or 40755,
+                                mode= 040755,
                                 inode_id = inode_id,
                                 type='file',
-                                mtime = timestamp or aff4.oracle.resolve(urn, AFF4_MTIME) or \
-                                        aff4.oracle.resolve(urn, AFF4_TIMESTAMP),
-                                atime = aff4.oracle.resolve(urn, AFF4_ATIME) or timestamp,
-                                ctime = aff4.oracle.resolve(urn, AFF4_CTIME) or timestamp,
-                                size = size or aff4.oracle.resolve(urn, AFF4_SIZE),
+                                size = size,
                                 _fast=_fast,
                                 path = FlagFramework.normpath(posixpath.dirname(path)),
                                 name = posixpath.basename(path))
 
-        for t in ['ctime','atime','mtime']:
-            time = inode_properties.pop(t)
-            if time:
-                inode_properties["_"+t] = DB.expand("from_unixtime(%r)", time)
+        if oracle.resolve_value(urn, pyaff4.AFF4_SIZE, integer):
+            inode_properties['size'] = integer.value
+
+        if oracle.resolve_value(urn, pyaff4.AFF4_UNIX_PERMS, integer):
+            inode_properties['mode'] = integer.value
+
+        if oracle.resolve_value(urn, pyaff4.AFF4_MTIME, xsddatetime):
+            inode_properties['mtime'] = xsddatetime.serialised
+
+        if oracle.resolve_value(urn, pyaff4.AFF4_ATIME, xsddatetime):
+            inode_properties['atime'] = xsddatetime.serialised
+
+        if oracle.resolve_value(urn, pyaff4.AFF4_CTIME, xsddatetime):
+            inode_properties['ctime'] = xsddatetime.serialised
 
         ## Is it already present?
-        dbh.execute("select inode_id from vfs where inode_id = %r", inode_id)
-        if dbh.fetch():
-            dbh.update('vfs', where='inode_id = "%s"' % inode_id,
-                       **inode_properties)
-        else:
-            dbh.insert('vfs',**inode_properties)
+#        dbh.execute("select inode_id from vfs where inode_id = %r", inode_id)
+#        if dbh.fetch():
+#            dbh.update('vfs', where='inode_id = "%s"' % inode_id,
+#                       **inode_properties)
+#        else:
+#            dbh.insert('vfs',**inode_properties)
 
+        dbh.insert('vfs',**inode_properties)
         return inode_id
 
     def longls(self,path='/', dirs = None):
@@ -1070,8 +1083,8 @@ class DBFS(FileSystem):
         return [ "%s" % (dent['name']) for dent in self.longls(path,dirs) ]
 
     def istat(self, inode_id):
-        urn = aff4.oracle.get_urn_by_id(inode_id)
-        result = aff4.oracle.export_dict(urn)
+        urn = oracle.get_urn_by_id(inode_id)
+        result = oracle.export_dict(urn)
         result['urn'] = [urn,]
         return result
 

@@ -1232,10 +1232,10 @@ class FilenameType(StringType):
 
     def operator_literal(self, column, operator, pattern):
         column = self.escape_column_name(self.column)
-        return DB.expand("%s in (select inode_id from `%s` where "
+        return DB.expand("`%s`.inode_id in (select inode_id from `%s` where "
                          "concat(`%s`.path, `%s`.name) %s %r)",
                          (self.table, self.table, self.table,
-                          column, operator, pattern))
+                          self.table, operator, pattern))
 
     def create(self):
         return "path TEXT, name TEXT"

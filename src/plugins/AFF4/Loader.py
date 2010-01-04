@@ -8,9 +8,11 @@ volume
 """
 import pyflag.Reports as Reports
 import pyflag.CacheManager as CacheManager
-import pyflag.aff4.aff4 as aff4
 import pyflag.FlagFramework as FlagFramework
 import pdb
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 class LoadVolume(Reports.report):
     """ Creates a new AFF4 object in the VFS. """
@@ -30,7 +32,7 @@ class LoadVolume(Reports.report):
                     query['case'], FlagFramework.normpath(query['name']))
 
                 for f in query.getarray('files'):
-                    fd = aff4.oracle.open(f)
+                    fd = oracle.open(f)
                     new_fd.write_from(fd.urn, 0, fd.size)
 
                 new_fd.close()
@@ -39,3 +41,5 @@ class LoadVolume(Reports.report):
             result.fileselector("Select files to load", 'files')
             result.text("Files will be logically concatenated in the order selected")
             result.textfield("Name of object in VFS",'name')
+
+

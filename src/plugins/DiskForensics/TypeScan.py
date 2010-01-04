@@ -37,19 +37,21 @@ import pyflag.Registry as Registry
 from pyflag.ColumnTypes import StringType, TimestampType,AFF4URN, FilenameType, IntegerType
 import fnmatch
 import pyflag.Magic as Magic
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.pyflag_attributes import *
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 class TypeMagic(Magic.Magic):
     """ Suggests a type based on hints """
 
     def score(self, fd, data):
-        hint = aff4.oracle.resolve(fd.urn, PYFLAG_TYPE)
-        if hint:
-            self.type = hint
-            
+        hint = pyaff4.XSDString()
+
+        if oracle.resolve_value(fd.urn, pyaff4.AFF4_FILE_TYPE, hint):
+            self.type = hint.value
+
             return 50
-        
+
         return 0
 
 ## A report to examine the Types of different files:

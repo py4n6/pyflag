@@ -148,6 +148,47 @@ class Store:
         for t, k, obj in self.creation_times:
             yield obj
 
+## A much faster and simpler implementation of the above
+class FastStore:
+    """ This is a cache which expires objects in oldest first manner. """
+    def __init__(self, limit=50, max_size=0, kill_cb=None):
+        self.age = []
+        self.hash = {}
+        self.limit = max_size or limit
+        self.kill_cb = kill_cb
+
+    def expire(self):
+        while len(self.age) > self.limit:
+            x = self.age.pop(0)
+            ## Kill the object if needed
+            if self.kill_cb:
+                self.kill_cb(self.hash[x])
+
+            del self.hash[x]
+
+    def add(self, urn, obj):
+        self.hash[urn] = obj
+        self.age.append(urn)
+        self.expire()
+
+    def get(self, urn):
+        return self.hash[urn]
+
+    def __contains__(self, obj):
+        return obj in self.hash
+
+    def __getitem__(self, urn):
+        return self.hash[urn]
+
+    def flush(self):
+        if self.kill_cb:
+            for x in self.hash.values():
+                self.kill_cb(x)
+
+        self.hash = {}
+        self.age = []
+
+
 ## Store unit tests:
 import unittest
 import random, time

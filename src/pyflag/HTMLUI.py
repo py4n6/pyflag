@@ -30,7 +30,6 @@
 """ Main UI module.
 
 The output within flag is abstracted such that it is possible to connect any GUI backend with any GUI Front end. This is done by use of UI objects. When a report runs, it will generate a UI object, which will be built during report execution. The report then returns the object to the calling framework which will know how to handle it. Therefore the report doesnt really know or care how the GUI is constructed """
-import pyflag.aff4.aff4 as aff4
 import re,cgi,types,textwrap,sys
 from urllib import quote
 import pyflag.FlagFramework as FlagFramework
@@ -213,7 +212,7 @@ class HTMLUI(UI.GenericUI):
         try:
             name = file.name
         except AttributeError:
-            name = aff4.escape_filename(file.urn)
+            name = file.urn.value
 
         self.generator.headers=[("Content-Disposition",expand("attachment; filename=%s",
                                                               name))]

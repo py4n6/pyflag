@@ -1532,7 +1532,7 @@ PyMODINIT_FUNC initpytdb(void) {
   /* create module */
   PyObject *m = Py_InitModule3("pytdb", tdb_methods,
 			       "PyTDB module.");
-  
+
   /* setup tdbType type */
   tdbType.tp_new = PyType_GenericNew;
   if (PyType_Ready(&tdbType) < 0)

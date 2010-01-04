@@ -18,7 +18,7 @@ class PartitionScanner(Scanner.GenScanFactory):
     """
     default = True
     group = "Disk Forensics"
-    
+
     def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
         if 'x86 boot sector' in type:
             try:
@@ -34,7 +34,7 @@ class PartitionScanner(Scanner.GenScanFactory):
                 ## Add new maps for each partition
                 map = CacheManager.AFF4_MANAGER.create_cache_map(
                     fd.case,
-                    "%s/%s" % (fd.urn, name))
+                    "%s/%s" % (fd.urn.parser.query, name))
 
                 map.write_from(fd.urn, SECTOR_SIZE * part[0],
                                SECTOR_SIZE * part[1])
@@ -52,13 +52,12 @@ class PartitionScanner(Scanner.GenScanFactory):
                     Magic.set_magic(fd.case,
                                     inode_id = map.inode_id,
                                     mime = "application/filesystem",
-                                    magic = "Filesystem")                    
+                                    magic = "Filesystem")
 
                 except: pass
 
                 Scanner.scan_inode_distributed(fd.case, map.inode_id,
                                                scanners, cookie)
-                
 
 class FilesystemLoader(Scanner.GenScanFactory):
     """ A Scanner to automatically load filesystem """
@@ -77,9 +76,10 @@ class FilesystemLoader(Scanner.GenScanFactory):
         skfd = fs.open(inode=skfs_inode)
         skfd.seek(0,2)
         size = skfd.tell()
+
         map = CacheManager.AFF4_MANAGER.create_cache_map(
             fd.case,
-            "%s/__inodes__/%s" % (fd.urn, skfs_inode),
+            "%s/__inodes__/%s" % (fd.urn.parser.query, skfs_inode),
             size = size, target = fd.urn,
             status=status)
 
@@ -87,24 +87,23 @@ class FilesystemLoader(Scanner.GenScanFactory):
             map.write_from(fd.urn, block * block_size, block_size)
 
         ## update the size of the map
-        map.size = size
+        map.size.set(size)
+
         CacheManager.AFF4_MANAGER.create_link(
             fd.case,
-            map.urn, FlagFramework.sane_join(fd.urn, path),
-            size = size)
-        
+            map.urn, FlagFramework.sane_join(fd.urn.parser.query, path))
+
         map.close()
 
     def scan(self, fd, scanners, type, mime, cookie, scores=None, **args):
         if 'Filesystem' in type:
-            print "Will load %s" % fd.urn
-
+            print "Will load %s" % fd.urn.value
             fs = sk.skfs(fd)
 
             for root, dirs, files in fs.walk('/', unalloc=True, inodes=True):
                 for d, dirname in dirs:
                     self.create_map(fd, fs, d, FlagFramework.sane_join(root[1], dirname))
-                    
+
                 for f, filename in files:
                     self.create_map(fd, fs, f, FlagFramework.sane_join(root[1], filename))
 

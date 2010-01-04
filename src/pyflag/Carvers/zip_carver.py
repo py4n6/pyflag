@@ -252,7 +252,7 @@ class ZipCarver(Carver.CarverFramework):
             b = Buffer(image_fd)[ecd_offset:]
             ecd = Zip.EndCentralDirectory(b)
             print "End Central Directory at offset %s:" % (ecd_offset,)
-
+            
             ## Find the CD:
             offset_of_cd = ecd['offset_of_cd'].get_value()
 

@@ -27,109 +27,107 @@
 Currently supported RAID5 with one Parity disk (any number of data
 disks).
 """
-import plugins.Images as Images
 import pyflag.FlagFramework as FlagFramework
-import pyflag.IO as IO
 import re, os.path
-import pyflag.DB as DB
+import pyflag.Reports as Reports
 
-class RAIDFD(Images.OffsettedFDFile):
-    """ A RAID file like object - must be initialised with the correct parameters """
-    def __init__(self, fds, blocksize, map, offset, physical_period):
-        self.readptr = 0
-        self.fds = fds
-        ## The number of disks in the set
-        self.disks = len(fds)
-        self.blocksize = blocksize
+#class RAIDFD(Images.OffsettedFDFile):
+#     """ A RAID file like object - must be initialised with the correct parameters """
+#     def __init__(self, fds, blocksize, map, offset, physical_period):
+#         self.readptr = 0
+#         self.fds = fds
+#         ## The number of disks in the set
+#         self.disks = len(fds)
+#         self.blocksize = blocksize
         
-        ## The physical period is the number of blocks before the map
-        ## repeats in each disk
-        self.physical_period = physical_period
-        self.parse_map(map)
-        self.offset = offset
+#         ## The physical period is the number of blocks before the map
+#         ## repeats in each disk
+#         self.physical_period = physical_period
+#         self.parse_map(map)
+#         self.offset = offset
 
-        ## We estimate the size:
-        if fds:
-            fds[0].seek(0,2)
-            self.size = fds[0].tell() * self.physical_period
+#         ## We estimate the size:
+#         if fds:
+#             fds[0].seek(0,2)
+#             self.size = fds[0].tell() * self.physical_period
 
-    def seek(self, offset, whence=0):
-        """ fake seeking routine """
-        readptr = self.readptr
-        if whence==0:
-            readptr = offset + self.offset
-        elif whence==1:
-            readptr += offset
-        elif whence==2:
-            readptr = self.size
+#     def seek(self, offset, whence=0):
+#         """ fake seeking routine """
+#         readptr = self.readptr
+#         if whence==0:
+#             readptr = offset + self.offset
+#         elif whence==1:
+#             readptr += offset
+#         elif whence==2:
+#             readptr = self.size
 
-        if readptr < self.offset:
-            raise IOError("Seek before start of file")
+#         if readptr < self.offset:
+#             raise IOError("Seek before start of file")
 
-        self.readptr = readptr
+#         self.readptr = readptr
 
-    def parse_map(self, map):
-        elements = map.split(".")
-        self.map = []
-        for j in range(self.physical_period):
-            self.map.append([])
-            for i in range(self.disks):
-                if not elements:
-                    raise RuntimeError("Map does not have enough elements")
+#     def parse_map(self, map):
+#         elements = map.split(".")
+#         self.map = []
+#         for j in range(self.physical_period):
+#             self.map.append([])
+#             for i in range(self.disks):
+#                 if not elements:
+#                     raise RuntimeError("Map does not have enough elements")
                 
-                try:
-                    disk_number = int(elements.pop(0))
-                except: disk_number=None
+#                 try:
+#                     disk_number = int(elements.pop(0))
+#                 except: disk_number=None
                 
-                self.map[-1].append(disk_number)
+#                 self.map[-1].append(disk_number)
 
-        ## Now derive the period map
-        self.period_map = []
-        for i in range((self.physical_period -1) * self.disks):
-            found = False
-            ## Find the required disk in the map:
-            for period_index in range(len(self.map)):
-                try:
-                    d = self.map[period_index].index(i)
-                    self.period_map.append((period_index,d))
-                    found = True
-                    break
-                except: pass
+#         ## Now derive the period map
+#         self.period_map = []
+#         for i in range((self.physical_period -1) * self.disks):
+#             found = False
+#             ## Find the required disk in the map:
+#             for period_index in range(len(self.map)):
+#                 try:
+#                     d = self.map[period_index].index(i)
+#                     self.period_map.append((period_index,d))
+#                     found = True
+#                     break
+#                 except: pass
 
-            if not found:
-                raise RuntimeError("Invalid map position %s not found" % i)
+#             if not found:
+#                 raise RuntimeError("Invalid map position %s not found" % i)
             
-        self.logical_period_size = len(self.period_map)
+#         self.logical_period_size = len(self.period_map)
 
-    def partial_read(self, length):
-        ## calculate the current position within the logical
-        ## image. Logical blocks refer to the reconstituted image,
-        ## physical to the raw disks
-        logical_block_number = self.readptr / self.blocksize
-        logical_block_offset = self.readptr % self.blocksize
+#     def partial_read(self, length):
+#         ## calculate the current position within the logical
+#         ## image. Logical blocks refer to the reconstituted image,
+#         ## physical to the raw disks
+#         logical_block_number = self.readptr / self.blocksize
+#         logical_block_offset = self.readptr % self.blocksize
 
-        ## Our logical block position within the period
-        logical_period_position = logical_block_number % self.logical_period_size
-        logical_period_number = logical_block_number / self.logical_period_size
+#         ## Our logical block position within the period
+#         logical_period_position = logical_block_number % self.logical_period_size
+#         logical_period_number = logical_block_number / self.logical_period_size
 
-        ## Now work out which disk is needed.
-        physical_period_number, disk_number = self.period_map[logical_period_position]
+#         ## Now work out which disk is needed.
+#         physical_period_number, disk_number = self.period_map[logical_period_position]
 
-        ## Now the physical block within the disk:
-        physical_block_number = logical_period_number * self.physical_period \
-                                + physical_period_number
+#         ## Now the physical block within the disk:
+#         physical_block_number = logical_period_number * self.physical_period \
+#                                 + physical_period_number
 
-        ## Now fetch the data
-        to_read = min(self.blocksize - logical_block_offset, length)
-        offset = self.blocksize * physical_block_number \
-                 + logical_block_offset
-        self.fds[disk_number].seek(offset)
+#         ## Now fetch the data
+#         to_read = min(self.blocksize - logical_block_offset, length)
+#         offset = self.blocksize * physical_block_number \
+#                  + logical_block_offset
+#         self.fds[disk_number].seek(offset)
         
-        data = self.fds[disk_number].read(to_read)
+#         data = self.fds[disk_number].read(to_read)
 
-        self.readptr += to_read
+#         self.readptr += to_read
 
-        return data
+#         return data
 
 def swap(a,x):
     """ Create a permutation to swap column x in list a """
@@ -139,17 +137,24 @@ def swap(a,x):
     else:
         return a[:x] + [ a[x+1] ] + [a[x]] + a[x+2:]
 
-class RAID(Images.Standard):
-    """ RAID image sets """
-    name = 'RAID5 (1 Parity)'
-
+class RAID(Reports.report):
+    """ Load RAID image sets """
+    name = 'Load RAID5 (1 Parity)'
+    family = 'Load Data'
+    
     presets = [ [ "3 Disk Rotating parity (Adaptec)", "0.1.P.2.P.3.P.4.5", "3" ],
                 [ "4 Disk Continuing parity (Linux)", "0.1.2.P.4.5.P.3.8.P.6.7.P.9.10.11", "4" ],
                 [ "3 Disk double parity (4x3 permutations)",
                   "0.1.P.2.3.P.4.5.P.6.7.P.8.P.9.10.P.11."\
                   "12.P.13.14.P.15.P.16.17.P.18.19.P.20.21.P.22.23", "12"]]
-    
-    def form(self, query, result):
+
+    def display(self, query, result):
+        result.start_form(query)
+        result.heading("Load Volume")
+        self.render_form(query, result)
+        result.end_form('Submit')
+
+    def render_form(self, query, result):
         ## Some reasonable defaults to get you started
         query.default('blocksize','4k')
         query.default('period',self.presets[0][2])
@@ -160,7 +165,6 @@ class RAID(Images.Standard):
         result.textfield("Block size",'blocksize')
         result.textfield("Period",'period')
         self.calculate_map(query, result)
-        self.calculate_partition_offset(query, result)
 
         def preset(query, result):
             result.heading("Select a present map")

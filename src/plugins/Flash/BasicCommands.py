@@ -33,9 +33,10 @@ import pyflag.conf
 config=pyflag.conf.ConfObject()
 import fnmatch
 import pyflag.TEXTUI as TEXTUI
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.aff4_attributes import *
 import pyflag.CacheManager as CacheManager
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 class load(pyflagsh.command):
     """ Assigns a current case for use in the shell """
@@ -192,23 +193,19 @@ class less(ls):
         """ Pipes the content of the file to less """
         def help(self):
             return "Pipe files to less pager "
-        
+
         def execute(self):
             pager = os.environ.get("PAGER","less")
             for arg in self.args:
-                arg = self.environment.CWD + arg
-                try:
-                    fd=self.environment._FS.open(path=arg)
-                except IOError:
-                    fd=self.environment._FS.open(urn=arg)
-                
+                arg = os.path.join(self.environment.CWD, arg)
+                fd=self.environment._FS.open(path=arg)
                 pipe=os.popen(pager,"w")
 
                 while 1:
                     data=fd.read(10000)
                     if not data: break
                     pipe.write(data)
-                    
+
                 pipe.close()
                 yield 'Viewing of %s with less successful' % arg
 
@@ -435,7 +432,7 @@ class stat(ls):
     """ stats a urn in the filesystem """
     def execute(self):
         for arg in self.args:
-            yield aff4.oracle.export_dict(arg)
+            yield oracle.export_dict(arg)
             
 class execute(pyflagsh.command):
     """ Executes a report's analysis method with the required parameters """

@@ -124,7 +124,7 @@ class GZScan(GenScanFactory):
     ## For gziped files, we convert them to Image stream to provide
     ## seekable access - This does duplicate data but otherwise we
     ## would need to use a temporary file anyway
-    def scan(self, fd, factories, type, mime):
+    def scan(self, fd, scanners, type, mime, cookie, **args):
         if "gzip" in type:
             new_path = "%s/%s" % (fd.urn, self.find_gzipped_filename(fd, type))
             new_fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.case, new_path)
@@ -137,7 +137,7 @@ class GZScan(GenScanFactory):
             new_fd.close()
             ## Now scan the new fd
             Scanner.scan_inode(self.case, new_fd.inode_id,
-                               factories)
+                               scanners)
 
     class Scan:
         """ If we hit a gzip file, we just create a new Inode entry in the VFS """

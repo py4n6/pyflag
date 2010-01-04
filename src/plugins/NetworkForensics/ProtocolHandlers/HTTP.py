@@ -29,7 +29,6 @@ import re,time,cgi,Cookie,pdb, os.path
 from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, PacketType, guess_date, PCAPTime
 import pyflag.Time as Time
 import pyflag.CacheManager as CacheManager
-from pyflag.aff4.aff4_attributes import *
 import pyflag.Scanner as Scanner
 import pyflag.pyflaglog as pyflaglog
 from pyflag.FlagFramework import make_tld, CaseTable
@@ -38,6 +37,10 @@ import zlib, gzip
 import pyflag.Reports as Reports
 import plugins.NetworkForensics.NetworkScanner as NetworkScanner
 import FileFormats.urlnorm as urlnorm
+from pyflag.attributes import *
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 class RelaxedGzip(gzip.GzipFile):
     """ A variant of gzip which is more relaxed about errors """
@@ -63,7 +66,9 @@ class HTTPScanner(Scanner.GenScanFactory):
     def scan(self, fd, scanners, type, mime, cookie, **args):
         if "HTTP Request stream" in type:
             forward_fd = fd
-            reverse_urn = fd[PYFLAG_REVERSE_STREAM]
+            reverse_urn = pyaff4.RDFURN()
+            oracle.resolve_value(fd.urn, PYFLAG_REVERSE_STREAM, reverse_urn)
+
             self.cookie = cookie
             dbfs = FileSystem.DBFS(fd.case)
             reverse_fd = dbfs.open(urn = reverse_urn)

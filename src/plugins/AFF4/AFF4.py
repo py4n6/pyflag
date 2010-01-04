@@ -11,11 +11,6 @@ We have an AFF4 VFSFile object which is able to access these files.
 import pyflag.pyflaglog as pyflaglog
 import pyflag.Farm as Farm
 
-## We just include the pure python implementation of AFF4 in the
-## PyFlag source tree.
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.aff4_attributes import *
-
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
 import pyflag.conf as conf
@@ -30,32 +25,22 @@ import PIL, cStringIO, PIL.ImageFile
 import pyflag.Registry as Registry
 from pyflag.ColumnTypes import AFF4URN, StringType, FilenameType, DeletedType, IntegerType, TimestampType, BigIntegerType, StateType, ThumbnailType, SetType
 import time
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 config.add_option("RDF_SERIALIZER", default="turtle",
                   help = "RDF serialiser for new AFF4 volumes")
-
-## Some private AFF4 namespace objects
-PYFLAG_NS = "pyflag:"
-PYFLAG_CASE = PYFLAG_NS + "case"
 
 ## Make sure the aff4 subsystem can only load files from the upload
 ## dir:
 os.environ['AFF4_FILEPATH'] = "%s:%s" % (config.RESULTDIR, config.UPLOADDIR)
 
-## Ensure that it does not get exported.
-
-## These are the supported streams
-SUPPORTED_STREAMS = [AFF4_IMAGE, AFF4_MAP, AFF4_AFF1_STREAM,
-                     AFF4_EWF_STREAM, AFF4_RAW_STREAM]
-
-## Move towards using the tdb resolver for AFF4
-import pyflag.aff4.tdb_resolver as tdb_resolver
-
 class LoadAFF4Volume(Reports.report):
     """
     Load an AFF4 volume
     -------------------
-    
+
     AFF4 is an advanced open format for forensic evidence storage and
     exchange. This report merges the AFF4 volume directly into the
     current VFS.
@@ -64,7 +49,7 @@ class LoadAFF4Volume(Reports.report):
     name = "Load AFF4 Volume"
     family = "Load Data"
     description = "Load an AFF4 Volume"
-    
+
     def form(self, query, result):
         result.fileselector("Select AFF4 volume:", name='filename', vfs=True)
         try:
@@ -75,21 +60,32 @@ class LoadAFF4Volume(Reports.report):
 
     def display(self, query, result):
         filenames = query.getarray('filename')
-        print "Openning AFF4 volume %s" % (filenames,)
+        print "Openning AFF4 volumes %s" % (filenames,)
         result.heading("Loading AFF4 Volumes")
+        fsfd = DBFS(query['case'])
 
-        loaded_volumes = []
-        
         for filename in filenames:
             ## Filenames are always specified relative to the upload
             ## directory
-            #filename = "file://%s/%s" % (config.UPLOADDIR, f)
-            volumes = aff4.load_volume(filename)
-            result.row("%s" % volumes)
-            loaded_volumes.extend(volumes)
+            urn = pyaff4.RDFURN()
+            urn.set(config.UPLOADDIR)
+            urn.add(filename)
 
-        fsfd = DBFS(query['case'])
-        base_dir = os.path.basename(filenames[0])
+            ## We try to load the volume contained in the URI given,
+            ## but if that fails we just load the URI as a raw file:
+            if oracle.load(urn):
+                stream_urn = pyaff4.RDFURN()
+                iter = oracle.get_iter(urn, pyaff4.AFF4_CONTAINS)
+                while oracle.iter_next(iter, stream_urn):
+                    result.row("Adding %s" % stream_urn.value)
+
+                    ## FIXME - what kind of objects do we import?
+                    ## Segments might be too much
+                    fsfd.VFSCreate(stream_urn, stream_urn.parser.query, _fast=True,
+                                   mode=-1)
+
+        return
+
 
         ## FIXME - record the fact that these volumes are loaded
         ## already into this case...
@@ -147,11 +143,10 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
     ## This must occur last to ensure we close the volume after all
     ## the exit functions are called.
     order = 1000
-    
-    def startup(self, dbh, case):
-        aff4.oracle = tdb_resolver.TDBResolver(hashsize=1024)        
-        ## configure some defaults
-        aff4.oracle.set(GLOBAL, CONFIG_RDF_SERIALIZER, config.RDF_SERIALIZER)
+
+    def create(self, dbh, case):
+        ## Make sure that the CacheManager makes a new AFF4 volume
+        CacheManager.AFF4_MANAGER.create_volume(case)
 
     def worker_startup(self, dbh, case):
         if FlagFramework.job_tdb:
@@ -218,7 +213,7 @@ class AFF4VFS(FlagFramework.CaseTable):
                                           ],
                                         ]
 
-    
+
 import unittest
 import pyflag.pyflagsh as pyflagsh
 
@@ -246,7 +241,7 @@ class AFF4LoaderTest(unittest.TestCase):
                                  argv=['*', 'PartitionScanner',
                                        'FilesystemLoader', 'PCAPScanner',
                                        'HTTPScanner', 'GZScan'])
-            
+
         #fd = CacheManager.AFF4_MANAGER.create_cache_fd(self.test_case, "/foo/bar/test.txt")
         #fd.write("hello world")
         #fd.close()

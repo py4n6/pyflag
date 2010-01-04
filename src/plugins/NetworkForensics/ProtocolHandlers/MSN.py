@@ -44,8 +44,6 @@ import base64, posixpath
 import urllib,os,time,datetime
 from pyflag.ColumnTypes import StringType, TimestampType, AFF4URN, IntegerType, ColumnType, PCAPTime, PacketType, BigIntegerType
 import pyflag.Scanner as Scanner
-from pyflag.aff4.aff4_attributes import *
-import pyflag.aff4.aff4 as aff4
 import pyflag.CacheManager as CacheManager
 import plugins.NetworkForensics.NetworkScanner as NetworkScanner
 import pyflag.FileSystem as FileSystem

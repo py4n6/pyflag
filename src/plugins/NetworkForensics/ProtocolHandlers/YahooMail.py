@@ -34,7 +34,6 @@ import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
 import pyflag.ColumnTypes as ColumnTypes
 import pyflag.Time as Time
-import pyflag.aff4.aff4 as aff4
 import pyflag.Magic as Magic
 import pyflag.CacheManager as CacheManager
 

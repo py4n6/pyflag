@@ -16,6 +16,10 @@ import index, pdb
 import pyflag.Registry as Registry
 import pyflag.DB as DB
 import pyflag.pyflaglog as pyflaglog
+import pyaff4
+
+oracle = pyaff4.Resolver()
+
 
 class MagicResolver:
     """ This is a highlander class to manage access to all the resolvers """
@@ -107,9 +111,7 @@ class MagicResolver:
         We check the db cache first.
         """
         if urn:
-            import pyflag.aff4.aff4 as aff4
-            
-            inode_id = aff4.oracle.get_id_by_urn(urn)
+            inode_id = oracle.get_id_by_urn(urn)
             if not inode_id:
                 raise IOError("Unknown URN %s" % urn)
             
@@ -122,13 +124,14 @@ class MagicResolver:
         
         return max_score[1].type_str(), max_score[1].mime_str(), scores
 
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.pyflag_attributes import *
-
 def set_magic(case, inode_id, magic, mime=None):
     """ Set the magic string on the inode """
-    urn = aff4.oracle.get_urn_by_id(inode_id)    
-    aff4.oracle.set(urn, PYFLAG_TYPE, magic)
+    urn = pyaff4.RDFURN()
+    xsd_magic = pyaff4.XSDString()
+    xsd_magic.set(magic)
+
+    oracle.get_urn_by_id(inode_id, urn)
+    oracle.set_value(urn, pyaff4.AFF4_FILE_TYPE, xsd_magic)
 
 class Magic:
     """ This is the base class for all Magic handlers. """

@@ -97,8 +97,6 @@ import FileFormats.Javascript as Javascript
 import FileFormats.HTML as HTML
 import pyflag.Magic as Magic
 import pyflag.CacheManager as CacheManager
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.aff4_attributes import *
 
 class GmailStreamMagic(Magic.Magic):
     """ Detect Gmail emails """

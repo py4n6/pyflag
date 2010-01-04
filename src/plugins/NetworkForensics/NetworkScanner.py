@@ -31,16 +31,19 @@ import dissect
 import struct,sys,cStringIO
 import pyflag.DB as DB
 import pyflag.FlagFramework as FlagFramework
-import pyflag.aff4.aff4 as aff4
 import pyflag.Magic as Magic
 import reassembler, pypcap
 import pdb
-from aff4.aff4_attributes import *
 from pyflag.ColumnTypes import AFF4URN, IntegerType, IPType, ShortIntegerType, TimestampType, StateType
 import pyflag.Reports as Reports
 import pyflag.FileSystem as FileSystem
+import pyflag.Store as Store
+import pyaff4
+from pyflag.attributes import *
 
-PCAP_FILE_CACHE = aff4.Store()
+oracle = pyaff4.Resolver()
+
+PCAP_FILE_CACHE = Store.FastStore()
 
 class PCAPMagic(Magic.Magic):
     """ Identify PCAP files """
@@ -107,8 +110,10 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
                     ip.source_addr, ip.dest_addr,
                     tcp.source, tcp.dest)
 
+                timestamp = pyaff4.XSDDatetime()
+                timestamp.set(packet.ts_sec)
                 map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                    case, base_urn + "forward", timestamp = packet.ts_sec,
+                    case, base_urn + "forward", timestamp = timestamp,
                     target = urn)
                 connection['map'] = map_stream
 
@@ -116,12 +121,12 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
                 ## each packet header - this helps us get back to
                 ## the packet information for each bit of data
                 map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
-                    case, base_urn + "forward.pkt", timestamp = packet.ts_sec,
+                    case, base_urn + "forward.pkt", timestamp = timestamp,
                     target = urn, inherited = map_stream.urn)
                 connection['map.pkt'] = map_stream_pkt
 
                 r_map_stream = CacheManager.AFF4_MANAGER.create_cache_map(
-                    case, base_urn + "reverse", timestamp = packet.ts_sec,
+                    case, base_urn + "reverse", timestamp = timestamp,
                     target = urn, inherited = map_stream.urn)
                 connection['reverse']['map'] = r_map_stream
 
@@ -129,7 +134,7 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
                 ## each packet header - this helps us get back to
                 ## the packet information for each bit of data
                 r_map_stream_pkt = CacheManager.AFF4_MANAGER.create_cache_map(
-                    case, base_urn + "reverse.pkt", timestamp = packet.ts_sec,
+                    case, base_urn + "reverse.pkt", timestamp = timestamp,
                     target = urn, inherited = r_map_stream.urn)
                 connection['reverse']['map.pkt'] = r_map_stream_pkt
 
@@ -166,10 +171,8 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
             if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
 
                 map_stream = connection['map']
-                map_stream.close()
 
                 r_map_stream = connection['reverse']['map']
-                r_map_stream.close()
 
                 map_stream_pkt = connection['map.pkt']
                 Magic.set_magic(case, map_stream_pkt.inode_id,
@@ -181,12 +184,16 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
 
                 r_map_stream.set_attribute(PYFLAG_REVERSE_STREAM, map_stream.urn)
                 map_stream.set_attribute(PYFLAG_REVERSE_STREAM, r_map_stream.urn)
+
+                ## Close all the streams
                 r_map_stream_pkt.close()
                 map_stream_pkt.close()
+                r_map_stream.close()
+                map_stream.close()
 
                 ## FIXME - this needs to be done out of process using
                 ## the distributed architecture!!!
-                
+
                 ## Open read only versions of these streams for
                 ## scanning
                 dbfs = FileSystem.DBFS(case)
@@ -197,7 +204,7 @@ def make_processor(case, scanners, urn_dispatcher, cookie):
                                                scanners, cookie)
                 Scanner.scan_inode_distributed(case, r_map_stream.inode_id,
                                                scanners, cookie)
-                
+
     ## Create a tcp reassembler if we need it
     processor = reassembler.Reassembler(packet_callback = Callback)
 
@@ -234,18 +241,22 @@ def dissect_packet(stream_fd):
     """ Return a dissected packet in stream fd. Based on the current readptr.
     """
     dbfs = FileSystem.DBFS(stream_fd.case)
-    target_urn = aff4.oracle.resolve(stream_fd.urn, AFF4_TARGET)
-    fd = dbfs.open(urn = "%s.pkt" % stream_fd.urn)
-    if not fd or not target_urn:
+    urn = pyaff4.RDFURN()
+    urn.set(stream_fd.urn.value)
+    urn.add(".pkt")
+
+    fd = dbfs.open(urn = urn)
+    if not fd or \
+            not oracle.resolve_value(stream_fd.urn, AFF4_TARGET, urn):
         raise RuntimeError("%s is not a stream" % stream_fd.urn)
-    
+
     ## Get the file from cache
     try:
-        pcap_file = PCAP_FILE_CACHE.get(target_urn)
+        pcap_file = PCAP_FILE_CACHE.get(urn.value)
     except KeyError:
-        pcap_fd = dbfs.open(urn = target_urn)
+        pcap_fd = dbfs.open(urn = urn)
         pcap_file = pypcap.PyPCAP(pcap_fd)
-        PCAP_FILE_CACHE.add(target_urn, pcap_file)
+        PCAP_FILE_CACHE.add(urn, pcap_file)
 
     offset = stream_fd.readptr
 
@@ -253,7 +264,7 @@ def dissect_packet(stream_fd):
     (image_offset_at_point,
      target_offset_at_point,
      available_to_read,
-     target_urn) =  fd.get_range(offset)
+     urn) =  fd.get_range(offset)
 
     if available_to_read:
         ## Go to the packet

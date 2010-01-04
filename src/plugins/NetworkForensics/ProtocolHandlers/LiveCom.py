@@ -88,8 +88,9 @@ import pyflag.Registry as Registry
 import pyflag.Graph as Graph
 import pyflag.Time as Time
 import pyflag.CacheManager as CacheManager
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.aff4_attributes import *
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 Live20Style = """.SortSearchContainer{z-index:3;background-color:#BBD8FB;background-position:left bottom;background-repeat:repeat-x;height:2.15em;}
 .Managed .SortSearchContainer{position:absolute;top:0px;left:0em;right:0em;}
@@ -308,7 +309,7 @@ class MessageColumn(AFF4URN):
         fd = dbfs.open(inode_id = value)
 
         self.sanitize_data(fd.read(fd.size), value, result)
-        for part_urn in aff4.oracle.resolve_list(fd.urn, AFF4_CONTAINS):
+        for part_urn in oracle.resolve_list(fd.urn, AFF4_CONTAINS):
             part_fd = dbfs.open(urn = part_urn)
             self.sanitize_data(part_fd.read(part_fd.size), part_fd.inode_id, result)
         

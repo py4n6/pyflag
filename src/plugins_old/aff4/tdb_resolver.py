@@ -322,7 +322,7 @@ try:
                                              data = self, base = volume_urn)
 
             try:
-                serializer.set_namespace("aff4://", "" )
+                serializer.set_namespace("aff4://", ":" )
             except RuntimeError: pass
             
             for urn in self.resolve_list(volume_urn, AFF4_CONTAINS):

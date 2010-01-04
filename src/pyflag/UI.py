@@ -40,7 +40,7 @@ import pyflag.pyflaglog as pyflaglog
 config=pyflag.conf.ConfObject()
 import pyflag.parser as parser
 import pyflag.Registry as Registry
-
+import pdb
 
 config.LOG_LEVEL=7
 
@@ -294,11 +294,9 @@ class GenericUI:
                     def tree_cb(path):
                         fsfd = FileSystem.DBFS(query['case'])
                         query.default("path",'/')
-                        if not path.endswith('/'): path=path+'/'
-                        
                         dirs = []
-                        for i in fsfd.dent_walk(path): 
-                            if i['mode']=="d/d" and i['status']=='alloc' and i['name'] not in dirs:
+                        for i in fsfd.longls(path): 
+                            if i['type']=="directory":
                                 dirs.append(i['name'])
                                 yield(([i['name'],i['name'],'branch']))
                                 
@@ -316,8 +314,8 @@ class GenericUI:
                                                       link_pane = 'parent'),
                                          IntegerType('File Size','size'),
                                          ],
-                            table='inode',
-                            where=DB.expand("file.path=%r and file.mode!='d/d'", (path+'/')),
+                            table='vfs',
+                            where=DB.expand("path=%r and type!='directory'", (path+'/')),
                             case=query['case'],
                             pagesize=10,
                             filter="filter2",

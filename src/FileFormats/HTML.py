@@ -17,8 +17,6 @@ from pyflag.DB import expand
 from FlagFramework import query_type, normpath, get_bt_string, smart_str, smart_unicode, iri_to_uri
 import pyflag.FileSystem as FileSystem
 import pyflag.FlagFramework as FlagFramework
-import pyflag.aff4.aff4 as aff4
-from pyflag.aff4.aff4_attributes import *
 import urlnorm
 
 def traced(func):

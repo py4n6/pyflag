@@ -944,7 +944,6 @@ def print_info():
                               ("Column Types", "COLUMN_TYPES"),
                               ("Case Tables", "CASE_TABLES"),
                               ("Magic Handlers", "MAGIC_HANDLERS"),
-                              ("Carvers", "CARVERS"),
                               ("Hexeditor Actions", "ACTIONS"),
                               ):
         result += "\n%s:\n%s\n" % (heading, '-' * len(heading))
