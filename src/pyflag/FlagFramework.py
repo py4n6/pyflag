@@ -861,6 +861,10 @@ def delete_case(case):
     except Exception,e:
         print e
 
+    import pyflag.CacheManager as CacheManager
+
+#    CacheManager.AFF4_MANAGER.expire(case)
+
     ## Expire any caches we have relating to this case:
     key_re = "%s[/|]?.*" % case
 

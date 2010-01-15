@@ -36,6 +36,7 @@ import pyflag.ColumnTypes as ColumnTypes
 import pyflag.Time as Time
 import pyflag.Magic as Magic
 import pyflag.CacheManager as CacheManager
+import time
 
 class YahooMagic(Magic.Magic):
     """ Identify Yahoo Classic Mail Messages """
@@ -247,6 +248,9 @@ class YahooMail20Tests(tests.ScannerTest):
                              argv=["*",                   ## Inodes (All)
                                    "YahooMail20Scan", "YahooMailScan",
                                    ])                   ## List of Scanners
-    def XXXtearDown(self):
+
         print "Closing volume"
-        CacheManager.AFF4_MANAGER.close(self.test_case)
+        t = time.time()
+        #CacheManager.AFF4_MANAGER.close(self.test_case)
+        print "Closed in %s seconds " % (time.time()- t)
+        print CacheManager.oracle.flush()

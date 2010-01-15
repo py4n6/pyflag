@@ -92,7 +92,8 @@ class File:
                 raise IOError("URN %s not known" % self.inode_id)
 
         elif urn:
-            self.urn = urn
+            self.urn = pyaff4.RDFURN()
+            self.urn.set(urn.value)
             self.inode_id = oracle.get_id_by_urn(urn)
         else:
             self.urn = pyaff4.RDFURN()
@@ -102,15 +103,11 @@ class File:
             if not self.urn:
                 raise IOError("Unable to find urn for inode_id %s" % inode_id)
 
-        fd = oracle.open(self.urn, 'r')
-        if not fd:
+        self.fd = oracle.open(self.urn, 'r')
+        if not self.fd:
             raise IOError("URN %s not found" % self.urn.value)
-        try:
-            self.size = fd.size.value
-        finally:
-            fd.cache_return()
 
-        self.readptr = 0
+        self.size = self.fd.size.value
 
         # should reads return slack space or overread into the next block? 
         # NOTE: not all drivers implement this (only really Sleuthkit)
@@ -123,53 +120,24 @@ class File:
     def __getitem__(self, item):
         return oracle.resolve(self.urn, item)
 
-    def seek(self, offset, rel=None):
+    def seek(self, offset, rel=0):
         """ Seeks to a specified position inside the file """
-        ## If the file is cached we seek the backing file:
-        if rel==1:
-            self.readptr += offset
-
-        ## Seek relative to size
-        elif rel==2:
-            self.readptr = self.size + offset
-        else:
-            self.readptr = offset
-
-        ## FIXME - implement overread.
-            
-        if self.readptr<0:
-            raise IOError("Invalid Arguement")
-
-        return self.readptr
+        return self.fd.seek(offset, rel)
 
     def tell(self):
         """ returns the current read pointer"""
-        return self.readptr
+        return self.fd.readptr
 
-    def get_range(self, offset):
-        fd = oracle.open(self.urn, 'r')
-        try:
-            fd.seek(offset)
-            return fd.get_range()
-        finally:
-            fd.cache_return()
+    def get_range(self, offset, target_urn):
+        return self.fd.map.get_range(offset, target_urn)
 
     def read(self, length=None):
         """ Reads length bytes from file, or less if there are less
         bytes in file. If length is None, returns the whole file"""
-        if length is None:
-            length = self.size - self.readptr
+        result = self.fd.read(length)
 
-        fd = oracle.open(self.urn, 'r')
-        try:
-            fd.seek(self.readptr)
-            result = fd.read(length)
-        finally:
-            fd.cache_return()
-
-        self.readptr+=len(result)
         return result
-            
+
     def stat(self):
         """ Returns a dict of statistics about the content of the file. """
         result = {}
@@ -216,62 +184,31 @@ class File:
             if names[i] not in stat_names:
                 stat_names.append(names[i])
                 stat_cbs.append(cbs[i])
-        
+
         return stat_names, stat_cbs
 
     end_of_line = '\r\n'
 
-    ## We seem to get a good speed up if we do the caching here rather
-    ## than in aff4.FileLikeObject because we really reduce lock
-    ## contention. It seems that locking is rather expensive.
     def readline(self, size=1024):
-        idx = None
-        try:
-            ## We try to find the marker in the lookahead buffer. This
-            ## check protects us from seeks or reads that were done
-            ## out of sync with readline()
-            assert(self.readptr == self.lookahead_readptr)
-            idx = self.lookahead.index(self.end_of_line)
+        offset = self.fd.readptr
+        buffer = self.fd.read(size)
 
-        except (AttributeError, ValueError, AssertionError): 
-            ## There is no lookahead buffer, or mark not found in the
-            ## current buffer. Refresh the lookahead buffer.
-            self.lookahead_readptr = self.readptr
-            self.lookahead = self.read(size)
-            self.readptr = self.lookahead_readptr
+        next_offset = buffer.find(self.end_of_line)
+        if next_offset > 0:
+            next_offset += len(self.end_of_line)
+            self.fd.seek(offset + next_offset)
 
-        ## Try to find it again in the new buffer:
-        try:
-            if idx == None:
-                idx = self.lookahead.index(self.end_of_line)
-        except ValueError:
-            ## If the mark is still not found in the buffer, we just
-            ## return the whole buffer. The lookahead buffer will be
-            ## refreshed next time.
-            self.readptr += len(self.lookahead)
-            return self.lookahead
+            return buffer[:next_offset]
 
-        ## If we get here, the end_of_line was found in the lookahead
-        ## - we adjust the buffer and return it:
-        idx += len(self.end_of_line)
-        self.lookahead, data = self.lookahead[idx:], self.lookahead[:idx]
-
-        ## Update the new readptrs for the buffer and the fd:
-        self.readptr = self.lookahead_readptr = self.lookahead_readptr + idx
-
-        return data
+        return buffer
 
     def explain(self, query, result):
         """ This method is called to explain how we arrive at this
         data"""
-        fd = oracle.open(self.urn, 'r')
-        try:
-            data = fd.explain()
-            data = data.replace("<","&lt;")
-            data = data.replace(">","&gt;")
-            result.text(data, font='typewriter')
-        finally:
-            fd.cache_return()
+        data = self.fd.explain()
+        data = data.replace("<","&lt;")
+        data = data.replace(">","&gt;")
+        result.text(data, font='typewriter')
 
     def summary(self, query,result):
         """ This method draws a summary of the file.

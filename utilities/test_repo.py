@@ -116,7 +116,7 @@ def resolve_path(url):
     except:
         ## Or else it was probably given relative to the repo:
         return urllib2.urlopen("%s/%s" % (config.REPO, url))
-    
+
 def process_file(file_record):
     """ Process the file given the file_record """
     try:
@@ -137,16 +137,16 @@ def process_file(file_record):
         pyflaglog.log(pyflaglog.DEBUG, "Unzipping %s" % path)
         copy(resolve_path(path),
              create(path))
-        
+
         fd = zipfile.ZipFile("%s/%s" % (config.TARGET, path))
         for info in fd.infolist():
             if info.filename.endswith("/"): continue
-            
+
             outfd = create(info.filename)
             pyflaglog.log(pyflaglog.DEBUG, "Extracting %s" % outfd.name)
             outfd.write(fd.read(info.filename))
             outfd.close()
-                
+
     elif action=='ewfextract':
         ## We just grab the local file:
         if arg.startswith("local://"):
@@ -175,12 +175,12 @@ for file_record in inventory:
             while 1:
                 data = fd.read(1024 * 1024)
                 if len(data)==0: break
-                
+
                 m.update(data)
 
             if file_record['hash'].lower() != m.hexdigest():
                 process_file(file_record)
-                
+
         except IOError:
             process_file(file_record)
     else:

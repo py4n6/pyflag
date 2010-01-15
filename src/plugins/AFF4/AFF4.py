@@ -73,16 +73,20 @@ class LoadAFF4Volume(Reports.report):
 
             ## We try to load the volume contained in the URI given,
             ## but if that fails we just load the URI as a raw file:
-            if oracle.load(urn):
-                stream_urn = pyaff4.RDFURN()
-                iter = oracle.get_iter(urn, pyaff4.AFF4_CONTAINS)
-                while oracle.iter_next(iter, stream_urn):
-                    result.row("Adding %s" % stream_urn.value)
+            if not oracle.load(urn):
+                fsfd.VFSCreate(urn, urn.parser.query, _fast=True,
+                               mode=-1)
+                return
 
-                    ## FIXME - what kind of objects do we import?
-                    ## Segments might be too much
-                    fsfd.VFSCreate(stream_urn, stream_urn.parser.query, _fast=True,
-                                   mode=-1)
+            stream_urn = pyaff4.RDFURN()
+            iter = oracle.get_iter(urn, pyaff4.AFF4_CONTAINS)
+            while oracle.iter_next(iter, stream_urn):
+                result.row("Adding %s" % stream_urn.value)
+
+                ## FIXME - what kind of objects do we import?
+                ## Segments might be too much
+                fsfd.VFSCreate(stream_urn, stream_urn.parser.query, _fast=True,
+                               mode=-1)
 
         return
 
@@ -153,12 +157,7 @@ class AFF4ResolverTable(FlagFramework.EventHandler):
             FlagFramework.job_tdb.close()
             FlagFramework.job_tdb = None
 
-        try:
-            aff4.oracle.close()
-        except AttributeError: pass
-
-        ## Make sure we have our own unique resolver
-        aff4.oracle = tdb_resolver.TDBResolver(hashsize=1024)
+        oracle = pyaff4.Resolver()
 
     def exit(self, dbh, case):
         """ Check for dirty volumes and closes them """
@@ -220,8 +219,8 @@ import pyflag.pyflagsh as pyflagsh
 class AFF4LoaderTest(unittest.TestCase):
     """ Load handling of AFF4 volumes """
     test_case = "PyFlagTestCase"
-    test_file = 'http_small.pcap'
-#    test_file = 'http.pcap'
+#    test_file = 'http_small.pcap'
+    test_file = 'http.pcap'
 #    test_file = '/testimages/pyflag_stdimage_0.5.e01'
 #    test_file = 'stdcapture_0.4.pcap.e01'
 

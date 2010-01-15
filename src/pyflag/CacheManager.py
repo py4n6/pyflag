@@ -35,8 +35,11 @@ import pyflag.Registry as Registry
 import cPickle, urllib
 import pyaff4
 from pyflag.attributes import *
+import time
 
 oracle = pyaff4.Resolver()
+
+initialised = False
 
 class PyFlagRDFType:
     dataType = PYFLAG_RDFTYPE
@@ -61,8 +64,20 @@ class PyFlagRDFType:
     def set(self, value):
         self.value = value
 
+class PyFlagAFF4Renderer:
+    def message(self, level, message):
+        pass
+
+if not initialised:
+    time.sleep(1)
+
 ## Now we register this class as an RDFValue type
-oracle.register_rdf_value_class(pyaff4.ProxiedRDFValue(PyFlagRDFType))
+if not initialised:
+    oracle.register_rdf_value_class(pyaff4.ProxiedRDFValue(PyFlagRDFType))
+    oracle.set_logger(pyaff4.ProxiedLogger(PyFlagAFF4Renderer()))
+
+initialised = True
+
 
 def update_table_from_urn(case, urn):
     ## We need to do this explicitely because we might end up
@@ -116,8 +131,52 @@ class AFF4Proxy:
         ## Search for the attribute of the proxied object
         return getattr(self.obj, attr)
 
+    def __repr__(self):
+        return "<Proxy for %s>" % self.obj
+
 class PyFlagMap(AFF4Proxy):
     include_in_VFS = None
+    end_of_line = '\r\n'
+
+    ## We seem to get a good speed up if we do the caching here rather
+    ## than in aff4.FileLikeObject because we really reduce lock
+    ## contention. It seems that locking is rather expensive.
+    def readline(self, size=1024):
+        idx = None
+        try:
+            ## We try to find the marker in the lookahead buffer. This
+            ## check protects us from seeks or reads that were done
+            ## out of sync with readline()
+            assert(self.readptr == self.lookahead_readptr)
+            idx = self.lookahead.index(self.end_of_line)
+
+        except (AttributeError, ValueError, AssertionError): 
+            ## There is no lookahead buffer, or mark not found in the
+            ## current buffer. Refresh the lookahead buffer.
+            self.lookahead_readptr = self.readptr
+            self.lookahead = self.read(size)
+            self.readptr = self.lookahead_readptr
+
+        ## Try to find it again in the new buffer:
+        try:
+            if idx == None:
+                idx = self.lookahead.index(self.end_of_line)
+        except ValueError:
+            ## If the mark is still not found in the buffer, we just
+            ## return the whole buffer. The lookahead buffer will be
+            ## refreshed next time.
+            self.readptr += len(self.lookahead)
+            return self.lookahead
+
+        ## If we get here, the end_of_line was found in the lookahead
+        ## - we adjust the buffer and return it:
+        idx += len(self.end_of_line)
+        self.lookahead, data = self.lookahead[idx:], self.lookahead[:idx]
+
+        ## Update the new readptrs for the buffer and the fd:
+        self.readptr = self.lookahead_readptr = self.lookahead_readptr + idx
+
+        return data
 
     def insert_to_table(self, table, props):
         """ This function adds the properties for this object as
@@ -145,19 +204,15 @@ class PyFlagMap(AFF4Proxy):
         ## Now sync the db from the RDF
         self.update_tables()
 
-class PyFlagImage(AFF4Proxy):
-    def close(self):
-        obj = oracle.open(self.urn, self.mode)
-        obj.close(self)
+    def cache_return(self):
+        ## Now sync the db from the RDF
         self.update_tables()
+        self.obj.cache_return()
 
-    def finish(self):
-        result = pyaff4.Image.finish(self)
-
-        ## Come up with a valid inode_id
-        self.inode_id = oracle.get_id_by_urn(self.urn)
-
-        return result
+class PyFlagImage(PyFlagMap):
+    def close(self):
+        self.obj.close(self)
+        self.update_tables()
 
 class PyFlagSegment(AFF4Proxy):
     def __init__(self, case, volume_urn, segment_urn, data=''):
@@ -185,6 +240,7 @@ class PyFlagSegment(AFF4Proxy):
         return self.buffer.tell()
 
     def close(self):
+        pdb.set_trace()
         volume = oracle.open(self.volume_urn, 'w')
         try:
             oracle.set_value(self.urn, pyaff4.AFF4_STORED, self.volume_urn)
@@ -202,29 +258,54 @@ class AFF4Manager:
     def __init__(self):
         self.volume_urns = {}
 
+    def expire(self, case):
+        try:
+            volume_urn = self.volume_urns[case]
+        except KeyError:
+            volume_urn = self.create_volume(case)
+
+        pdb.set_trace()
+        try:
+            t = time.time()
+            oracle.expire(volume_urn)
+            print "Expired %s in %s sec" % (volume_urn.value, time.time() -t)
+
+            del self.volume_urns[case]
+            self.create_volume(case)
+        except KeyError:
+            pass
+
     def create_volume(self, case):
         """ Create a new case AFF4 Result file """
         urn = pyaff4.RDFURN()
         urn.set(config.RESULTDIR)
         urn.add("%s.aff4" % case)
 
-        volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
-        oracle.set_value(volume.urn, pyaff4.AFF4_STORED, urn)
-        volume = volume.finish()
+        ## Try to open an existing volume
+        if  not oracle.load(urn):
+            volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+            oracle.set_value(volume.urn, pyaff4.AFF4_STORED, urn)
+            volume = volume.finish()
+            urn.set(volume.urn.value)
+            volume.cache_return()
 
         ## Keep the volume urn associated with this case (NOTE this is
         ## not the same as the file URI for the volume itself.
-        urn.set(volume.urn.value)
         self.volume_urns[case] = urn
-        volume.cache_return()
+
+        return urn
 
     def close(self, case):
-        volume_urn = self.volume_urns[case]
+        try:
+            volume_urn = self.volume_urns[case]
+        except KeyError:
+            volume_urn = self.create_volume(case)
+
         volume = oracle.open(volume_urn, 'w')
         volume.close()
 
     def create_cache_data(self, case, path, data='', include_in_VFS=True,
-                          timestamp = None,
+                          timestamp = None, size=0,
                           inherited = None,**kwargs):
         """ Creates a new AFF4 segment. A segment is useful for 
         storing small amounts of data in a single compressed file.
@@ -232,30 +313,37 @@ class AFF4Manager:
         We return the URN of the created object so callers can use
         this to set properties on it.
         """
-        ## Drop the FQN from the path
-        if path.startswith(FQN) and "/" in path:
-            path = path[path.index("/"):]
+        try:
+            volume_urn = self.volume_urns[case]
+        except KeyError:
+            volume_urn = self.create_volume(case)
 
-        volume_urn = self.make_volume_urn(case)
-        urn = fully_qualified_name(path, volume_urn)
-        fd = PyFlagSegment(case, volume_urn, urn, data)
+        fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
+        fd.urn.set(self.volume_urns[case].value)
+        fd.urn.add_query(path)
+        fd.size.set(size)
 
         if timestamp:
-            oracle.set_value(fd.urn, AFF4_TIMESTAMP, timestamp)
+            if not isinstance(timestamp, pyaff4.XSDDatetime):
+                t = pyaff4.XSDDatetime()
+                t.set(timestamp)
+            else:
+                t = timestamp
 
-        if inherited:
-            assert(type(inherited) == str)
-            fd.set_inheritence(inherited)
+            oracle.set_value(fd.urn, pyaff4.AFF4_TIMESTAMP, t)
 
-        fd.finish()
+        oracle.set_value(fd.urn, pyaff4.AFF4_STORED, volume_urn)
+        fd = fd.finish()
+        fd = PyFlagImage(fd)
 
         kwargs['path'] = path
+        fd.case = kwargs['case'] = case
         if include_in_VFS:
             fd.include_in_VFS = kwargs
 
         return fd
 
-    def create_cache_fd(self, case, path, include_in_VFS=True,
+    def create_cache_fd(self, case, path, include_in_VFS=True, size=0,
                         inherited = None, timestamp = None, compression=True,
                         **kwargs):
         """ Creates a new non-seakable AFF4 Image stream that can be
@@ -265,29 +353,33 @@ class AFF4Manager:
         done. The new object will be added to the VFS at path (and
         that is what its URN will be too relative to the volume).
         """
-        ## Drop the FQN from the path
-        if path.startswith(FQN) and "/" in path:
-            path = path[path.index("/"):]
+        try:
+            volume_urn = self.volume_urns[case]
+        except KeyError:
+            volume_urn = self.create_volume(case)
 
-        fd = PyFlagImage(None, 'w')
-        volume_urn = self.make_volume_urn(case)
-        fd.urn = fully_qualified_name(path, volume_urn)
-        if not compression:
-            oracle.set_value(fd.urn, AFF4_COMPRESSION, 0)
+        fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
+        fd.urn.set(self.volume_urns[case].value)
+        fd.urn.add_query(path)
+        fd.size.set(size)
 
+        oracle.set_value(fd.urn, pyaff4.AFF4_STORED, volume_urn)
+        ## If a timestamp was specified we set it - otherwise we just
+        ## take it from our inherited URN
         if timestamp:
-            oracle.set_value(fd.urn, AFF4_TIMESTAMP, timestamp)
+            if not isinstance(timestamp, pyaff4.XSDDatetime):
+                t = pyaff4.XSDDatetime()
+                t.set(timestamp)
+            else:
+                t = timestamp
 
-        if inherited:
-            fd.set_inheritence(inherited)
+            oracle.set_value(fd.urn, pyaff4.AFF4_TIMESTAMP, t)
 
-        oracle.set_value(fd.urn, AFF4_STORED, volume_urn)
-        #aff4.oracle.set(fd.urn, PYFLAG_CASE, case)
         fd = fd.finish()
+        fd = PyFlagImage(fd)
 
         kwargs['path'] = path
         fd.case = kwargs['case'] = case
-
         if include_in_VFS:
             fd.include_in_VFS = kwargs
 
@@ -302,27 +394,39 @@ class AFF4Manager:
         written to the volume. The returned object is a standard AFF4
         map object and supports all the methods from the AFF4 library.
         """
-        #pdb.set_trace()
-        volume_urn =self.volume_urns[case]
+        try:
+            volume_urn = self.volume_urns[case]
+        except KeyError:
+            volume_urn = self.create_volume(case)
+
         fd = oracle.create(pyaff4.AFF4_MAP, 'w')
-        fd.urn.set(self.volume_urns[case].value)
-        fd.urn.add_query(path)
-        fd.size.set(size)
+        urn = fd.urn
+        urn.set(self.volume_urns[case].value)
+        urn.add_query(path)
+        if size:
+            fd.size.set(size)
 
         #FIXME:
         #if inherited:
         #    fd.set_inheritence(inherited)
 
         if target:
-            oracle.set_value(fd.urn, pyaff4.AFF4_TARGET, target)
+            oracle.set_value(urn, pyaff4.AFF4_TARGET, target)
 
-        oracle.set_value(fd.urn, pyaff4.AFF4_STORED, volume_urn)
+        oracle.set_value(urn, pyaff4.AFF4_STORED, volume_urn)
         ## If a timestamp was specified we set it - otherwise we just
         ## take it from our inherited URN
         if timestamp:
-            oracle.set_value(fd.urn, pyaff4.AFF4_TIMESTAMP, timestamp)
+            if not isinstance(timestamp, pyaff4.XSDDatetime):
+                t = pyaff4.XSDDatetime()
+                t.set(timestamp)
+            else:
+                t = timestamp
 
-        fd = PyFlagMap(fd.finish())
+            oracle.set_value(urn, pyaff4.AFF4_TIMESTAMP, t)
+
+        fd = fd.finish()
+        fd = PyFlagMap(fd)
 
         kwargs['path'] = path
         fd.case = kwargs['case'] = case

@@ -161,37 +161,50 @@ class HTTPScanner(Scanner.GenScanFactory):
         try:
             ## Handle gzip encoded data
             if headers['content-encoding'] == 'gzip':
+                urn = fd.urn
+                case = fd.case
                 fd.close()
-                fd.seek(0)
-                gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
-                ## If the file is small enough we just put it in a
-                ## segment:
-                if fd.size < 100000:
-                    data = gzip_fd.read(1024 * 1024)
-                    http_object = CacheManager.AFF4_MANAGER.create_cache_data(
-                        fd.case, '/'.join((fd.urn, "decompressed")),
-                        data, timestamp = headers['timestamp'],
-                        target = fd.urn, inherited = fd.urn)
-                else:
-                    http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
-                        fd.case, '/'.join((fd.urn, "decompressed")),
-                        timestamp = headers['timestamp'],
-                        target = fd.urn, inherited = fd.urn)
-                
-                    while 1:
-                        data = gzip_fd.read(1024*1024)
-                        if not data: break
 
-                        http_object.write(data)
+                ## reopen the file for reading
+                fd = oracle.open(urn, 'r')
+                try:
+                    gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
+                    ## If the file is small enough we just put it in a
+                    ## segment:
+                    if fd.size.value < 100000:
+                        try:
+                            data = gzip_fd.read(1024 * 1024)
+                        except:
+                            return
 
-                return http_object
+                        http_object = CacheManager.AFF4_MANAGER.create_cache_data(
+                            case, '/'.join((fd.urn.parser.query, "decompressed")),
+                            data, timestamp = headers['timestamp'],
+                            target = fd.urn, inherited = fd.urn)
+                    else:
+                        http_object = CacheManager.AFF4_MANAGER.create_cache_fd(
+                            case, '/'.join((fd.urn.parser.query, "decompressed")),
+                            timestamp = headers['timestamp'],
+                            target = fd.urn, inherited = fd.urn)
+
+                        while 1:
+                            data = gzip_fd.read(1024*1024)
+                            if not data: break
+
+                            http_object.write(data)
+
+                    return http_object
+                finally:
+                    pass
+
         except KeyError: pass
-        
+
         return fd
 
-    def handle_encoding(self, headers, fd):        
+    def handle_encoding(self, headers, fd):
         http_object = CacheManager.AFF4_MANAGER.create_cache_map(
-            fd.case, '/'.join((fd.urn, "HTTP","%s" % fd.tell())),
+            fd.case,
+            '/'.join((fd.urn.parser.query, "HTTP","%s" % fd.tell())),
             timestamp = headers['timestamp'],
             target = fd.urn, inherited = fd.urn)
 
@@ -212,7 +225,7 @@ class HTTPScanner(Scanner.GenScanFactory):
                         length = int(line,16)
                     except:
                         return http_object
-                    
+
                     if length == 0:
                         return http_object
 
@@ -254,8 +267,8 @@ class HTTPScanner(Scanner.GenScanFactory):
 
         ## Deal with potentially very large uploads:
         if hasattr(value,'filename') and value.filename:
-            new_urn = target.urn + "/" + value.filename
-            
+            new_urn = target.urn.parser.query + "/" + value.filename
+
             ## dump the file to the AFF4 volume
             fd = CacheManager.AFF4_MANAGER.create_cache_fd(target.case, new_urn,
                                                            inherited = target.urn)
@@ -263,9 +276,9 @@ class HTTPScanner(Scanner.GenScanFactory):
             while 1:
                 data = value.file.read(1024*1024)
                 if not data: break
-                
+
                 fd.write(data)
-            
+
             ## We store the urn of the dumped file in place of the value
             value = fd.urn
             fd.close()
@@ -273,7 +286,7 @@ class HTTPScanner(Scanner.GenScanFactory):
             try:
                 value = value.value
             except: pass
-            
+
         target.insert_to_table('http_parameters',
                                dict(key = key,
                                     value = value))
@@ -291,8 +304,8 @@ class HTTPScanner(Scanner.GenScanFactory):
         request_body.seek(0)
         env = dict(REQUEST_METHOD=request['method'],
                    CONTENT_TYPE=request.get('content-type',''),
-                   CONTENT_LENGTH=request_body.size,
-                   REQUEST_BODY=request_body.urn,
+                   CONTENT_LENGTH=request_body.size.value,
+                   REQUEST_BODY=request_body.urn.value,
                    QUERY_STRING=query)
         
         result = cgi.FieldStorage(environ = env, fp = request_body)
@@ -313,7 +326,7 @@ class HTTPScanner(Scanner.GenScanFactory):
             response = {}
             parse = False
             request_body = response_body = None
-            
+
             ## First parse both request and response
             ## Get the current timestamp of the request
             packet = NetworkScanner.dissect_packet(forward_fd)
@@ -322,7 +335,7 @@ class HTTPScanner(Scanner.GenScanFactory):
                     request['timestamp'] = packet.ts_sec
                 except AttributeError:
                     request['timestamp'] = 0
-                
+
                 parse = True
                 request_body = self.skip_body(request, forward_fd)
                 request_body.dirty = 0
@@ -333,7 +346,7 @@ class HTTPScanner(Scanner.GenScanFactory):
                     response['timestamp'] = packet.ts_sec
                 except AttributeError:
                     response['timestamp'] = 0
- 
+
                 parse = True
                 response_body = self.skip_body(response, reverse_fd)
 
@@ -344,7 +357,7 @@ class HTTPScanner(Scanner.GenScanFactory):
                 self.process_post_body(request, request_body, response_body)
                 if request_body.size > 0:
                     request_body.close()
-                
+
             if response_body and response_body.size > 0:
                 ## Store information about the object in the http table:
                 url = request.get('url','/')

@@ -623,7 +623,7 @@ class seal(load):
         text=''
         try:
             case=args[0]
-            yield "Completing AFF4 volume %s (This could take a while)" % CacheManager.AFF4_MANAGER.make_volume_filename(case)
+            yield "Completing AFF4 volume (This could take a while)"
             CacheManager.AFF4_MANAGER.close(case)
             yield "Done"
         except Exception,e:

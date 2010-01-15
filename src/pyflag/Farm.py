@@ -102,7 +102,7 @@ def run_task(command, argdict, cookie):
         task = task()
         task.run(cookie=cookie, **argdict)
     except Exception,e:
-        pdb.post_mortem(t = sys.exc_info()[2])
+        #pdb.post_mortem(t = sys.exc_info()[2])
         pyflaglog.log(pyflaglog.ERRORS, "Error %s %s %s" % (task.__class__.__name__,argdict,e))
 
     ## Decrement the cookie in the jobs_tdb

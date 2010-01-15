@@ -242,12 +242,11 @@ def dissect_packet(stream_fd):
     """
     dbfs = FileSystem.DBFS(stream_fd.case)
     urn = pyaff4.RDFURN()
-    urn.set(stream_fd.urn.value)
-    urn.add(".pkt")
+    urn.set(stream_fd.urn.value + ".pkt")
 
     fd = dbfs.open(urn = urn)
     if not fd or \
-            not oracle.resolve_value(stream_fd.urn, AFF4_TARGET, urn):
+            not oracle.resolve_value(stream_fd.urn, pyaff4.AFF4_TARGET, urn):
         raise RuntimeError("%s is not a stream" % stream_fd.urn)
 
     ## Get the file from cache
@@ -256,20 +255,18 @@ def dissect_packet(stream_fd):
     except KeyError:
         pcap_fd = dbfs.open(urn = urn)
         pcap_file = pypcap.PyPCAP(pcap_fd)
-        PCAP_FILE_CACHE.add(urn, pcap_file)
+        PCAP_FILE_CACHE.add(urn.value, pcap_file)
 
-    offset = stream_fd.readptr
+    offset = stream_fd.tell()
 
     ## What is the current range?
-    (image_offset_at_point,
-     target_offset_at_point,
-     available_to_read,
-     urn) =  fd.get_range(offset)
+    (target_offset_at_point,
+     available_to_read) =  fd.get_range(offset, None)
 
     if available_to_read:
         ## Go to the packet
         pcap_file.seek(target_offset_at_point)
-        
+
         ## Dissect it
         try:
             return pcap_file.dissect()

@@ -654,11 +654,12 @@ class Live20Scanner(HotmailScanner):
                 if fsfd.lookup(path = message_urn):
                     return
             except RuntimeError: pass
-            
+
+            pdb.set_trace()
             message_fd = CacheManager.AFF4_MANAGER.create_cache_data(
                 fd.case, message_urn,
                 inherited = fd.urn)
-            
+
             message_fd.write(msg.innerHTML().encode("utf8"))
             message_fd.insert_to_table("webmail_messages", result)
             message_fd.close()
