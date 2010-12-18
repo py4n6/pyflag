@@ -66,8 +66,9 @@ typedef uint16_t USHORT;
 #define UNCOMPRESSED_BLOCK_SIZE (PAGE_SIZE * 0x10)
 
 ULONG Xpress_Decompress(PUCHAR InputBuffer,
-                      PUCHAR OutputBuffer,
-                      ULONG OutputSize)
+			unsigned long InputSize,
+			PUCHAR OutputBuffer,
+			ULONG OutputSize)
 {
 ULONG OutputIndex, InputIndex;
 ULONG Indicator, IndicatorBit;
@@ -85,10 +86,11 @@ Offset = 0;
 NibbleIndex = 0; 
 NibbleIndicator = XPRESS_ENCODE_MAGIC;
 
-    while (OutputIndex < OutputSize) 
+ while ((OutputIndex < OutputSize) && (InputIndex<InputSize) )
     {
         if (IndicatorBit == 0)
         {
+	    if(InputIndex+3 >= InputSize) return OutputIndex;
             Indicator = (InputBuffer[InputIndex + 3] << 24) | (InputBuffer[InputIndex + 2] << 16) |
                         (InputBuffer[InputIndex + 1] <<  8) | InputBuffer[InputIndex];
             InputIndex += sizeof(ULONG);
@@ -102,12 +104,14 @@ NibbleIndicator = XPRESS_ENCODE_MAGIC;
 
         if (((Indicator >> IndicatorBit) & 1) == 0)
         {
+	    if(OutputIndex>=OutputSize) return OutputIndex;
             OutputBuffer[OutputIndex] = InputBuffer[InputIndex]; 
             InputIndex += sizeof(UCHAR);
             OutputIndex += sizeof(UCHAR);
         }
         else 
         {
+	    if(InputIndex+1 >= InputSize) return OutputIndex;
             Length = (InputBuffer[InputIndex + 1] << 8) | InputBuffer[InputIndex];
             
             /*
@@ -125,6 +129,7 @@ NibbleIndicator = XPRESS_ENCODE_MAGIC;
                 if (NibbleIndex == 0)
                 {
                     NibbleIndex = InputIndex;
+		    if(InputIndex>=InputSize) return OutputIndex;
                     Length = InputBuffer[InputIndex] % 16; 
                     //if ((OutputIndex > 0xD0) && (OutputIndex < 0xF0)) printf("--2 Len: %02X (%d)\n", Length, Length);
                     InputIndex += sizeof(UCHAR);
@@ -138,11 +143,13 @@ NibbleIndicator = XPRESS_ENCODE_MAGIC;
 
                 if (Length == 15)
                 {
+		    if(InputIndex>=InputSize) return OutputIndex;
                     Length = InputBuffer[InputIndex];
                     //if ((OutputIndex > 0xD0) && (OutputIndex < 0xF0)) printf("--4 Len: %02X (%d)\n", Length, Length);
                     InputIndex += sizeof(UCHAR); 
                         if (Length == 255)
                         {
+			    if(InputIndex+2>=InputSize) return OutputIndex;
                             Length = (InputBuffer[InputIndex + 1] << 8) | InputBuffer[InputIndex];
                             InputIndex += sizeof(USHORT);
                             Length -= (15 + 7); 
@@ -190,7 +197,7 @@ static PyObject *xpress_decode(PyObject *self, PyObject *args) {
   if(!result) return NULL;
 
   outbuff = PyString_AsString(result);
-  outsize = Xpress_Decompress(inbuff, outbuff, outsize);
+  outsize = Xpress_Decompress(inbuff, insize, outbuff, outsize);
 
   // Truncate buffer back to outsize:
   if(_PyString_Resize(&result, outsize) < 0) 
