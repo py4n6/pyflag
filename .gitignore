@@ -1,6 +1,4 @@
 # use glob syntax.
-syntax: glob
-
 *.elc
 *.pyc
 *~
@@ -33,6 +31,3 @@ src/regtools/reglookup
 *\#
 .\#*
 *.tdb
-
-syntax: regexp
-

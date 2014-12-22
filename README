@@ -11,3 +11,8 @@ data analyis using a mysql database. It is written in python and
 should be portable to other unix-like systems.
 
 Installation instructions can be found in the INSTALL file.
+
+This is a copy of: https://code.google.com/p/pyflag/
+
+This project is no longer actively maintained and primarily kept as reference.
+
